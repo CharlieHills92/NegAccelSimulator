@@ -1,0 +1,37 @@
+# Build artifacts
+build/
+*.o
+*.d
+runtest_new_v2
+Simulator
+Simulator_shield
+main.cpp_OLD
+
+# ibsimu library - exclude static archive (large) and backup headers
+lib/*.a
+include/ibsimu-1.0.6dev_ori/
+
+# Large magnetic field data files (track with Git LFS or download separately)
+Bfields/
+Bfield_MITICA/*.fld
+Bfield_MTF/*.fld
+Bfield_SPIDER/*.fld
+
+# Scan files (keep only one example)
+*.scn
+!MTF_J_SEC.scn
+
+# Simulation output directories
+MTF_J_*/
+SPIDER_J*/
+
+# Debug/log files
+*.log
+debug_*.txt
+THCdebug.txt
+
+# IDE / editor
+.vscode/
+
+# OS files
+.DS_Store

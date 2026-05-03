@@ -1,0 +1,12 @@
+prefix=${pcfiledir}/../..
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include/ibsimu-1.0.6dev
+
+Name: libibsimu
+Description: Ion Beam Simulation Package
+Version: 1.0.6dev
+Requires: cairo gsl gtk+-3.0  
+Libs: -L${libdir} -libsimu-1.0.6dev -lfreetype  -lfontconfig -lfreetype  -lz -lpng16     
+Libs.private: -lm
+Cflags: -I${includedir}
