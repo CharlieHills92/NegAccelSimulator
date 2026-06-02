@@ -327,7 +327,9 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
         if (zgrids.size() > 1) {
             zg = vector<double>(zgrids.begin() + 1, zgrids.end());
         } else {
-            zg = {0.566, 0.565};  // Fallback values
+            // Fallback: use domain exit plane derived from geometry
+            double z_fallback = geometry->max()[2] - params.getMeshSize();
+            zg = {z_fallback};
         }
         
         string gridfile = "statsatgrids.txt";
@@ -343,8 +345,8 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
         
     } catch (const std::exception& e) {
         if (debug) logfile << "DEBUG: Error processing grid data: " << e.what() << endl << flush;
-        // Continue with fallback grid analysis
-        vector<double> fallback_zgrids = {0.009, 0.566, 0.565};
+        // Continue with fallback grid analysis derived from geometry bounds
+        vector<double> fallback_zgrids = {0.009, geometry->max()[2] - params.getMeshSize()};
         string gridfile = "particlesatgrids.txt";
         generateDiagnosticData(fallback_zgrids, 0, gridfile, false, particles, geometry, potential, magnetic);
     }
@@ -436,7 +438,9 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
             zg = vector<double>(zgrids.begin() + 1, zgrids.end());
         } else {
             cout << "Error: zgrids does not have enough elements to create zg." << endl;
-            zg = {0.566, 0.565};  // Fallback values
+            // Fallback: use domain exit plane derived from geometry
+            double z_fallback = geometry->max()[2] - params.getMeshSize();
+            zg = {z_fallback};
         }
         
         string gridfile = "TEST_MTF/TEST_MTF_1_particlesatgrids.txt";

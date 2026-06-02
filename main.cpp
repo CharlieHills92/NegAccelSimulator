@@ -145,7 +145,9 @@ int main( int argc, char **argv )
 			logfile << "Done! ***\n" << flush;
 			Simulation.fill_particle_dbs();
 			
-			double zlocsummary = 0.565;
+			// Use the actual domain exit plane instead of a hardcoded value.
+			// 0.565m is only valid for MITICA/MTF (567mm domain); SPIDER domain is ~85mm.
+			double zlocsummary = Simulation.get_domain_z_size() - Simulation.get_MESH_SIZE();
 
 			Simulation.analysis(zlocsummary);
 			Simulation.plot_simulation(argc, argv);
@@ -245,7 +247,7 @@ int main( int argc, char **argv )
 			// 	}
 			// }
 
-			string finaloutput = Simulation.save_emitter("final_map_outside.txt", 0.565);
+			string finaloutput = Simulation.save_emitter("final_map_outside.txt", zlocsummary);
 			logfile << "*** Output location of particles saved to file " << finaloutput << " ***\n" << flush;
 			logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans <<" COMPLETED ***\n" << flush;
 
@@ -263,7 +265,8 @@ int main( int argc, char **argv )
 			Simulation.particles_end_location();
 			Simulation.fill_particle_dbs();
 			
-			double zlocsummary = 0.565;
+			// Use the actual domain exit plane instead of a hardcoded value.
+			double zlocsummary = Simulation.get_domain_z_size() - Simulation.get_MESH_SIZE();
 
 			Simulation.analysis(zlocsummary);
 			Simulation.plot_simulation(argc, argv);

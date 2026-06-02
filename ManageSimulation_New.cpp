@@ -164,7 +164,7 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
     EpotBiCGSTABSolver* bicgstab_solver = nullptr;
     EpotMGSolver* mg_solver = nullptr;
     
-    InitialPlasma initp( AXIS_Z, 7e-3 );
+    InitialPlasma initp( AXIS_Z, 6e-3 );
     ForcedPot force;
 
     if (solver_type == 0) {
@@ -172,24 +172,26 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         bicgstab_solver = new EpotBiCGSTABSolver(*geometry);
         if (meniscus_type == 1U) {
             ibsimu.message(1) << " Setting meniscus shield model in BiCGSTAB solver.\n";
-            bicgstab_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
+            // bicgstab_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
+            bicgstab_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
         } else {
             ibsimu.message(1) << " Setting nsimp plasma model in BiCGSTAB solver.\n";
             bicgstab_solver->set_nsimp_initial_plasma( &initp );
         }
-        bicgstab_solver->set_forced_potential_volume( 0.0, &force );
+        // bicgstab_solver->set_forced_potential_volume( 0.0, &force );
         solver = bicgstab_solver;
     } else {
         logfile << "Using MG solver... " << flush;
         mg_solver = new EpotMGSolver(*geometry);
         if (meniscus_type == 1U) {
-            ibsimu.message(1) << " Setting meniscus shield model in MG solver.\n";
-            mg_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
+            // ibsimu.message(1) << " Setting meniscus shield model in MG solver.\n";
+            // mg_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
+            mg_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
         } else {
             ibsimu.message(1) << " Setting nsimp plasma model in MG solver.\n";
             mg_solver->set_nsimp_initial_plasma( &initp );
         }
-        mg_solver->set_forced_potential_volume( 0.0, &force );
+        // mg_solver->set_forced_potential_volume( 0.0, &force );
         solver = mg_solver;
     }
     
@@ -257,12 +259,11 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
 
         if (i == 1) {
             // Set up plasma conditions for positive ions
-            // This would need specific solver methods if available
             if (meniscus_type == 1U) {
-                ibsimu.message(1) << " Setting meniscus shield model in BiCGSTAB solver.\n";
-                bicgstab_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
+                ibsimu.message(1) << " Setting meniscus shield model in solver.\n";
+                solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
             } else {
-                ibsimu.message(1) << " Setting nsimp plasma model in BiCGSTAB solver.\n";
+                ibsimu.message(1) << " Setting nsimp plasma model in solver.\n";
                 std::vector<double> Ei, rhoi;
                 Ei.push_back( parameters->getTPositive() ); // Temperature of positive ions
                 rhoi.push_back( 0.5*rho_h );
@@ -458,13 +459,15 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         
         rho_tot = pdb->get_rhosum();
 
-        // Space charge averaging
+        // Space charge averaging: scharge_ave = (scharge_old + alpha*scharge_new) / (1+alpha)
+        // scharge is NOT modified in-place so the saved file contains the true last-iteration scharge.
         if (i == 0) {
             scharge_ave = *scharge;
         } else {
             double coef = parameters->getAlphaCoeff();
-            *scharge *= coef;
-            scharge_ave += *scharge;
+            MeshScalarField scharge_scaled(*scharge);
+            scharge_scaled *= coef;
+            scharge_ave += scharge_scaled;
             scharge_ave *= (1.0/(1.0+coef));
         }
         
