@@ -164,7 +164,7 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
     EpotBiCGSTABSolver* bicgstab_solver = nullptr;
     EpotMGSolver* mg_solver = nullptr;
     
-    InitialPlasma initp( AXIS_Z, 6e-3 );
+    InitialPlasma initp( AXIS_Z, 7e-3 );
     ForcedPot force;
 
     if (solver_type == 0) {
@@ -173,7 +173,8 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         if (meniscus_type == 1U) {
             ibsimu.message(1) << " Setting meniscus shield model in BiCGSTAB solver.\n";
             // bicgstab_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
-            bicgstab_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+            // bicgstab_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+            bicgstab_solver->set_initial_plasma(0, &initp);
         } else {
             ibsimu.message(1) << " Setting nsimp plasma model in BiCGSTAB solver.\n";
             bicgstab_solver->set_nsimp_initial_plasma( &initp );
@@ -186,7 +187,8 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         if (meniscus_type == 1U) {
             // ibsimu.message(1) << " Setting meniscus shield model in MG solver.\n";
             // mg_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
-            mg_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+            // mg_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+            mg_solver->set_initial_plasma(0, &initp);
         } else {
             ibsimu.message(1) << " Setting nsimp plasma model in MG solver.\n";
             mg_solver->set_nsimp_initial_plasma( &initp );
