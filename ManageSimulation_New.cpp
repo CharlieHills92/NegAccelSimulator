@@ -87,7 +87,9 @@ void ManageSimulation::initializeComponents(const std::string& scan_name, const 
 void ManageSimulation::initializeIbsimu() {
     // Initialize IBSIMU settings
     ibsimu.set_message_threshold(MSG_VERBOSE, 1);
-    ibsimu.set_thread_count(debug ? 1 : 8);
+    const bool monte_carlo_enabled = parameters &&
+        (parameters->getIncludeStripping() > 0 || parameters->getIncludeSurfaceCollisions() > 0);
+    ibsimu.set_thread_count((debug || monte_carlo_enabled) ? 1 : 8);
 }
 
 void ManageSimulation::ResetSimulation() {
@@ -354,7 +356,9 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
             if (thcsec == nullptr) {
                 static double mass = parameters->getMIons();
                 string density_profile = getDensityProfileFilename((int)parameters->getAcceleratorIdx());
-                thcsec = new THCallback_secondaries(pdb, mass, periodicity_empty, density_profile);
+                double secondary_z_min = 7.0e-3 + parameters->getMeshSize();
+                thcsec = new THCallback_secondaries(pdb, mass, periodicity_empty, density_profile,
+                                                    secondary_z_min);
             }
             
             // Set appropriate callback based on iteration and stripping mode
@@ -422,9 +426,9 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
             }
             
             ibsimu.message(1) << "Particle trajectory calculation completed successfully." << endl;
-        } catch (const Error& e) {
+        } catch (Error& e) {
             ibsimu.message(1) << "ERROR: Particle trajectory calculation failed" << endl;
-            // ibsimu.message(1) << "Error message: " << e.what() << endl;
+            ibsimu.message(1) << "Error message: " << e.get_error_message() << endl;
             if (parameters->getIncludeStripping() > 1) {
                 ibsimu.message(1) << "This crash occurred with secondary particle generation enabled." << endl;
                 ibsimu.message(1) << "Possible causes:" << endl;
@@ -729,7 +733,9 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
             // if (parameters->getIncludeStripping() > 1) {
             if (true) { // Always create secondaries callback for tracing if stripping is enabled
                 vector<double> periodicity = {0.04, -0.04, 0.04, -0.04};
-                thcsec = new THCallback_secondaries(pdb, mass, periodicity, density_profile);
+                double secondary_z_min = 7.0e-3 + parameters->getMeshSize();
+                thcsec = new THCallback_secondaries(pdb, mass, periodicity, density_profile,
+                                                    secondary_z_min);
                 pdb->set_trajectory_handler_callback(thcsec);
                 ibsimu.message(1) << "Using secondaries stripping callback" << endl;
                 
@@ -977,12 +983,18 @@ void ManageSimulation::add_to_scan_beam_properties_summary(int scan_index, const
     // Calculate extracted current density at EG exit using ParticleManager
     double oriJ = parameters->getJIon();  // Original input current density
     double extsimJ = 0.0;  // Will be filled by checkEGExtractedCurrent
+    const ParticleDataBase3D* beam_property_particles = particleManager->getParticles();
+    const std::vector<ParticleDataBase3D*>& particle_species = particleManager->getParticleSpecies();
+    int negion_index = get_particle_int(PARTICLE_HM);
+    if (negion_index >= 0 && negion_index < static_cast<int>(particle_species.size()) && particle_species[negion_index]) {
+        beam_property_particles = particle_species[negion_index];
+    }
     
     // Get the extracted current density
     particleManager->checkEGExtractedCurrent(oriJ, extsimJ, *parameters);
     
     diagnosticsManager->addToScanBeamPropertiesSummary(scan_index, simulation_tag, scan_folder, scan_file_tag,
-                                                      zlocsummary, particleManager->getParticles(),
+                                                      zlocsummary, beam_property_particles,
                                                       extsimJ, fieldManager->getMagnetic(),
                                                       fieldManager->getPotential(), pk);
 }

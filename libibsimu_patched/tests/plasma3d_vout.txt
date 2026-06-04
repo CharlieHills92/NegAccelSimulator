@@ -1,0 +1,140 @@
+Ion Beam Simulator 1.0.6dev (e8500a2, Mon Jul 25 15:47:35 2022 +0300)
+Constructing geometry
+  origo     =            0            0            0
+  size      =          121           73           73
+  max       =        0.012       0.0072       0.0072
+  h         = 0.0001
+  nodecount = 644809
+  Done
+Building mesh
+  Done. Built mesh with:
+  389069 pure vacuum nodes
+  10833 near solid nodes
+  23208 neumann nodes
+  221699 dirichlet nodes
+  96832 solid 7 nodes
+  124449 solid 8 nodes
+  time used = 0.035686 s (0.01908 s realtime)
+Building surface triangulation
+  23642 triangles
+  12165 vertices
+  Done.
+  time used = 0.011591 s (0.011631 s realtime)
+Calculating efield
+Calculating efield
+Solving problem
+  dof = 422750
+  Using BiCGSTAB-ILU0 solver (imax = 10000, eps = 0.0001)
+  
+  error estimate = 7.65821e-05
+  iterations = 93
+  time used = 3.13622 s (3.16511 s realtime)
+Calculating efield
+Defining a cylindrical beam
+  Total beam current 0.00188496 A
+Calculating particle trajectories
+  Using surface collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (5000 total):
+    flown = 1250
+    time limited = 0
+    step count limited = 0
+    bad definitions = 3750
+    beam to boundary 1 = 0 A (0 particles)
+    beam to boundary 2 = 9.16088e-05 A (243 particles)
+    beam to boundary 3 = 0 A (0 particles)
+    beam to boundary 4 = 0 A (0 particles)
+    beam to boundary 5 = 0 A (0 particles)
+    beam to boundary 6 = 0 A (0 particles)
+    beam to boundary 7 = 0.00037963 A (1007 particles)
+    beam to boundary 8 = 0 A (0 particles)
+    total steps = 16508
+    steps per particle (ave) = 3.3016
+  time used = 0.053764 s (0.01606 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 243
+  total current = 9.16088e-05 A
+Iteration round 0
+  Epot error = 0 V (max)
+  Space charge error = 0 C/m3 (max)
+  Emittance 0 error = 0 mm mrad (max)
+Solving problem
+  dof = 423110
+  Using Globally convergent Newton-Raphson BiCGSTAB-ILU0 solver (imax = 10000, eps = 0.0001, newton_imax = 10, newton_eps = 0.0001)
+  Round     Iter      Step size       Step fac       Residual   Err estimate
+        0       67        45.3977              1        8.02553     9.7109e-05
+  Newton-Raphson converged
+  total iterations = 67
+  time used = 2.11493 s (2.12698 s realtime)
+Calculating efield
+Defining a cylindrical beam
+  Total beam current 0.00188496 A
+Calculating particle trajectories
+  Using surface collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (5000 total):
+    flown = 1250
+    time limited = 0
+    step count limited = 0
+    bad definitions = 3750
+    beam to boundary 1 = 0 A (0 particles)
+    beam to boundary 2 = 9.19858e-05 A (244 particles)
+    beam to boundary 3 = 0 A (0 particles)
+    beam to boundary 4 = 0 A (0 particles)
+    beam to boundary 5 = 0 A (0 particles)
+    beam to boundary 6 = 0 A (0 particles)
+    beam to boundary 7 = 0.000379253 A (1006 particles)
+    beam to boundary 8 = 0 A (0 particles)
+    total steps = 13082
+    steps per particle (ave) = 2.6164
+  time used = 0.036612 s (0.010616 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 244
+  total current = 9.19858e-05 A
+Iteration round 1
+  Epot error = 45.3977 V (max)
+  Space charge error = 0.0186139 C/m3 (max)
+  Emittance 0 error = 7.21144e-07 mm mrad (max)
+Solving problem
+  dof = 423110
+  Using Globally convergent Newton-Raphson BiCGSTAB-ILU0 solver (imax = 10000, eps = 0.0001, newton_imax = 10, newton_eps = 0.0001)
+  Round     Iter      Step size       Step fac       Residual   Err estimate
+        0      101        16.9848              1        0.99343    1.20205e-05
+  Newton-Raphson converged
+  total iterations = 101
+  time used = 3.09397 s (3.11374 s realtime)
+Calculating efield
+Defining a cylindrical beam
+  Total beam current 0.00188496 A
+Calculating particle trajectories
+  Using surface collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (5000 total):
+    flown = 1250
+    time limited = 0
+    step count limited = 0
+    bad definitions = 3750
+    beam to boundary 1 = 0 A (0 particles)
+    beam to boundary 2 = 9.83947e-05 A (261 particles)
+    beam to boundary 3 = 0 A (0 particles)
+    beam to boundary 4 = 0 A (0 particles)
+    beam to boundary 5 = 0 A (0 particles)
+    beam to boundary 6 = 0 A (0 particles)
+    beam to boundary 7 = 0.000372844 A (989 particles)
+    beam to boundary 8 = 0 A (0 particles)
+    total steps = 12846
+    steps per particle (ave) = 2.5692
+  time used = 0.039887 s (0.012927 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 261
+  total current = 9.83947e-05 A
+Iteration round 2
+  Epot error = 16.9848 V (max)
+  Space charge error = 0.00359816 C/m3 (max)
+  Emittance 0 error = 5.66934e-07 mm mrad (max)
+Plotting to PNG-file "plasma3d.png"
+Ending simulation
+  time used = 8.79826 s (8.75513 s realtime)

@@ -14,13 +14,14 @@ module load matplotlib 2>/dev/null || echo "Warning: matplotlib module not avail
 # IBSimu paths - use the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export IBSIMU_ROOT="$SCRIPT_DIR"
+export IBSIMU_DIR="${IBSIMU_ROOT}/libibsimu_patched"
 
 # Library paths
-export LDFLAGS="${LDFLAGS} -L${IBSIMU_ROOT}/lib"
-export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${IBSIMU_ROOT}/lib"
+export LDFLAGS="${LDFLAGS} -L${IBSIMU_DIR}/src/.libs -Wl,-rpath,${IBSIMU_DIR}/src/.libs"
+export LD_LIBRARY_PATH="${IBSIMU_DIR}/src/.libs${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # PKG_CONFIG paths
-export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}:${IBSIMU_ROOT}/lib/pkgconfig"
+export PKG_CONFIG_PATH="${IBSIMU_DIR}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
 
 # Add module pkg-config paths if available
 if [ -n "$EBROOTGSL" ]; then

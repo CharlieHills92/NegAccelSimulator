@@ -1,0 +1,387 @@
+lib_LTLIBRARIES = libibsimu-1.0.6dev.la
+
+libibsimu_1_0_6dev_la_LDFLAGS = -version-info 0:1:0
+
+AM_LDFLAGS = -Wall @rdynamic_flag@ @lt_enable_auto_import@
+AM_CPPFLAGS = -Wall
+
+libibsimu_1_0_6dev_la_SOURCES = \
+axisymmetricvectorfield.cpp \
+axisymmetricvectorfield.hpp \
+callback.hpp \
+ccolmatrix.cpp \
+ccolmatrix.hpp \
+cfifo.hpp \
+colormap.hpp \
+compmath.cpp \
+compmath.hpp \
+comptime.cpp \
+comptime.hpp \
+config.h \
+config.hpp \
+constants.hpp \
+convergence.cpp \
+convergence.hpp \
+coordmapper.hpp \
+coordmatrix.cpp \
+coordmatrix.hpp \
+crowmatrix.cpp \
+crowmatrix.hpp \
+diag_precond.cpp \
+diag_precond.hpp \
+dxf_solid.cpp \
+dxf_solid.hpp \
+empty_precond.hpp \
+epot_bicgstabsolver.cpp \
+epot_bicgstabsolver.hpp \
+epot_efield.cpp \
+epot_efield.hpp \
+epot_field.cpp \
+epot_field.hpp \
+epot_gssolver.cpp \
+epot_gssolver.hpp \
+epot_matrixsolver.cpp \
+epot_matrixsolver.hpp \
+epot_mgsolver.cpp \
+epot_mgsolver.hpp \
+epot_mgsubsolver.cpp \
+epot_mgsubsolver.hpp \
+epot_solver.cpp \
+epot_solver.hpp \
+eqpotgraph.cpp \
+eqpotgraph.hpp \
+error.cpp \
+error.hpp \
+field.hpp \
+fielddiagplot.cpp \
+fielddiagplot.hpp \
+fielddiagplotter.cpp \
+fielddiagplotter.hpp \
+fieldgraph.cpp \
+fieldgraph.hpp \
+file.cpp \
+file.hpp \
+fonts.cpp \
+fonts.hpp \
+frame.cpp \
+frame.hpp \
+func_solid.cpp \
+func_solid.hpp \
+geom3dplot.cpp \
+geom3dplot.hpp \
+geometry.cpp \
+geometry.hpp \
+geomplot.cpp \
+geomplot.hpp \
+geomplotter.cpp \
+geomplotter.hpp \
+graph.hpp \
+graph3d.hpp \
+hbio.cpp \
+hbio.hpp \
+histogram.cpp \
+histogram.hpp \
+ibsimu.cpp \
+ibsimu.hpp \
+ilu0_precond.cpp \
+ilu0_precond.hpp \
+ilu1_precond.cpp \
+ilu1_precond.hpp \
+interpolation.cpp \
+interpolation.hpp \
+label.cpp \
+label.hpp \
+legend.cpp \
+legend.hpp \
+lineclip.cpp \
+lineclip.hpp \
+mat3d.cpp \
+mat3d.hpp \
+matrix.cpp \
+matrix.hpp \
+mesh.cpp \
+mesh.hpp \
+meshcolormap.cpp \
+meshcolormap.hpp \
+meshgraph.cpp \
+meshgraph.hpp \
+meshscalarfield.cpp \
+meshscalarfield.hpp \
+meshvectorfield.cpp \
+meshvectorfield.hpp \
+multimeshvectorfield.cpp \
+multimeshvectorfield.hpp \
+mvector.cpp \
+mvector.hpp \
+mydxfarc.cpp \
+mydxfarc.hpp \
+mydxfblocks.cpp \
+mydxfblocks.hpp \
+mydxfcircle.cpp \
+mydxfcircle.hpp \
+mydxfentities.cpp \
+mydxfentities.hpp \
+mydxffile.cpp \
+mydxffile.hpp \
+mydxffont.cpp \
+mydxffont.hpp \
+mydxfheader.cpp \
+mydxfheader.hpp \
+mydxfinsert.cpp \
+mydxfinsert.hpp \
+mydxfline.cpp \
+mydxfline.hpp \
+mydxflwpolyline.cpp \
+mydxflwpolyline.hpp \
+mydxfmtext.cpp \
+mydxfmtext.hpp \
+mydxfspline.cpp \
+mydxfspline.hpp \
+mydxftables.cpp \
+mydxftables.hpp \
+palette.cpp \
+palette.hpp \
+particledatabase.cpp \
+particledatabase.hpp \
+particledatabaseimp.cpp \
+particledatabaseimp.hpp \
+particlediagplot.cpp \
+particlediagplot.hpp \
+particlediagplotter.cpp \
+particlediagplotter.hpp \
+particlegraph.cpp \
+particlegraph.hpp \
+particleiterator.cpp \
+particleiterator.hpp \
+particles.cpp \
+particles.hpp \
+particlestatistics.cpp \
+particlestatistics.hpp \
+particlestepper.hpp \
+plotter.cpp \
+plotter.hpp \
+polysolver.cpp \
+polysolver.hpp \
+precond.hpp \
+random.cpp \
+random.hpp \
+readascii.cpp \
+readascii.hpp \
+renderer.cpp \
+renderer.hpp \
+ruler.cpp \
+ruler.hpp \
+scalarfield.hpp \
+scharge.cpp \
+scharge.hpp \
+scheduler.hpp \
+solid.cpp \
+solid.hpp \
+solidgraph.cpp \
+solidgraph.hpp \
+solver.hpp \
+sort.cpp \
+sort.hpp \
+statusprint.cpp \
+statusprint.hpp \
+stl_solid.cpp \
+stl_solid.hpp \
+stlfile.cpp \
+stlfile.hpp \
+symbols.hpp \
+timer.cpp \
+timer.hpp \
+trajectory.cpp \
+trajectory.hpp \
+trajectorydiagnostics.cpp \
+trajectorydiagnostics.hpp \
+transformation.cpp \
+transformation.hpp \
+types.cpp \
+types.hpp \
+vec3d.cpp \
+vec3d.hpp \
+vec4d.cpp \
+vec4d.hpp \
+vectorfield.cpp \
+vectorfield.hpp \
+vtriangle.cpp \
+vtriangle.hpp \
+xygraph.cpp \
+xygraph.hpp
+
+libibsimu_1_0_6dev_la_includedir=$(includedir)/ibsimu-1.0.6dev
+libibsimu_1_0_6dev_la_include_HEADERS = \
+axisymmetricvectorfield.hpp \
+callback.hpp \
+ccolmatrix.hpp \
+cfifo.hpp \
+colormap.hpp \
+config.h \
+constants.hpp \
+convergence.hpp \
+compmath.hpp \
+comptime.hpp \
+coordmapper.hpp \
+coordmatrix.hpp \
+crowmatrix.hpp \
+diag_precond.hpp \
+dxf_solid.hpp \
+empty_precond.hpp \
+epot_bicgstabsolver.hpp \
+epot_efield.hpp \
+epot_field.hpp \
+epot_gssolver.hpp \
+epot_matrixsolver.hpp \
+epot_mgsolver.hpp \
+epot_mgsubsolver.hpp \
+epot_solver.hpp \
+eqpotgraph.hpp \
+error.hpp \
+field.hpp \
+fielddiagplot.hpp \
+fielddiagplotter.hpp \
+fieldgraph.hpp \
+file.hpp \
+fonts.hpp \
+frame.hpp \
+func_solid.hpp \
+geometry.hpp \
+geomplot.hpp \
+geomplotter.hpp \
+graph.hpp \
+graph3d.hpp \
+hbio.hpp \
+histogram.hpp \
+ibsimu.hpp \
+ilu0_precond.hpp \
+ilu1_precond.hpp \
+interpolation.hpp \
+label.hpp \
+legend.hpp \
+lineclip.hpp \
+mat3d.hpp \
+matrix.hpp \
+mesh.hpp \
+meshcolormap.hpp \
+meshgraph.hpp \
+meshscalarfield.hpp \
+meshvectorfield.hpp \
+multimeshvectorfield.hpp \
+mvector.hpp \
+mydxfarc.hpp \
+mydxfblocks.hpp \
+mydxfcircle.hpp \
+mydxfentities.hpp \
+mydxffile.hpp \
+mydxffont.hpp \
+mydxfheader.hpp \
+mydxfinsert.hpp \
+mydxfline.hpp \
+mydxflwpolyline.hpp \
+mydxfmtext.hpp \
+mydxfspline.hpp \
+mydxftables.hpp \
+palette.hpp \
+particledatabase.hpp \
+particlediagplot.hpp \
+particlediagplotter.hpp \
+particlegraph.hpp \
+particleiterator.hpp \
+particles.hpp \
+particlestatistics.hpp \
+particlestepper.hpp \
+plotter.hpp \
+polysolver.hpp \
+precond.hpp \
+random.hpp \
+readascii.hpp \
+ruler.hpp \
+scalarfield.hpp \
+scharge.hpp \
+scheduler.hpp \
+solid.hpp \
+solidgraph.hpp \
+solver.hpp \
+sort.hpp \
+statusprint.hpp \
+stlfile.hpp \
+stl_solid.hpp \
+timer.hpp \
+trajectory.hpp \
+trajectorydiagnostics.hpp \
+transformation.hpp \
+types.hpp \
+vec3d.hpp \
+vec4d.hpp \
+vectorfield.hpp \
+vtriangle.hpp \
+xygraph.hpp
+
+if GTK3
+libibsimu_1_0_6dev_la_SOURCES += \
+gtkfielddiagdialog.cpp \
+gtkfielddiagdialog.hpp \
+gtkfielddiagexportdialog.cpp \
+gtkfielddiagexportdialog.hpp \
+gtkfielddiagwindow.cpp \
+gtkfielddiagwindow.hpp \
+gtkframewindow.cpp \
+gtkframewindow.hpp \
+gtkgeom3dwindow.cpp \
+gtkgeom3dwindow.hpp \
+gtkgeomwindow.cpp \
+gtkgeomwindow.hpp \
+gtkhardcopy.cpp \
+gtkhardcopy.hpp \
+gtkparticlediagdialog.cpp \
+gtkparticlediagdialog.hpp \
+gtkparticlediagexportdialog.cpp \
+gtkparticlediagexportdialog.hpp \
+gtkparticlediagwindow.cpp \
+gtkparticlediagwindow.hpp \
+gtkplotter.cpp \
+gtkplotter.hpp \
+gtkpreferences.cpp \
+gtkpreferences.hpp \
+gtkwindow.cpp \
+gtkwindow.hpp \
+icon_field_diag.hpp \
+icon_geom2d.hpp \
+icon_geom3d.hpp \
+icon_hardcopy.hpp \
+icon_move.hpp \
+icon_particle_diag.hpp \
+icon_track.hpp \
+icon_zoom_fit.hpp \
+icon_zoom_in.hpp \
+icon_zoom_out.hpp \
+icons.cpp \
+icons.hpp \
+softwarerenderer.cpp \
+softwarerenderer.hpp
+libibsimu_1_0_6dev_la_include_HEADERS += \
+gtkplotter.hpp \
+gtkwindow.hpp
+endif
+
+if OPENGL
+libibsimu_1_0_6dev_la_SOURCES += glrenderer.cpp glrenderer.hpp
+endif
+
+if UMFPACK
+libibsimu_1_0_6dev_la_SOURCES += epot_umfpacksolver.cpp epot_umfpacksolver.hpp 
+libibsimu_1_0_6dev_la_include_HEADERS += epot_umfpacksolver.hpp 
+endif
+
+if CSG
+libibsimu_1_0_6dev_la_SOURCES += csgobject_solid.cpp csgobject_solid.hpp
+libibsimu_1_0_6dev_la_include_HEADERS += csgobject_solid.hpp
+endif
+
+EXTRA_DIST = \
+id.hpp
+
+CLEANFILES = *~
+
+

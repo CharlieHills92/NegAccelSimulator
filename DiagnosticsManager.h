@@ -249,7 +249,8 @@ public:
                                              double ionmass,
                                              const std::string& output_folder,
                                              const std::string& file_tag,
-                                             particle_kind pk = PARTICLE_ALL);
+                                             particle_kind pk = PARTICLE_ALL,
+                                             std::vector<double>* current_per_solid_out = nullptr);
 
     /**
      * @brief Create enhanced simulation summary with current density analysis

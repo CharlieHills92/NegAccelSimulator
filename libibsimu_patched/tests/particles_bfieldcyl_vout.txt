@@ -1,0 +1,44 @@
+Ion Beam Simulator 1.0.6dev (e8500a2, Mon Jul 25 15:47:35 2022 +0300)
+Constructing geometry
+  origo     =        -0.05            0            0
+  size      =           21           11            1
+  max       =         0.15          0.1            0
+  h         = 0.01
+  nodecount = 231
+  Done
+Building mesh
+  Done. Built mesh with:
+  171 pure vacuum nodes
+  0 near solid nodes
+  0 neumann nodes
+  60 dirichlet nodes
+  time used = 0.000486 s (0.000264 s realtime)
+Solving problem
+  dof = 171
+  Using BiCGSTAB-ILU0 solver (imax = 10000, eps = 0.0001)
+  
+  error estimate = 0
+  iterations = 0
+  time used = 9.5e-05 s (9.5e-05 s realtime)
+Calculating efield
+Calculating particle trajectories
+  Using solid collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (3 total):
+    flown = 3
+    time limited = 0
+    step count limited = 0
+    bad definitions = 0
+    beam to boundary 1 = 0 A (0 particles)
+    beam to boundary 2 = 0 A (3 particles)
+    beam to boundary 3 = 0 A (0 particles)
+    beam to boundary 4 = 0 A (0 particles)
+    beam to boundary 5 = 0 A (0 particles)
+    beam to boundary 6 = 0 A (0 particles)
+    total steps = 105
+    steps per particle (ave) = 35
+  time used = 0.001473 s (0.000626 s realtime)
+Plotting to PNG-file "particles_bfieldcyl.png"
+Ending simulation
+  time used = 0.059207 s (0.059128 s realtime)

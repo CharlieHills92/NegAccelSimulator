@@ -1,0 +1,49 @@
+		INCOMPATIBLE LIBRARY CHANGES
+		============================
+
+This document describes those library changes that break end-user
+programs, that is removal or changes of old features or
+functions. This list was started from version 1.0.3.
+
+IBSimu 1.0.4dev
+---------------------------------------------------------------------------
+
+VectorField is made abstract and efields inherits vector field. Mesh
+base vector field is now MeshVectorField. Potential based electric
+field is still EpotEfield.
+
+All MyDXFEntities constructors need a pointer to MyDXFFile. This
+change is made to give MyDXFEntities access to warning level setting
+at MyDXFFile.
+
+All debug_print() commands now require a reference to the output
+stream where debugging information is printed to.
+
+ParticleDataBase::set_thread_count() is deprecated by introducing
+global setting for thread count in IBSimu class. The set_thread_count
+function still remains for compatibility reasons but has no effect.
+
+Plasma suppression for magnetic fields enabled with particle database
+member enable_nsimp_plasma_threshold() is replaced with new
+set_bfield_suppression() using callback functors.
+
+Error reporting classes are privatized. Printing now done with
+print_error_message()
+
+IBSimu 1.0.4							
+---------------------------------------------------------------------------
+
+Changed enum efield_extrpl_e to enum field_extrpl_e for making
+extrapolations more general (also to be used with bfields).
+
+IBSimu 1.0.3							
+---------------------------------------------------------------------------
+
+Verbosity level is now controlled using IBSimu::set_verbose_output()
+in global ibsimu class instead of the old globally defined integer
+verbose_output. The header file verbose.hpp doesn't exist
+anymore. IBSimu class is defined in ibsimu.h
+
+Function set_nsimp_initial_plasma() to set initial plasma area has
+changed. The functionality is changed to be fully three dimensional
+and now the plasma area is defined using a function.

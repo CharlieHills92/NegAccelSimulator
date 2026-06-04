@@ -10,19 +10,23 @@ MKDIR_P = mkdir -p
 # Directories
 BUILD_DIR = build
 IBSIMU_ROOT = $(CURDIR)
+IBSIMU_DIR = $(IBSIMU_ROOT)/libibsimu_patched
+IBSIMU_SRC_DIR = $(IBSIMU_DIR)/src
+IBSIMU_LIB_DIR = $(IBSIMU_SRC_DIR)/.libs
+IBSIMU_SHARED = $(IBSIMU_LIB_DIR)/libibsimu-1.0.6dev.so
 
-# Use environment PKG_CONFIG_PATH if set, otherwise use default
-PKG_CONFIG_PATH ?= $(IBSIMU_ROOT)/lib/pkgconfig
-export PKG_CONFIG_PATH
+# Export patched IBSimu paths so builds and local runs use the vendored source tree.
+export PKG_CONFIG_PATH := $(IBSIMU_DIR)$(if $(PKG_CONFIG_PATH),:$(PKG_CONFIG_PATH))
+export LD_LIBRARY_PATH := $(IBSIMU_LIB_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY_PATH))
 
 # Compiler flags
 CXXFLAGS = -std=$(CXX_STD) -Wall -Wextra -g -O2 -MMD -MP -DNEW_IMPLEMENTATION
 
-# Always add ibsimu include path directly
-CXXFLAGS += -I$(IBSIMU_ROOT)/include/ibsimu-1.0.6dev
+# Always add the patched IBSimu headers directly
+CXXFLAGS += -I$(IBSIMU_SRC_DIR)
 
 # Library flags (try pkg-config first, fallback to direct paths)
-LIBS := $(shell pkg-config --libs ibsimu-1.0.6dev 2>/dev/null || echo "-L$(IBSIMU_ROOT)/lib -libsimu-1.0.6dev -lcairo -lglib-2.0 -lumfpack -lamd -lcholmod -lcolamd -lsuitesparseconfig -lblas -llapack -lgsl -lgslcblas -lm")
+LIBS := $(shell pkg-config --libs ibsimu-1.0.6dev 2>/dev/null || echo "-L$(IBSIMU_LIB_DIR) -libsimu-1.0.6dev -lfreetype -lfontconfig -lz -lpng16 -lcairo -lglib-2.0 -lgtk-3 -lgsl -lgslcblas -lm")
 
 # Include flags from pkg-config if available
 CXXFLAGS += $(shell pkg-config --cflags ibsimu-1.0.6dev 2>/dev/null || echo "")
@@ -33,7 +37,7 @@ CXXFLAGS += $(shell pkg-config --cflags gtk+-3.0 2>/dev/null || echo "")
 CXXFLAGS += $(shell pkg-config --cflags glib-2.0 2>/dev/null || echo "")
 
 # Linker flags
-LDFLAGS = -Wall -g
+LDFLAGS = -Wall -g -Wl,-rpath,$(IBSIMU_LIB_DIR)
 
 # Source files for main simulation (using refactored managers)
 SOURCES = main.cpp ManageSimulation_New.cpp \
@@ -50,10 +54,15 @@ OBJECTS = $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 DEPS = $(OBJECTS:.o=.d)
 
 # Default target
-all: runtest_new_v2
+all: $(IBSIMU_SHARED) runtest_new_v2
+
+# Build patched IBSimu before linking the application
+$(IBSIMU_SHARED):
+	@echo "Building libibsimu_patched..."
+	$(MAKE) -C $(IBSIMU_DIR) -j4
 
 # Build main executable
-runtest_new_v2: $(OBJECTS) | $(BUILD_DIR)
+runtest_new_v2: $(IBSIMU_SHARED) $(OBJECTS) | $(BUILD_DIR)
 	@echo "Linking runtest_new_v2..."
 	$(CXX) $(OBJECTS) -o $@ $(LDFLAGS) $(LIBS)
 	@echo "Successfully built runtest_new_v2"
@@ -73,6 +82,7 @@ $(BUILD_DIR):
 # Clean targets
 clean:
 	$(RM) $(BUILD_DIR)/*.o $(BUILD_DIR)/*.d
+	@if [ -d $(IBSIMU_DIR) ]; then $(MAKE) -C $(IBSIMU_DIR) clean >/dev/null 2>&1 || true; fi
 
 distclean: clean
 	$(RM) runtest_new_v2

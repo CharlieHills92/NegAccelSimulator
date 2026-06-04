@@ -22,7 +22,7 @@ particle_kind identify_particle_species( double mass, double charge, double ION_
 	else if ( (mass>2*ION_MASS*1.5e-27) & (mass<2*ION_MASS*1.8e-27) & (charge>0) ) {
 		kind=PARTICLE_H2P; // H2+
 	}
-	else if ( (mass>2*ION_MASS*1.5e-27) & (mass<2*ION_MASS*1.8e-27) & (charge>0) ) {
+	else if ( (mass>2*ION_MASS*1.5e-27) & (mass<2*ION_MASS*1.8e-27) & (charge==0) ) {
 		kind=PARTICLE_H20; // H20
 	}
 	else {

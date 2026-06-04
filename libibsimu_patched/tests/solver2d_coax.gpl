@@ -1,0 +1,12 @@
+reset
+set sample 1000
+set encoding iso_8859_1
+set term post port enh solid color "Times-Roman" 12
+set nokey
+set size 0.8,0.4
+
+set out "solver2d_coax.ps"
+f(x) = (x > 0.02) ? ( (x < 0.07) ? (7.98235600148*log(x) + 31.2271603153) : 10.0) : 0.0
+set xlabel "r (m)"
+set ylabel "Potential (V)"
+plot f(x), "solver2d_coax.dat" u 3:4 w d 3

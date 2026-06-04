@@ -1,0 +1,91 @@
+		NEWS
+		====
+
+IBSimu 1.0.6dev                    				12 Jun 2015
+---------------------------------------------------------------------------
+
+
+IBSimu 1.0.6                     				12 Jun 2015
+---------------------------------------------------------------------------
+
+- Huge amount of changes, this list probably misses a lot
+- Problem class removed. Problem data in Solver and Geometry
+- Solid edge smoothing changed from virtual potential method to
+  uneven finite difference step size
+- Surface triangulation for 3D
+- 3D plotter
+- Relativistic particle iterator
+- STL input
+- Bug fixes
+
+IBSimu 1.0.5                     				26 Sep 2011
+---------------------------------------------------------------------------
+
+- Fixed bugs: errnous kinetic energy diagnostic, polynomial coldata 
+  infinite loop, etc
+- Trajectories at freely defined plane diagnostic feature
+- Debug printing to have stream reference for output
+- Trajectory density plot
+- Interactive plotter for selectable field plots
+- Legend for plots
+- Better DXF input: spline object included, perturbation more fail safe,
+  2d->3d transformation
+- Magnetic fields: Generalized magnetic field type, conversion routines
+- Colomap: fixed palette bug, made plotter for vector graphics formats
+- Added particle statistics for collision locations
+
+IBSimu 1.0.4                     				28 Dec 2010
+---------------------------------------------------------------------------
+
+- Changed to SourceForge hosting and git code management tool
+- Added features and fixed bugs with DXF features.
+- Extrapolation setting for VectorField.
+
+IBSimu 1.0.3c							25 Nov 2010
+---------------------------------------------------------------------------
+
+- Fixed a critical bug in solid definition from DXF.
+- Fixed a typo causing compilation problems at MVector
+
+IBSimu 1.0.3							10 Nov 2010
+---------------------------------------------------------------------------
+
+- Implemented simple negative ion plasma extraction model.
+- Moved verbose setting to IBSimu class, where all global 
+  settings are to be gathered (see COMPATIBILITY).
+- Changed uintial plasma area definition to use a function for fully three
+  dimensional possibilities (see COMPATIBILITY).
+- Added a small DXF library for reading geometries.
+- Added (r,r') conversion emittance to interactive plotter.
+- Corrected energy units in beam emittance definition functions.
+- Bugfixes and improvements to configure script.
+- Bugfix for errnous virtual potential point on the simulation boundary
+- Bugfix for leaking memory and redefinition of iteration limits in 
+  Newton-Raphson solver
+- Bugfix for errnous axes in field diagnostic plots
+- Various minor bugfixes
+- Documentation
+
+IBSimu 1.0.2							21 Jul 2010
+---------------------------------------------------------------------------
+
+- Fixes to get code running in windows MinGW
+- Replaced isinf and isnan with custom functions
+- Workaround for strerror_r in windows
+- Timer implementations for windows
+- Zlib, gettimeofday, pthreads and many more checks added to configure
+
+IBSimu 1.0.1 released
+---------------------------------------------------------------------------
+
+- Minor bugfixes
+
+IBSimu 1.0.0 released                                           22 Oct 2009
+---------------------------------------------------------------------------
+
+- Initial release for new C++ version
+- Code still buggy and badly documented
+- Works most of the time
+
+
+

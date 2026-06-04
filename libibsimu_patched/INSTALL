@@ -1,0 +1,375 @@
+		Installing IBSimu
+		=================
+
+
+Ion Beam Simulator is a library written in C++ and is compilable by
+modern gcc compilers in Linux/Unix and Microsoft Windows
+environments. If the dependencies are available and correctly
+installed, it should be pretty straightforward to compile the library
+using GNU autotools build system.
+
+
+Getting IBSimu
+--------------
+
+The Ion Beam Simulator is hosted at SourceForge. The downloads of
+published official releases can be made at section Files. Please see
+
+http://ibsimu.sourceforge.net/
+and
+http://sourceforge.net/projects/ibsimu/files/
+
+The releases are available as .tar.gz archives. Just extract the
+archive with 
+
+tvkalvas@PHYS78 ~/src
+$ tar zxvf ibsimu-1.0.6.tar.gz
+
+and start the configuration and compilation process.
+
+The very latest source code, known as the "development version" is
+available through the source repository accessible with source code
+management tool git. For the first time, you can fetch the code with:
+
+tvkalvas@PHYS78 ~/src
+$ git clone git://ibsimu.git.sourceforge.net/gitroot/ibsimu/ibsimu
+
+Move into the directory containing the ibsimu code
+
+tvkalvas@PHYS78 ~/src
+$ cd ibsimu
+
+In the code directory you can do the following:
+
+tvkalvas@PHYS78 ~/src/ibsimu
+$ git pull
+
+tvkalvas@PHYS78 ~/src/ibsimu
+$ ./reconf
+
+tvkalvas@PHYS78 ~/src/ibsimu
+$ ./configure
+
+tvkalvas@PHYS78 ~/src/ibsimu
+$ make clean
+
+tvkalvas@PHYS78 ~/src/ibsimu
+$ make 
+
+tvkalvas@PHYS78 ~/src/ibsimu
+$ make install
+
+to update ibsimu at any time to the most recent version.
+
+Please note that the code obtained with git might not be
+compilable. If it is not, you can try to use an older version of the
+development chain (Use "git checkout <hash>" to get a specific
+version, use "git checkout master" to return to the most recent
+version). The development chain of the code is stamped with version
+number X.Y.Zdev, where X.Y.Z is the number of the last published
+release (on which the development version is based on). The code also
+has a 160-bit hash number identifier automatically given by the
+git. The hash number is shown by ibsimu in the verbose printout along
+with the version number and the date of last modification. For
+example:
+
+Ion Beam Simulator 1.0.6dev (6fa86a3, Mon Jul 18 10:56:59 2016 +0300)
+
+A web interface for ibsimu git repository is available at
+
+http://ibsimu.git.sourceforge.net/git/gitweb-index.cgi
+
+
+Configuration and compilation
+-----------------------------
+
+Ion Beam Simulator is a library, which means that it is not a complete
+program that you can just execute and use. The library is distributed
+as source code so it has to be compiled first and then it has to be
+used through a program written by the user. This brings some
+complication into using the software but it also enables great
+versatility. It also makes it possible to use the software in
+different kind of computers including Linux and Windows systems. You
+can use the software in many different ways and modify it if you need
+to. In this document I assume that you have nearly no experience in
+programming or use of libraries and therefore I will go through each
+part of the installation of the necessary tools, dependencies and
+IBSimu itself in a step-by-step fashion.  
+
+Tools
+-----
+
+In modern Linux systems the software is bundled in packages that can
+be installed by using graphical package manager systems. They are very
+simple to use. The only thing you need to know is a list of tools
+needed. You will need the following software:
+
+C++ compiler: I recommend the C++ compiler from the gcc suite.
+
+Linker: A program for bundling together the compiled object
+files. Usually comes with the compiler suite (gcc).
+
+Make: Compiler commanding system. GNU make is recommended. Usually
+comes with the compiler suite.
+
+pkg-config: A metainformation system for querying installed libraries.
+
+An editor: You can do it with notepad, but you are not going to like
+it. Install a decent programmers editor. I use GNU emacs.
+
+For most of the Linux systems all of this software is already
+installed by default. For Windows the recipe is also quite simple, but
+the installation process will be hand made. Because IBSimu is
+developed under Linux, it uses the GNU autoconf system for
+compilation. Therefore you have to have to have a Unix-like
+environment in windows for running the automatic configuration and
+compilation. The system I recommend to use with IBSimu in Windows is
+the MSYS/MinGW, which are available at http://www.mingw.org/. I do not
+recommend using CygWin because I have no experience with it. So,
+please download and install MSYS and MinGW. I tested IBSimu with MinGW
+version 5.1.6 and MSYS version 1.0.11 successfully. First install
+MinGW. Use the "Automated MinGW intstaller" from Downloads and select
+both "minimal" and "g++" packages to be installed. Use the default
+installation directory C:\MinGW\. The MSYS should be installed from
+the MSYS-1.0.11.exe package or newer. Install into the default
+directory C:\MSYS\1.0\. Enter "C:\MinGW\" when the post-install
+process asks for the location of MinGW.
+
+If the installation was successful you should have a "MSYS" icon on
+your desktop. Launching this will open a terminal with a Unix-like
+command prompt with the tab-operated filename completition and all the
+goodies. When you start the MSYS terminal for the first time, it will
+create a home directory for you at C:\MSYS\1.0\home\username. Inside
+MSYS this directory is seen as /home/username, where username is your
+username on the computer. If you don't have or don't want to use
+Administrator on the computer (which is what is recommended nowadays)
+you should have write permissions to this directory. After doing that
+you have to configure your users path settings by editing a
+configuration file .profile in your home directory. This script file
+is automatically executed when you start the MSYS. Add the following
+lines to your .profile with you favourite editor:
+
+#!/bin/sh.exe
+#
+# Get the aliases and functions
+#
+if [ -f ${HOME}/.bashrc ]
+then
+  . ${HOME}/.bashrc
+fi
+
+export PATH="${HOME}/bin:${HOME}/lib:${PATH}"
+export LDFLAGS="-L${HOME}/lib"
+export CFLAGS="-I${HOME}/include -O2 -march=native"
+export CXXFLAGS="${CFLAGS}"
+export PKG_CONFIG_PATH="${HOME}/lib/pkgconfig"
+export LD_LIBRARY_PATH="${HOME}/lib"
+
+Please not that here I set the compiler optimization options "-O2" and
+"-march=native". These will make the code much faster than what it would
+be without them.
+
+Now restart your MSYS terminal and you should be ready to compile and
+install programs in MSYS. The MSYS terminal should give you a typical
+command prompt, which looks something like this:
+
+tvkalvas@PHYS78 ~
+$ 
+
+In the prompt above, "tvkalvas" is my username, "PHYS78" is the name
+of the computer, "~" is the current working directory ("~" equals
+home). The "$" on the next line indicates that you can write commands
+after it.  
+
+
+Dependencies
+------------
+
+In addition to the tools you will also need some libraries that
+provide the background functionality for graphics, mathematics and
+some other background features in IBSimu. In Linux you just use the
+package manager again and install the software. You need development
+(often packages named *-dev) packages for:
+
+FontConfig: A library for finding system fonts.
+
+FreeType2: A library for rendering fonts.
+
+Cairographics: General graphics library.
+
+libpng: PNG graphics file format library.
+
+zlib: Data compression library.
+
+POSIX threads: Multithreading library standard. Several
+implementations exist. Y our Linux should already have an
+implementation.
+
+GNU Scientific Library: Mathematics library.
+
+Optional software you might want:
+
+GTK+ 3.0: The GNOME Toolkit. Windowing library. Used for interactive
+graphics. This library has several dependencies on its own.
+
+Gtkglext-3.0: OpenGL library for GTK+ 3.0. Used for 3D rendering on
+interactive window. Fallback software rendering exists.
+
+UMFPACK/Suitesparse: Matrix factorization/solver library.
+
+CSG: Constructive solid geometry library by the author. One way for
+building 3D geometries.
+
+For Windows you can get most of these libraries and the dependencies
+of GTK+ bundled in one package at http://www.gtk.org/ in
+"Download". Download the newest stable release "all-in-one bundle". At
+the time of writing (21 May 2014) the newest version was 3.6.4.
+Uncompress the package contents into a temporary location and copy the
+contents into C:\MSYS\1.0\ in such a way that the contents of the bin
+directory in the gtk package will go into C:\MSYS\1.0\bin, lib into
+C:\MSYS\1.0\lib, et cetera. This needs to be done as the
+Administrator. The GTK+ in Windows seems to be now distributed through
+a system called MSYS2 Installer. Please see the website for
+installation instructions.
+
+The only libraries which are not in the bundle are the POSIX threads
+and the GNU Scientific Library and the other optional dependencies.
+
+For POSIX Threads you can find a Windows implementation at
+http://sourceware.org/pthreads-win32/. Download the most recent
+self-extracting release and uncompress it to a temporary location. At
+the time of writing this is pthreads-w32-2-8-0-release.exe. From
+inside the archive (folder Pre-built.2) you need to copy the contents
+of the include directory into /home/username/include and from the lib
+directory you need to copy the file libpthreadGC2.a into
+/home/username/lib/pthread.a (note the rename) and pthreadGC2.dll into
+/home/username/lib/pthreadGC2.dll (no rename here). In Linux, POSIX
+Threads should be included in the distribution by default.
+
+The GNU Scientific Library can be fetched from
+http://www.gnu.org/software/gsl/. Go to the download section and
+choose the most recent package (gsl-1.16.tar.gz at the time of
+writing). Save the archive into /home/username/src (I like to keep my
+files in order and therefore I put sources into a subdirectory
+src). The GSL will have to be compiled in the MSYS/MinGW
+environment. Open the MSYS terminal and uncompress the gsl in the src
+subdirectory:
+
+tvkalvas@PHYS78 ~
+$ cd src
+
+tvkalvas@PHYS78 ~/src
+$ tar zxvf gsl-1.16.tar.gz
+
+The GSL will be uncompressed into a directory gsl-1.16. go into the
+directory with cd and run the configure script indicating the desired
+installation location:
+
+tvkalvas@PHYS78 ~/src
+$ cd gsl-1.16
+
+tvkalvas@PHYS78 ~/src/gsl-1.16
+$ ./configure --prefix=/home/tvkalvas
+
+If everything goes well the configure script shouldn't complain about
+anything and it should be ready to compile the GSL. Compilation,
+checks and installation follow:
+
+tvkalvas@PHYS78 ~/src/gsl-1.16
+$ make
+
+tvkalvas@PHYS78 ~/src/gsl-1.16
+$ make check
+
+tvkalvas@PHYS78 ~/src/gsl-1.16
+$ make install
+
+This is everything you have to have to be able to start compiling
+IBSimu. You might want to install Constructive Solid Geometry library
+CSG and SuiteSparse libraries from the IBSimu website for additional
+features, but I won't cover those in this document. Read the README
+files which come with the packages for information.
+
+
+Compilation
+-----------
+
+The compilation of IBSimu is pretty much similar to compilation of
+GSL. You should download the most recent version of IBSimu into your
+src directory, which is then uncompressed and configured. This has to
+be done manually also in Linux:
+
+tvkalvas@PHYS78 ~/src
+$ tar zxvf libibsimu-1.0.6.tar.gz
+
+tvkalvas@PHYS78 ~/src
+$ cd libibsimu-1.0.6
+
+tvkalvas@PHYS78 ~/src/libibsimu-1.0.6
+$ ./configure --prefix=/home/tvkalvas
+
+The configuration script works mostly automatically, but it also has
+several options that you can tune to de-select some optional features,
+for example --without-opengl to compile without OpenGL renderer
+(requires GtkGLExt), --without-umfpack to compile without the UMFPACK
+solver (requires SuiteSparse) and --without-csg to compile without CSG
+solids (requires Constructive Solid Geometry library). The
+requirements for these three options are automatically detected. You
+can also do --disable-sigsegv_stack to disable stack printing on
+segmentation faults, etc. This is necessary for example on non-x86
+computers. After successful configuration you can compile, run the
+checks and install:
+
+tvkalvas@PHYS78 ~/src/libibsimu-1.0.6
+$ make
+
+tvkalvas@PHYS78 ~/src/libibsimu-1.0.6
+$ make check
+
+tvkalvas@PHYS78 ~/src/libibsimu-1.0.6
+$ make install
+
+That finishes the installation.
+
+
+Usage
+-----
+
+As a first test for the library, a quick test of using the library
+should be done. You should make a new directory for your simulations
+and a directory for this first test within:
+
+tvkalvas@PHYS78 ~/src/libibsimu-1.0.6
+$ cd
+
+tvkalvas@PHYS78 ~
+$ mkdir simulations
+
+tvkalvas@PHYS78 ~
+$ cd simulations
+
+tvkalvas@PHYS78 ~/simulations
+$ mkdir first_test
+
+tvkalvas@PHYS78 ~/simulations
+$ cd first_test
+
+tvkalvas@PHYS78 ~/simulations/first_test
+$
+
+Then you should copy a tutorial file (and a Makefile) into this
+directory and try to compile:
+
+tvkalvas@PHYS78 ~/simulations/first_test
+$ make
+
+and run it:
+
+tvkalvas@PHYS78 ~/simulations/first_test
+$ ./vlasov2d
+
+Please read more instructions from the tutorial.
+
+
+
+-- Taneli Kalvas <taneli.kalvas@jyu.fi>, 25 Aug 2016

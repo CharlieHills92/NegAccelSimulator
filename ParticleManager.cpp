@@ -520,7 +520,13 @@ bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, cons
     // Implementation for checking extracted current density at EG (z=0.009m)
     // Based on the check_EGext function in ManageSimulation.cpp
     
-    if (!particles) {
+    ParticleDataBase3D* extracted_particles = particles;
+    int hm_index = get_particle_int(PARTICLE_HM);
+    if (hm_index >= 0 && hm_index < static_cast<int>(particles_species.size()) && particles_species[hm_index]) {
+        extracted_particles = particles_species[hm_index];
+    }
+
+    if (!extracted_particles) {
         extsimJ = 0.0;
         return false;
     }
@@ -537,7 +543,7 @@ bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, cons
         };
         
         // Get trajectories at EG exit plane
-        particles->trajectories_at_plane(tdata, AXIS_Z, eg_exit_z, diagnostics);
+        extracted_particles->trajectories_at_plane(tdata, AXIS_Z, eg_exit_z, diagnostics);
         
         // Calculate total current at EG exit
         double total_current = 0.0;
@@ -561,6 +567,9 @@ bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, cons
         
         if (debug) {
             logfile << "DEBUG: EG extracted current calculation:" << endl;
+            logfile << "  Current source: "
+                    << ((extracted_particles == particles) ? "all-particle database (fallback)" : "negative-ion database")
+                    << endl;
             logfile << "  Particles at EG exit (z=" << eg_exit_z << "m): " << particle_count << endl;
             logfile << "  Total current: " << total_current << " A" << endl;
             logfile << "  PG aperture area: " << pg_aperture_area << " m²" << endl;

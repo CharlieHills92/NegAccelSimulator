@@ -1,0 +1,65 @@
+		TODO list
+		=========
+
+Tag data files
+
+Randomize particle plotting
+
+Make particle groups
+
+New geometry collision detection routine (no need for solid inclusion
+test after initial build)
+
+Export for particle plotter
+ - colormap and scatter
+
+Tracking for field plotter
+ - x1, x2, y1, y2 axes
+
+Tracking for particle plotter
+ - intensity with colormap plots
+
+Q/M discrimination for plots (particle and geom) - two possibilities:
+ - Create one more level to pdb for particle "groups"
+ - Do the discrimination in plotter
+ * Should have coloring and on/off selection for each group (preferences tab)
+
+Particle plotter with points
+
+UMFPACK gnewton
+ - Better stability with high-intensity negative ion source simu
+
+Particle iterator force delta s steplen
+ - Problem with cylindrical coordinates -> seems to need adaptive steps
+
+Particle beam definition
+ - Possibility for ordered definition
+
+Particle database save/load for making debugging
+
+particlediagplot.cpp: scaling for profile plots in 2D
+
+New space charge setting routine
+ - Old routine is inaccurate with beams that are in E-fields
+
+Add PIC style particle stepper
+
+Suitesparse package to include umfpack.pc and amd.pc and newest
+versions of the algorithms
+
+Particle plot mirroring auto/off
+
+Data export from geomplot window
+
+Smooth edges for Gauss-Seidel solver
+
+Colormap plots on eps/pdf canvas.
+
+Optimize solvers (time using gperf)
+
+Parallelize solvers
+
+Improve CSG usability through input geometry definition script
+
+
+

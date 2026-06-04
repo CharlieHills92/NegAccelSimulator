@@ -227,6 +227,85 @@ private:
     vector<double> dens;
     bool _periodic;
     vector<double> _periodicity;
+    double _secondary_z_min;
+    size_t _initial_particle_count;
+    size_t _secondary_debug_count;
+
+    bool shouldLogSecondaryDebug(size_t predicted_index) const {
+         return predicted_index >= _initial_particle_count + 10300 &&
+             predicted_index < _initial_particle_count + 10550;
+    }
+
+    void logSecondaryDebug(const char *branch,
+                           ParticleBase *particle,
+                           const ParticleP3D &parent_state,
+                           const ParticleP3D &child_state,
+                           double child_current,
+                           double child_charge,
+                           double child_mass,
+                           int child_generation,
+                           double energy,
+                           double delta,
+                           double target_n) {
+        size_t predicted_index = _pdb->size();
+        if (!shouldLogSecondaryDebug(predicted_index)) {
+            return;
+        }
+
+        double child_speed = sqrt(child_state[2]*child_state[2] +
+                                  child_state[4]*child_state[4] +
+                                  child_state[6]*child_state[6]);
+
+        logfile << "SECONDARY_DEBUG"
+                << " event=" << _secondary_debug_count++
+                << " predicted_index=" << predicted_index
+                << " branch=" << branch
+                << " parent_gen=" << particle->gen()
+                << " parent_status=" << particle->get_status()
+                << " parent_q=" << particle->q()
+                << " parent_m=" << particle->m()
+                << " parent_IQ=" << particle->IQ()
+                << " child_gen=" << child_generation
+                << " child_q=" << child_charge
+                << " child_m=" << child_mass
+                << " child_IQ=" << child_current
+                << " energy=" << energy
+                << " delta=" << delta
+                << " target_n=" << target_n
+                << " parent_t=" << parent_state[0]
+                << " parent_x=" << parent_state[1]
+                << " parent_vx=" << parent_state[2]
+                << " parent_y=" << parent_state[3]
+                << " parent_vy=" << parent_state[4]
+                << " parent_z=" << parent_state[5]
+                << " parent_vz=" << parent_state[6]
+                << " child_t=" << child_state[0]
+                << " child_x=" << child_state[1]
+                << " child_vx=" << child_state[2]
+                << " child_y=" << child_state[3]
+                << " child_vy=" << child_state[4]
+                << " child_z=" << child_state[5]
+                << " child_vz=" << child_state[6]
+                << " child_speed=" << child_speed
+                << endl;
+    }
+
+    void addSecondaryParticleDebug(const char *branch,
+                                   ParticleBase *particle,
+                                   const ParticleP3D &parent_state,
+                                   const ParticleP3D &child_state,
+                                   double child_current,
+                                   double child_charge,
+                                   double child_mass,
+                                   int child_generation,
+                                   double energy,
+                                   double delta,
+                                   double target_n) {
+        logSecondaryDebug(branch, particle, parent_state, child_state,
+                          child_current, child_charge, child_mass,
+                          child_generation, energy, delta, target_n);
+        _pdb->add_particle(child_current, child_charge, child_mass, child_generation, child_state);
+    }
 
     // Helper function for safe velocity scaling
     bool validateAndScaleVelocity(double vel, double minvel, double originalVel[3], double scaledVel[3]) {
@@ -277,9 +356,13 @@ public:
         THCallback_secondaries( pdb, mass, periodicity, "densprofiles/MITICA_dens.txt" );
     }
 
-    THCallback_secondaries( ParticleDataBase3D* pdb, double& mass, vector<double>& periodicity, string density_filename ) {
+    THCallback_secondaries( ParticleDataBase3D* pdb, double& mass, vector<double>& periodicity,
+                            string density_filename, double secondary_z_min = 7.0e-3 ) {
         _pdb=pdb;
         _mass=mass;
+        _secondary_z_min = secondary_z_min;
+        _initial_particle_count = pdb->size();
+        _secondary_debug_count = 0;
         if (debug) cout << " MASS : " << _mass << endl;
         _rng = new MTRandom( 1 );
         _Gng = new MTRandom( 3 );
@@ -291,6 +374,11 @@ public:
         _rng->get( qx );
         _Gng->get( Rqx );
         load_density_profile(density_filename,pos,dens);
+        logfile << "SECONDARY_DEBUG initial_particle_count=" << _initial_particle_count
+            << " debug_window_start=" << (_initial_particle_count + 10300)
+            << " debug_window_end=" << (_initial_particle_count + 10550)
+            << " secondary_z_min=" << _secondary_z_min
+            << endl;
         _periodicity=periodicity;
         _periodic=false;
         if (_periodicity.size()>0) {
@@ -391,8 +479,8 @@ public:
 			return;
 		}
                     
-        // Reduce current according to stripping of H- probability
-        if ( (*pend)[5]>0.007 && (*pend)[6]>0  ) {
+		// Reduce current according to stripping of H- probability
+        if ( (*pend)[5] > _secondary_z_min && pend->speed() > 0.0 ) {
             if ( energy >= 10. && abs(particle->gen()%100)<5 ) {
                 if( particle->m() > 1.5e-27*_mass && particle->q() < 0 ) {
                     double single_strip;
@@ -427,15 +515,23 @@ public:
                                 // single stripping --> H- diventa neutro
                                 particle->set_status( PARTICLE_STRIP );
                                 int genORI=particle->gen();
-                                _pdb->add_particle( particle->IQ(), 0., 1., genORI+1, *pend); // H0 veloce
-                                _pdb->add_particle( particle->IQ(), -1., 1./1836, genORI+1, *pend); // 1e is emitted. Assume it has the same velocity of the original particle 
+                                addSecondaryParticleDebug( "hm_single_strip_h0", particle, *pcur, *pend,
+                                                           particle->IQ(), 0., 1., genORI+1,
+                                                           energy, delta, target_n );
+                                addSecondaryParticleDebug( "hm_single_strip_e", particle, *pcur, *pend,
+                                                           particle->IQ(), -1., 1./1836, genORI+1,
+                                                           energy, delta, target_n );
                             }
                             else if ( rand1[0] <= frac_double ){
                                 // double stripping --> H- diventa H+
                                 particle->set_status( PARTICLE_STRIP );
                                 int genORI=particle->gen();
-                                _pdb->add_particle( -particle->IQ(), 1., 1., genORI+1, *pend); // H+ veloce
-                                _pdb->add_particle( 2*particle->IQ(), -1., 1./1836, genORI+1, *pend); // 2e are emitted. Assume they have the same velocity of the original particle 
+                                addSecondaryParticleDebug( "hm_double_strip_hp", particle, *pcur, *pend,
+                                                           -particle->IQ(), 1., 1., genORI+1,
+                                                           energy, delta, target_n );
+                                addSecondaryParticleDebug( "hm_double_strip_e", particle, *pcur, *pend,
+                                                           2*particle->IQ(), -1., 1./1836, genORI+1,
+                                                           energy, delta, target_n );
                                 
                             }
                             else {
@@ -449,14 +545,22 @@ public:
                                 
                                 if (validateAndScaleVelocity(vel, minvelH2, originalVel, scaledVelH2)) {
                                     ParticleP3D seco1( (*pend)[0], (*pend)[1], scaledVelH2[0], (*pend)[3], scaledVelH2[1], (*pend)[5], scaledVelH2[2] );
-                                    _pdb->add_particle( -particle->IQ(), 1., 2., genORI+1, seco1); // H2+
+                                    addSecondaryParticleDebug( "hm_bkg_ionization_h2p", particle, *pcur, seco1,
+                                                               -particle->IQ(), 1., 2., genORI+1,
+                                                               energy, delta, target_n );
                                 }
                                 
                                 if (validateAndScaleVelocity(vel, minvele, originalVel, scaledVelE)) {
                                     ParticleP3D seco2( (*pend)[0], (*pend)[1], scaledVelE[0], (*pend)[3], scaledVelE[1], (*pend)[5], scaledVelE[2] );
-                                    _pdb->add_particle( particle->IQ(), -1., 1./1836, genORI+1, seco2); // e
+                                    addSecondaryParticleDebug( "hm_bkg_ionization_e", particle, *pcur, seco2,
+                                                               particle->IQ(), -1., 1./1836, genORI+1,
+                                                               energy, delta, target_n );
                                 }
                             }
+                        } catch (Error& e) {
+                            logfile << "ERROR: Failed to add secondary particle in H- collision: "
+                                    << e.get_error_message() << endl;
+                            // Continue with original particle
                         } catch (const std::exception& e) {
                             logfile << "ERROR: Failed to add secondary particle in H- collision: " << e.what() << endl;
                             // Continue with original particle
@@ -489,8 +593,12 @@ public:
                                 // stripping --> H0 diventa H+
                                 particle->set_status( PARTICLE_STRIP );
                                 int genORI=particle->gen();
-                                _pdb->add_particle( -particle->IQ(), 1., 1., genORI+1, *pend); // H+ veloce
-                                _pdb->add_particle( particle->IQ(), -1., 1./1836, genORI+1, *pend); // 1e is emitted. Assume it has the same velocity of the original particle 
+                                addSecondaryParticleDebug( "h0_strip_hp", particle, *pcur, *pend,
+                                                           -particle->IQ(), 1., 1., genORI+1,
+                                                           energy, delta, target_n );
+                                addSecondaryParticleDebug( "h0_strip_e", particle, *pcur, *pend,
+                                                           particle->IQ(), -1., 1./1836, genORI+1,
+                                                           energy, delta, target_n );
                             }
                             else {
                                 // ionizzazione del fondo --> H2 diventa H2+, H0 rimane H0
@@ -501,14 +609,21 @@ public:
                                 
                                 if (validateAndScaleVelocity(vel, minvelH2, originalVel, scaledVelH2)) {
                                     ParticleP3D seco1( (*pend)[0], (*pend)[1], scaledVelH2[0], (*pend)[3], scaledVelH2[1], (*pend)[5], scaledVelH2[2] );
-                                    _pdb->add_particle( -particle->IQ(), 1., 2., genORI+1, seco1); // H2+
+                                    addSecondaryParticleDebug( "h0_bkg_ionization_h2p", particle, *pcur, seco1,
+                                                               -particle->IQ(), 1., 2., genORI+1,
+                                                               energy, delta, target_n );
                                 }
                                 
                                 if (validateAndScaleVelocity(vel, minvele, originalVel, scaledVelE)) {
                                     ParticleP3D seco2( (*pend)[0], (*pend)[1], scaledVelE[0], (*pend)[3], scaledVelE[1], (*pend)[5], scaledVelE[2] );
-                                    _pdb->add_particle( particle->IQ(), -1., 1./1836, genORI+1, seco2); // e
+                                    addSecondaryParticleDebug( "h0_bkg_ionization_e", particle, *pcur, seco2,
+                                                               particle->IQ(), -1., 1./1836, genORI+1,
+                                                               energy, delta, target_n );
                                 }
                             }
+                        } catch (Error& e) {
+                            logfile << "ERROR: Failed to add secondary particle in H0 collision: "
+                                    << e.get_error_message() << endl;
                         } catch (const std::exception& e) {
                             logfile << "ERROR: Failed to add secondary particle in H0 collision: " << e.what() << endl;
                         }
@@ -541,10 +656,17 @@ public:
                             
                             if (validateAndScaleVelocity(vel, minvelH2, originalVel, scaledVelH2)) {
                                 ParticleP3D seco1( (*pend)[0], (*pend)[1], scaledVelH2[0], (*pend)[3], scaledVelH2[1], (*pend)[5], scaledVelH2[2] );
-                                _pdb->add_particle( -particle->IQ(), 1., 2., genORI+1, seco1); // H2+
+                                addSecondaryParticleDebug( "hp_cx_h2p", particle, *pcur, seco1,
+                                                           -particle->IQ(), 1., 2., genORI+1,
+                                                           energy, delta, target_n );
                             }
                             
-                            _pdb->add_particle( particle->IQ(), 0., 1., genORI+1, *pend); // H0 veloce
+                            addSecondaryParticleDebug( "hp_cx_h0", particle, *pcur, *pend,
+                                                       particle->IQ(), 0., 1., genORI+1,
+                                                       energy, delta, target_n );
+                        } catch (Error& e) {
+                            logfile << "ERROR: Failed to add secondary particle in H+ collision: "
+                                    << e.get_error_message() << endl;
                         } catch (const std::exception& e) {
                             logfile << "ERROR: Failed to add secondary particle in H+ collision: " << e.what() << endl;
                         }

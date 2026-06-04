@@ -1,0 +1,222 @@
+Ion Beam Simulator 1.0.6dev (e8500a2, Mon Jul 25 15:47:35 2022 +0300)
+Constructing geometry
+  origo     =            0            0            0
+  size      =           76           45            1
+  max       =        0.012      0.00704            0
+  h         = 0.00016
+  nodecount = 3420
+  Done
+Building mesh
+  Done. Built mesh with:
+  2277 pure vacuum nodes
+  98 near solid nodes
+  131 neumann nodes
+  914 dirichlet nodes
+  453 solid 7 nodes
+  452 solid 8 nodes
+  time used = 0.000762 s (0.000399 s realtime)
+Calculating efield
+Calculating efield
+Solving problem
+  Using Gauss-Seidel solver (w = 1.66, imax = 100000, eps = 0.0001)
+      0                    0     1680         9.922448e-05  
+  error estimate = 9.92245e-05
+  iterations = 1680
+  time used = 0.046333 s (0.046578 s realtime)
+Calculating efield
+Defining a 2d beam
+  Total beam current 0.9 A/m
+Calculating particle trajectories
+  Using solid collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (50000 total):
+    flown = 50000
+    time limited = 0
+    step count limited = 0
+    bad definitions = 0
+    beam to boundary 1 = 0 A/m (0 particles)
+    beam to boundary 2 = 0.31608 A/m (17560 particles)
+    beam to boundary 3 = 0 A/m (0 particles)
+    beam to boundary 4 = 0 A/m (0 particles)
+    beam to boundary 5 = 0 A/m (0 particles)
+    beam to boundary 6 = 0 A/m (0 particles)
+    beam to boundary 7 = 0.58392 A/m (32440 particles)
+    beam to boundary 8 = 0 A/m (0 particles)
+    total steps = 869532
+    steps per particle (ave) = 17.3906
+  time used = 2.11776 s (0.550743 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 17560
+  total current = 0.31608 A/m
+Iteration round 0
+  Epot error = 0 V (max)
+  Space charge error = 0 C/m3 (max)
+  Emittance 0 error = 0 mm mrad (max)
+Solving problem
+  Using Gauss-Seidel solver (w = 1.66, imax = 100000, eps = 0.0001)
+  Limiting plasma calculation to U > -45 V
+      0                    0     1177         9.961589e-05  
+  error estimate = 9.96159e-05
+  iterations = 1177
+  time used = 0.052883 s (0.053149 s realtime)
+Calculating efield
+Defining a 2d beam
+  Total beam current 0.9 A/m
+Calculating particle trajectories
+  Using solid collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (50000 total):
+    flown = 50000
+    time limited = 0
+    step count limited = 0
+    bad definitions = 0
+    beam to boundary 1 = 0 A/m (0 particles)
+    beam to boundary 2 = 0.296208 A/m (16456 particles)
+    beam to boundary 3 = 0 A/m (0 particles)
+    beam to boundary 4 = 0 A/m (0 particles)
+    beam to boundary 5 = 0 A/m (0 particles)
+    beam to boundary 6 = 0 A/m (0 particles)
+    beam to boundary 7 = 0.603792 A/m (33544 particles)
+    beam to boundary 8 = 0 A/m (0 particles)
+    total steps = 773010
+    steps per particle (ave) = 15.4602
+  time used = 2.36904 s (0.61652 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 16456
+  total current = 0.296208 A/m
+Iteration round 1
+  Epot error = 161.015 V (max)
+  Space charge error = 0.00522645 C/m3 (max)
+  Emittance 0 error = 1.39132e-07 mm mrad (max)
+Solving problem
+  Using Gauss-Seidel solver (w = 1.66, imax = 100000, eps = 0.0001)
+  Limiting plasma calculation to U > -45 V
+      0                    0      759         9.927853e-05  
+  error estimate = 9.92785e-05
+  iterations = 759
+  time used = 0.034315 s (0.034532 s realtime)
+Calculating efield
+Defining a 2d beam
+  Total beam current 0.9 A/m
+Calculating particle trajectories
+  Using solid collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (50000 total):
+    flown = 50000
+    time limited = 0
+    step count limited = 0
+    bad definitions = 0
+    beam to boundary 1 = 0 A/m (0 particles)
+    beam to boundary 2 = 0.29079 A/m (16155 particles)
+    beam to boundary 3 = 0 A/m (0 particles)
+    beam to boundary 4 = 0 A/m (0 particles)
+    beam to boundary 5 = 0 A/m (0 particles)
+    beam to boundary 6 = 0 A/m (0 particles)
+    beam to boundary 7 = 0.60921 A/m (33845 particles)
+    beam to boundary 8 = 0 A/m (0 particles)
+    total steps = 735549
+    steps per particle (ave) = 14.711
+  time used = 2.42346 s (0.628597 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 16155
+  total current = 0.29079 A/m
+Iteration round 2
+  Epot error = 10.3435 V (max)
+  Space charge error = 0.00185569 C/m3 (max)
+  Emittance 0 error = 7.44992e-07 mm mrad (max)
+Solving problem
+  Using Gauss-Seidel solver (w = 1.66, imax = 100000, eps = 0.0001)
+  Limiting plasma calculation to U > -45 V
+      0                    0      716         9.992482e-05  
+  error estimate = 9.99248e-05
+  iterations = 716
+  time used = 0.032353 s (0.032477 s realtime)
+Calculating efield
+Defining a 2d beam
+  Total beam current 0.9 A/m
+Calculating particle trajectories
+  Using solid collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (50000 total):
+    flown = 50000
+    time limited = 0
+    step count limited = 0
+    bad definitions = 0
+    beam to boundary 1 = 0 A/m (0 particles)
+    beam to boundary 2 = 0.28836 A/m (16020 particles)
+    beam to boundary 3 = 0 A/m (0 particles)
+    beam to boundary 4 = 0 A/m (0 particles)
+    beam to boundary 5 = 0 A/m (0 particles)
+    beam to boundary 6 = 0 A/m (0 particles)
+    beam to boundary 7 = 0.61164 A/m (33980 particles)
+    beam to boundary 8 = 0 A/m (0 particles)
+    total steps = 725625
+    steps per particle (ave) = 14.5125
+  time used = 2.01485 s (0.523917 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 16020
+  total current = 0.28836 A/m
+Iteration round 3
+  Epot error = 4.19861 V (max)
+  Space charge error = 0.000455807 C/m3 (max)
+  Emittance 0 error = 1.92002e-07 mm mrad (max)
+Solving problem
+  Using Gauss-Seidel solver (w = 1.66, imax = 100000, eps = 0.0001)
+  Limiting plasma calculation to U > -45 V
+      0                    0      636         9.967874e-05  
+  error estimate = 9.96787e-05
+  iterations = 636
+  time used = 0.028814 s (0.028948 s realtime)
+Calculating efield
+Defining a 2d beam
+  Total beam current 0.9 A/m
+Calculating particle trajectories
+  Using solid collision model
+  Using non-relativistic iterator
+  Finalizing space charge density map (PIC method)
+  Particle histories (50000 total):
+    flown = 50000
+    time limited = 0
+    step count limited = 0
+    bad definitions = 0
+    beam to boundary 1 = 0 A/m (0 particles)
+    beam to boundary 2 = 0.287316 A/m (15962 particles)
+    beam to boundary 3 = 0 A/m (0 particles)
+    beam to boundary 4 = 0 A/m (0 particles)
+    beam to boundary 5 = 0 A/m (0 particles)
+    beam to boundary 6 = 0 A/m (0 particles)
+    beam to boundary 7 = 0.612684 A/m (34038 particles)
+    beam to boundary 8 = 0 A/m (0 particles)
+    total steps = 726235
+    steps per particle (ave) = 14.5247
+  time used = 2.34425 s (0.610011 s realtime)
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 15962
+  total current = 0.287316 A/m
+Iteration round 4
+  Epot error = 1.53786 V (max)
+  Space charge error = 0.000111409 C/m3 (max)
+  Emittance 0 error = 5.34874e-08 mm mrad (max)
+Plotting to PNG-file "plasma2d_emit1.png"
+Making trajectory diagnostics at x = 1e-06
+  number of trajectories = 50000
+  total current = 0.9 A/m
+Plotting to PNG-file "plasma2d_emit2.png"
+Making trajectory diagnostics at x = 0.002
+  number of trajectories = 15962
+  total current = 0.287316 A/m
+Plotting to PNG-file "plasma2d_emit3.png"
+Making trajectory diagnostics at x = 0.006
+  number of trajectories = 15962
+  total current = 0.287316 A/m
+Plotting to PNG-file "plasma2d_emit4.png"
+Making trajectory diagnostics at x = 0.0119
+  number of trajectories = 15962
+  total current = 0.287316 A/m
+Plotting to PNG-file "plasma2d.png"
+Ending simulation
+  time used = 12.5834 s (4.25683 s realtime)
