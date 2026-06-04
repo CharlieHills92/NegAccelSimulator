@@ -11,13 +11,12 @@ main.cpp_OLD
 lib/*.a
 include/ibsimu-1.0.6dev_ori/
 
-# Vendored IBSimu build artifacts
-libibsimu_patched/**/.deps/
-libibsimu_patched/**/.libs/
-libibsimu_patched/**/*.la
-libibsimu_patched/**/*.lo
-libibsimu_patched/config.log
-libibsimu_patched/config.status
+# Bootstrapped IBSimu tree
+libibsimu_patched/
+
+# Patch apply leftovers
+*.orig
+*.rej
 
 # Large magnetic field data files (track with Git LFS or download separately)
 Bfields/

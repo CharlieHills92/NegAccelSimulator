@@ -11,6 +11,9 @@ MKDIR_P = mkdir -p
 BUILD_DIR = build
 IBSIMU_ROOT = $(CURDIR)
 IBSIMU_DIR = $(IBSIMU_ROOT)/libibsimu_patched
+IBSIMU_PATCH_DIR = $(IBSIMU_ROOT)/patches/ibsimu
+IBSIMU_BOOTSTRAP_SCRIPT = $(IBSIMU_ROOT)/bootstrap_ibsimu.sh
+IBSIMU_BOOTSTRAP_STAMP = $(IBSIMU_DIR)/.cpi-bootstrap-stamp
 IBSIMU_SRC_DIR = $(IBSIMU_DIR)/src
 IBSIMU_LIB_DIR = $(IBSIMU_SRC_DIR)/.libs
 IBSIMU_SHARED = $(IBSIMU_LIB_DIR)/libibsimu-1.0.6dev.so
@@ -56,8 +59,13 @@ DEPS = $(OBJECTS:.o=.d)
 # Default target
 all: $(IBSIMU_SHARED) runtest_new_v2
 
+# Bootstrap patched IBSimu from the pinned upstream source when missing.
+$(IBSIMU_BOOTSTRAP_STAMP): $(IBSIMU_BOOTSTRAP_SCRIPT) $(wildcard $(IBSIMU_PATCH_DIR)/*.patch)
+	@echo "Bootstrapping libibsimu_patched..."
+	bash $(IBSIMU_BOOTSTRAP_SCRIPT)
+
 # Build patched IBSimu before linking the application
-$(IBSIMU_SHARED):
+$(IBSIMU_SHARED): $(IBSIMU_BOOTSTRAP_STAMP)
 	@echo "Building libibsimu_patched..."
 	$(MAKE) -C $(IBSIMU_DIR) -j4
 
@@ -68,7 +76,7 @@ runtest_new_v2: $(IBSIMU_SHARED) $(OBJECTS) | $(BUILD_DIR)
 	@echo "Successfully built runtest_new_v2"
 
 # Object file compilation
-$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR) $(IBSIMU_BOOTSTRAP_STAMP)
 	@echo "Compiling $<..."
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -87,6 +95,9 @@ clean:
 distclean: clean
 	$(RM) runtest_new_v2
 	$(RM) -r $(BUILD_DIR)
+	$(RM) -r $(IBSIMU_DIR)
+
+bootstrap-ibsimu: $(IBSIMU_BOOTSTRAP_STAMP)
 
 # Test targets
 test: runtest_new_v2
@@ -106,15 +117,16 @@ test_mtf_grid_power: $(TEST_OBJECTS) test_mtf_grid_power.o
 test_load_and_trace: $(TEST_OBJECTS) test_load_and_trace.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-.PHONY: all clean distclean test test_grid_power test_mtf_grid_power test_load_and_trace
+.PHONY: all clean distclean bootstrap-ibsimu test test_grid_power test_mtf_grid_power test_load_and_trace
 
 # Help target
 help:
 	@echo "Available targets:"
 	@echo "  all         - Build runtest_new_v2 executable (default)"
+	@echo "  bootstrap-ibsimu - Clone and patch the pinned upstream IBSimu tree"
 	@echo "  runtest_new_v2 - Build the simulation executable using main.cpp"
 	@echo "  clean       - Remove object and dependency files"
-	@echo "  distclean   - Remove all generated files"
+	@echo "  distclean   - Remove all generated files, including libibsimu_patched"
 	@echo "  test        - Build and run basic test"
 	@echo "  test_grid_power - Build and run grid power analysis test"
 	@echo "  test_load_and_trace - Build and run field loading and particle tracing test"

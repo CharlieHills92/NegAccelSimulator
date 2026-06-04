@@ -1,31 +1,0 @@
-Ion Beam Simulator 1.0.6dev (e8500a2, Mon Jul 25 15:47:35 2022 +0300)
-Constructing geometry
-  origo     =            0            0            0
-  size      =           33           81            1
-  max       =        0.032         0.08            0
-  h         = 0.001
-  nodecount = 2673
-  Done
-Building mesh
-  Done. Built mesh with:
-  1426 pure vacuum nodes
-  66 near solid nodes
-  92 neumann nodes
-  1089 dirichlet nodes
-  726 solid 7 nodes
-  363 solid 8 nodes
-  time used = 0.000901 s (0.000479 s realtime)
-Solving problem
-  Using Multigrid solver (levels = 4, npre = 5, npost = 5, mgcycmax = 100, mgeps = 0.0001, gamma = 1, w = 1.7, coarse_eps = 1e-10, imax = 10000)
-  Linear problem
-  Preparing multigrid geometries
-  Done
-  Preprocessing
-  Taking multigrid cycles
-      1, rough 67 8.61075e-11, fine 0.180674            2, rough 61 7.22474e-11, fine 0.034745            3, rough 58 9.19372e-11, fine 0.0094657            4, rough 54 9.95761e-11, fine 0.00293976            5, rough 51 9.29247e-11, fine 0.000972152            6, rough 50 9.75624e-11, fine 0.000331728            7, rough 46 7.95506e-11, fine 0.000114965            8, rough 42 9.70486e-11, fine 4.01356e-05        
-  Done
-  Convergence criterion reached
-  Postprocessing
-  time used = 0.004216 s (0.00376 s realtime)
-Ending simulation
-  time used = 0.008446 s (0.009397 s realtime)

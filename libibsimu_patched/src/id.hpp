@@ -1,1 +1,0 @@
-#define IBSIMU_GIT_ID "e8500a2, Mon Jul 25 15:47:35 2022 +0300"

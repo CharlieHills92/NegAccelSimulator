@@ -1,0 +1,1104 @@
+diff --git a/ibsimu-1.0.6dev.pc.in b/ibsimu-1.0.6dev.pc.in
+index 8d47604..a1a9731 100644
+--- a/ibsimu-1.0.6dev.pc.in
++++ b/ibsimu-1.0.6dev.pc.in
+@@ -1,7 +1,8 @@
+-prefix=@prefix@
+-exec_prefix=@exec_prefix@
+-libdir=@libdir@
+-includedir=@includedir@/ibsimu-1.0.6dev
++prefix=${pcfiledir}
++exec_prefix=${prefix}
++# CPI patch on 20260604: keep pkg-config resolved against the vendored patched tree.
++libdir=${exec_prefix}/src/.libs
++includedir=${prefix}/src
+ 
+ Name: libibsimu
+ Description: Ion Beam Simulation Package
+diff --git a/src/constants.hpp b/src/constants.hpp
+index b3a2a0c..511ae2d 100644
+--- a/src/constants.hpp
++++ b/src/constants.hpp
+@@ -49,7 +49,8 @@
+ #define EPSILON0 8.854187817e-12
+ 
+ // Atomic mass unit (kg)
+-#define MASS_U        1.66053873e-27
++#define MASS_U        1.660539040e-27 //NdH: updated the value at 2016-11-21 from http://physics.nist.gov/cgi-bin/cuu/Value?tukg which gives the 2014 CODATA recommended value.
++
+ // Electron mass (kg)
+ #define MASS_E        9.10938291e-31
+ // Proton mass (kg)
+@@ -63,5 +64,9 @@
+ // Speed of light squared (m^2/s^2)
+ #define SPEED_C2      89875517873681764.0
+ 
++// Boltzmann constant (J/K)
++#define KBOLTZ        1.38064852e-23
+ 
+ #endif
++
++
+diff --git a/src/func_solid.cpp b/src/func_solid.cpp
+index 5b13aa8..1064b45 100644
+--- a/src/func_solid.cpp
++++ b/src/func_solid.cpp
+@@ -1,81 +1,36 @@
+-/*! \file func_solid.cpp
+- *  \brief %Solid definition based on C functions.
+- */
+-
+-/* Copyright (c) 2005-2009,2011-2012 Taneli Kalvas. All rights reserved.
+- *
+- * You can redistribute this software and/or modify it under the terms
+- * of the GNU General Public License as published by the Free Software
+- * Foundation; either version 2 of the License, or (at your option)
+- * any later version.
+- * 
+- * This library is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+- * General Public License for more details.
+- * 
+- * You should have received a copy of the GNU General Public License
+- * along with this library (file "COPYING" included in the package);
+- * if not, write to the Free Software Foundation, Inc., 51 Franklin
+- * Street, Fifth Floor, Boston, MA 02110-1301 USA
+- * 
+- * If you have questions about your rights to use or distribute this
+- * software, please contact Berkeley Lab's Technology Transfer
+- * Department at TTD@lbl.gov. Other questions, comments and bug
+- * reports should be sent directly to the author via email at
+- * taneli.kalvas@jyu.fi.
+- * 
+- * NOTICE. This software was developed under partial funding from the
+- * U.S.  Department of Energy.  As such, the U.S. Government has been
+- * granted for itself and others acting on its behalf a paid-up,
+- * nonexclusive, irrevocable, worldwide license in the Software to
+- * reproduce, prepare derivative works, and perform publicly and
+- * display publicly.  Beginning five (5) years after the date
+- * permission to assert copyright is obtained from the U.S. Department
+- * of Energy, and subject to any subsequent five (5) year renewals,
+- * the U.S. Government is granted for itself and others acting on its
+- * behalf a paid-up, nonexclusive, irrevocable, worldwide license in
+- * the Software to reproduce, prepare derivative works, distribute
+- * copies to the public, perform publicly and display publicly, and to
+- * permit others to do so.
+- */
+-
+ #include <iostream>
+ #include "func_solid.hpp"
+ #include "ibsimu.hpp"
+ #include "error.hpp"
+ 
++// Modified by C. Poggi on 10/02/2025 to include use of Lambda functions, for creating classes of geometries
+ 
+-bool FuncSolid::inside( const Vec3D &x ) const
++bool FuncSolid::inside(const Vec3D &x) const
+ {
+-    if( !_func )
+-	throw( Error( ERROR_LOCATION, "solid function not defined" ) );
++    if (!_func)
++        throw Error(ERROR_LOCATION, "solid function not defined");
+ 
+     // Transform 3D -> 3D
+-    Vec3D y = _T.transform_point( x );
+-    return( _func( y[0], y[1], y[2] ) );
++    Vec3D y = _T.transform_point(x);
++    return _func(y[0], y[1], y[2]);
+ }
+ 
+-
+-FuncSolid::FuncSolid( std::istream &is )
+-    : _func(NULL)
++FuncSolid::FuncSolid(std::istream &is)
++    : _func(nullptr)  // Initialize with nullptr
+ {
+-    ibsimu.message( MSG_WARNING, 1 ) << "Warning: loading of FuncSolid not implemented\n";
++    ibsimu.message(MSG_WARNING, 1) << "Warning: loading of FuncSolid not implemented\n";
+     ibsimu.flush();
+ }
+ 
+-
+-void FuncSolid::debug_print( std::ostream &os ) const
++void FuncSolid::debug_print(std::ostream &os) const
+ {
+     os << "**FuncSolid\n";
+-    os << "func = " << _func << "\n";
++    os << "func = " << (_func ? "Defined" : "NULL") << "\n";
+ }
+ 
+-
+-void FuncSolid::save( std::ostream &os ) const
++void FuncSolid::save(std::ostream &os) const
+ {
+-    write_int32( os, FILEID_FUNCSOLID );
+-    ibsimu.message( MSG_WARNING, 1 ) << "Warning: saving of FuncSolid not implemented\n";
++    write_int32(os, FILEID_FUNCSOLID);
++    ibsimu.message(MSG_WARNING, 1) << "Warning: saving of FuncSolid not implemented\n";
+     ibsimu.flush();
+ }
+-
+diff --git a/src/func_solid.hpp b/src/func_solid.hpp
+index 930c547..3c2d17a 100644
+--- a/src/func_solid.hpp
++++ b/src/func_solid.hpp
+@@ -1,52 +1,11 @@
+-/*! \file func_solid.hpp
+- *  \brief %Solid definition based on C functions.
+- */
+-
+-/* Copyright (c) 2005-2011 Taneli Kalvas. All rights reserved.
+- *
+- * You can redistribute this software and/or modify it under the terms
+- * of the GNU General Public License as published by the Free Software
+- * Foundation; either version 2 of the License, or (at your option)
+- * any later version.
+- * 
+- * This library is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
+- * General Public License for more details.
+- * 
+- * You should have received a copy of the GNU General Public License
+- * along with this library (file "COPYING" included in the package);
+- * if not, write to the Free Software Foundation, Inc., 51 Franklin
+- * Street, Fifth Floor, Boston, MA 02110-1301 USA
+- * 
+- * If you have questions about your rights to use or distribute this
+- * software, please contact Berkeley Lab's Technology Transfer
+- * Department at TTD@lbl.gov. Other questions, comments and bug
+- * reports should be sent directly to the author via email at
+- * taneli.kalvas@jyu.fi.
+- * 
+- * NOTICE. This software was developed under partial funding from the
+- * U.S.  Department of Energy.  As such, the U.S. Government has been
+- * granted for itself and others acting on its behalf a paid-up,
+- * nonexclusive, irrevocable, worldwide license in the Software to
+- * reproduce, prepare derivative works, and perform publicly and
+- * display publicly.  Beginning five (5) years after the date
+- * permission to assert copyright is obtained from the U.S. Department
+- * of Energy, and subject to any subsequent five (5) year renewals,
+- * the U.S. Government is granted for itself and others acting on its
+- * behalf a paid-up, nonexclusive, irrevocable, worldwide license in
+- * the Software to reproduce, prepare derivative works, distribute
+- * copies to the public, perform publicly and display publicly, and to
+- * permit others to do so.
+- */
+-
+ #ifndef FUNC_SOLID_HPP
+ #define FUNC_SOLID_HPP 1
+ 
+-
+ #include <iostream>
++#include <functional>  // Include for std::function
+ #include "solid.hpp"
+ 
++// Modified by C. Poggi on 10/02/2025 to include use of Lambda functions, for creating classes of geometries
+ 
+ /*! \brief Function solid class.
+  *
+@@ -58,17 +17,21 @@
+  */
+ class FuncSolid : public Solid {
+ 
+-    bool (*_func)(double,double,double);
++    std::function<bool(double, double, double)> _func;  // Use std::function instead of function pointer
+ 
+ public:
+ 
+     /*! \brief Constructor.
+      */
+-    FuncSolid( bool (*func)(double,double,double) ) : _func(func) {}
++    FuncSolid(std::function<bool(double, double, double)> func) : _func(func) {}
++
++    /*! \brief Constructor for function pointers (backward compatibility).
++     */
++    FuncSolid(bool (*func)(double, double, double)) : _func(func) {}
+ 
+     /*! \brief Constructor for loading solid data from stream \a is.
+      */
+-    FuncSolid( std::istream &is );
++    FuncSolid(std::istream &is);
+ 
+     /*! \brief Destructor.
+      */
+@@ -76,16 +39,15 @@ public:
+ 
+     /*! \brief Return if point x is inside funcsolid.
+      */
+-    bool inside( const Vec3D &x ) const;
++    bool inside(const Vec3D &x) const;
+ 
+     /*! \brief Print debugging information to \a os.
+      */
+-    void debug_print( std::ostream &os ) const;
++    void debug_print(std::ostream &os) const;
+ 
+-    /*! \brief Saves solid data to stream \a os
++    /*! \brief Saves solid data to stream \a os.
+      */
+-    void save( std::ostream &os ) const;
++    void save(std::ostream &os) const;
+ };
+ 
+-
+ #endif
+diff --git a/src/particledatabase.cpp b/src/particledatabase.cpp
+index 15cd2f7..df5aefd 100644
+--- a/src/particledatabase.cpp
++++ b/src/particledatabase.cpp
+@@ -703,6 +703,11 @@ void ParticleDataBase3D::add_particle( double IQ, double q, double m, const Part
+     _imp->add_particle( IQ, q, m, x );
+ }
+ 
++void ParticleDataBase3D::add_particle( double IQ, double q, double m, int gen, const ParticleP3D &x )
++{
++    _imp->add_particle( IQ, q, m, gen, x );
++}
++
+ 
+ void ParticleDataBase3D::add_particle( const Particle3D &p )
+ {
+diff --git a/src/particledatabase.hpp b/src/particledatabase.hpp
+index dbe5725..6a7f705 100644
+--- a/src/particledatabase.hpp
++++ b/src/particledatabase.hpp
+@@ -1064,6 +1064,7 @@ public:
+      *  particle.
+      */
+     void add_particle( double IQ, double q, double m, const ParticleP3D &x );
++    void add_particle( double IQ, double q, double m, int gen, const ParticleP3D &x );
+ 
+     /*! \brief Add one particle.
+      *
+diff --git a/src/particledatabaseimp.cpp b/src/particledatabaseimp.cpp
+index 08c722f..e1c4f64 100644
+--- a/src/particledatabaseimp.cpp
++++ b/src/particledatabaseimp.cpp
+@@ -2,7 +2,7 @@
+  *  \brief Particle database implementation
+  */
+ 
+-/* Copyright (c) 2005-2015,2021 Taneli Kalvas. All rights reserved.
++/* Copyright (c) 2005-2014 Taneli Kalvas. All rights reserved.
+  *
+  * You can redistribute this software and/or modify it under the terms
+  * of the GNU General Public License as published by the Free Software
+@@ -2057,6 +2057,272 @@ void ParticleDataBase3DImp::add_3d_gaussian_beam_with_emittance( uint32_t N, dou
+ }
+ 
+ 
++void ParticleDataBase3DImp::add_3d_plane_cosine_beam_with_partps( uint32_t N, double I, double m, double T, 
++                          Vec3D c, Vec3D dir1, Vec3D dir2, double size1, double size2 )
++{   //2016-11-21 This function should generate particles leaving a rectangular plane with a cosine distribution to facilitate neutral particle modeling.
++    m *= MASS_U;           //The mass is converted from atomic mass units to kg.
++    T *= KBOLTZ;           //The temperature is converted from K to J.
++    double q = CHARGE_E;   //The particles carry a positive charge of 1 e.
++    double IQ = I/N;       //Each particle carries a current IQ.
++    double JQ = IQ/(4.0*size1*size2); // This is the current density per particle in A/m2. It is only used for the mysterious rhosum variable.
++    // double dv = sqrt(T/m); //Each velocity component has a Gaussian distribution in a Maxwell-Boltzmann distribution.
++    double dv = T/m;       //The square is needed so this is more convenient.
++
++    ibsimu.message( 1 ) << "Defining a 3d rectangular beam with cosine distribution\n";
++
++    _particles.reserve( _particles.size()+N );
++
++    Random *rng; // Random number generator for two uniform random positions, and three Gaussian velocity components (to get a Maxwell-Boltzmann distribution for the total velocity).
++    if( ibsimu.get_rng_type() == RNG_SOBOL )  //In addition, two more numbers are needed for the cosine distribution and the angles.
++        rng = new QRandom( 7 );
++    else
++        rng = new MTRandom( 7 );
++    rng->set_transformation( 0, Uniform_Transformation() ); //Ok, the first two components are default, this is just for clarity.
++    rng->set_transformation( 1, Uniform_Transformation() );
++    rng->set_transformation( 2, Gaussian_Transformation() );
++    rng->set_transformation( 3, Gaussian_Transformation() );
++    rng->set_transformation( 4, Gaussian_Transformation() );
++    rng->set_transformation( 5, Uniform_Transformation() ); //Ok, the last two components are default, this is just for clarity.
++    rng->set_transformation( 6, Uniform_Transformation() );
++    double qx[7]; //Will hold the random numbers
++    double px[6]; //Will hold the location and direction vectors in the frame of the particle
++    double v;     //Will hold the total velocity
++
++    rng->get( qx ); //The first numbers seem to be all zero from the rng, I use this useless line to initialize the rng. (NdH 2017-04-13)
++
++    Vec3D dir3 = cross( dir1, dir2 ); // Calculate and check basis vectors
++    dir2 = cross( dir1, dir3 );
++    dir1.normalize();
++    dir2.normalize();
++    dir3.normalize();
++    if( comp_isnan( dir1[0] ) || comp_isnan( dir2[0] ) || comp_isnan( dir3[0] ) )
++        throw( Error( ERROR_LOCATION, "invalid direction vectors" ) );
++
++    ParticleP3D x; // Prepare particle (double t, double x, double vx, double y, double vy, double z, double vz)
++    x[0] = 0.0;
++
++    for( uint32_t a = 0; a < N; a++ ) //Loop over the particles to generate.
++    {
++        rng->get( qx );
++        v = sqrt(qx[2]*qx[2]*dv + qx[3]*qx[3]*dv + qx[4]*qx[4]*dv); //Make Maxwell-Boltzmann distribution by sampling individual velocity components.
++
++        px[0] = size1*(2.0*qx[0]-1.0); // Calculate in natural (dir1,dir2,dir3) coordinates
++        px[1] = size2*(2.0*qx[1]-1.0);
++        px[2] = 0.0;
++
++        double sintheta = sqrt( qx[5] ); //These lines generate a cosine distribution.
++        double costheta = sqrt( 1.0 - qx[5] );
++        double psiangle = qx[6]*2.0*M_PI;         
++
++        px[3] = v*sintheta*cos(psiangle); //Direction 3 is the direction normal to the plane!
++        px[4] = v*sintheta*sin(psiangle);
++        px[5] = v*costheta;               
++
++        x[1] = dir1[0]*px[0] + dir2[0]*px[1] + dir3[0]*px[2] + c[0]; // Map to world coordinates
++        x[2] = dir1[0]*px[3] + dir2[0]*px[4] + dir3[0]*px[5];
++        x[3] = dir1[1]*px[0] + dir2[1]*px[1] + dir3[1]*px[2] + c[1];
++        x[4] = dir1[1]*px[3] + dir2[1]*px[4] + dir3[1]*px[5];
++        x[5] = dir1[2]*px[0] + dir2[2]*px[1] + dir3[2]*px[2] + c[2];
++        x[6] = dir1[2]*px[3] + dir2[2]*px[4] + dir3[2]*px[5];
++
++        add_particle( Particle3D( IQ, q, m, x ) );
++
++        _rhosum += JQ/v;  //NOTE -> check later if this is correct!
++
++    }
++
++    delete( rng );
++
++    ibsimu.message( 1 ) << "Defined a 3d rectangular beam with cosine distribution\n";
++}
++
++void ParticleDataBase3DImp::add_3d_cylindrical_cosine_beam_with_partps( uint32_t N, double I, double m, double T, 
++                          Vec3D c, Vec3D dir1, Vec3D dir2, double r )
++{   //2017-02-06 This function should generate particles leaving a circular plane with a cosine distribution to facilitate neutral particle modeling.
++    m *= MASS_U;           //The mass is converted from atomic mass units to kg.
++    T *= KBOLTZ;           //The temperature is converted from K to J.
++    double q = CHARGE_E;   //The particles carry a positive charge of 1 e.
++    double IQ = I/N;       //Each particle carries a current IQ.
++    double JQ = IQ/(M_PI*r*r); // This is the current density per particle in A/m2. It is only used for the mysterious rhosum variable.
++    // double dv = sqrt(T/m); //Each velocity component has a Gaussian distribution in a Maxwell-Boltzmann distribution.
++    double dv = T/m;       //The square is needed so this is more convenient.
++
++    ibsimu.message( 1 ) << "Defining a 3d cylindrical beam with cosine distribution\n";
++
++    _particles.reserve( _particles.size()+N );
++
++    Random *rng; // Random number generator for two uniform random positions, and three Gaussian velocity components (to get a Maxwell-Boltzmann distribution for the total velocity).
++    if( ibsimu.get_rng_type() == RNG_SOBOL )  //In addition, two more numbers are needed for the cosine distribution and the angles.
++        rng = new QRandom( 7 );
++    else
++        rng = new MTRandom( 7 );
++    rng->set_transformation( 0, Uniform_Transformation() ); //Ok, the first two components are default, this is just for clarity.
++    rng->set_transformation( 1, Uniform_Transformation() );
++    rng->set_transformation( 2, Gaussian_Transformation() );
++    rng->set_transformation( 3, Gaussian_Transformation() );
++    rng->set_transformation( 4, Gaussian_Transformation() );
++    rng->set_transformation( 5, Uniform_Transformation() ); //Ok, the last two components are default, this is just for clarity.
++    rng->set_transformation( 6, Uniform_Transformation() );
++    double qx[7]; //Will hold the random numbers
++    double px[6]; //Will hold the location and direction vectors in the frame of the particle
++    double v;     //Will hold the total velocity
++
++    Vec3D dir3 = cross( dir1, dir2 ); // Calculate and check basis vectors
++    dir2 = cross( dir1, dir3 );
++    dir1.normalize();
++    dir2.normalize();
++    dir3.normalize();
++    if( comp_isnan( dir1[0] ) || comp_isnan( dir2[0] ) || comp_isnan( dir3[0] ) )
++        throw( Error( ERROR_LOCATION, "invalid direction vectors" ) );
++
++    ParticleP3D x; // Prepare particle (double t, double x, double vx, double y, double vy, double z, double vz)
++    x[0] = 0.0;
++
++    double Isum = 0.0;
++    uint32_t a = 0;
++    rng->get( qx ); //To initialize the random number generator, it is used once before, seems to be needed. 
++    while( a < N ) //A while loop is used here because the particles that are outside the circle are skipped, and then a should not be increased.
++    {
++        rng->get( qx );
++
++        px[0] = -r + 2.0*r*qx[0]; // Position in natural (dir1,dir2,dir3) coordinates
++        px[1] = -r + 2.0*r*qx[1];
++        px[2] = 0.0;
++
++        if( px[0]*px[0] + px[1]*px[1] > r*r ) // Reject points outside radius r circle
++            continue;
++
++        v = sqrt(qx[2]*qx[2]*dv + qx[3]*qx[3]*dv + qx[4]*qx[4]*dv); //Make Maxwell-Boltzmann distribution by sampling individual velocity components.
++        double sintheta = sqrt( qx[5] ); //These lines generate a cosine distribution.
++        double costheta = sqrt( 1.0 - qx[5] );
++        double psiangle = qx[6]*2.0*M_PI;         
++
++        px[3] = v*sintheta*cos(psiangle); //Direction 3 is the direction normal to the plane!
++        px[4] = v*sintheta*sin(psiangle);
++        px[5] = v*costheta;       
++
++        x[1] = dir1[0]*px[0] + dir2[0]*px[1] + dir3[0]*px[2] + c[0]; // Map to world coordinates
++        x[2] = dir1[0]*px[3] + dir2[0]*px[4] + dir3[0]*px[5];
++        x[3] = dir1[1]*px[0] + dir2[1]*px[1] + dir3[1]*px[2] + c[1];
++        x[4] = dir1[1]*px[3] + dir2[1]*px[4] + dir3[1]*px[5];
++        x[5] = dir1[2]*px[0] + dir2[2]*px[1] + dir3[2]*px[2] + c[2];
++        x[6] = dir1[2]*px[3] + dir2[2]*px[4] + dir3[2]*px[5];
++
++        add_particle( Particle3D( IQ, q, m, x ) );
++
++        _rhosum += JQ/v;  //NOTE -> check later if this is correct!
++        Isum += IQ;
++        a++;
++    }
++
++    delete( rng );
++
++    ibsimu.message( 1 ) << "Defined a 3d cylindrical beam with cosine distribution\n";
++    ibsimu.message( 1 ) << "  Total beam current " << Isum << " A\n";
++
++}
++
++void ParticleDataBase3DImp::add_3d_spherical_beam_with_energy( uint32_t N, double I, double q, double m, 
++             double E, double Tp, double Tt, Vec3D cent, Vec3D pole, double angl)
++{   //2018-06-21 This function should generate particles leaving a spherical surface with certain energy. Meaning of the input parameters:
++    //uint32_t      Number of particles
++    //double I      Total current carried by the particles (A)
++    //double q      Charge of each particle (elementary charges)
++    //double m      Mass of each particle (atomic mass units)
++    //double E      Starting energy (eV)
++    //double Tp     Temperature in parallel direction (eV)
++    //double Tt     Temperature in transverse direction (eV)
++    //Vec3D cent    Location of the center of the spere
++    //Vec3D pole    Location of the middle of the emitting spherical cap
++    //double angl   Polar angle between the rays from the center of the sphere to the apex of the cap (the pole) and the edge of the disk forming the base of the cap (degrees)
++
++    // Convert input parameters
++    m *= MASS_U;            //The mass is converted from atomic mass units to kg.
++    q *= CHARGE_E;          //The particles carry charges that are a multiple of e.
++    E *= CHARGE_E;
++    Tp *= CHARGE_E;
++    Tt *= CHARGE_E;
++    angl *= (M_PI/180.0);
++    double v = energy_to_velocity(E,m);
++    double dvp = sqrt(Tp/m);
++    double dvt = sqrt(Tt/m);
++    Vec3D ndrx = pole - cent; //A vector pointing from the center to the pole
++    double r = ndrx.norm2(); //Radius of sphere
++    double A = 2.0*M_PI*r*r*(1.0 - cos(angl)); //Area of cap.
++    double IQ = I/N;       //Each particle carries a current IQ.
++    // double JQ = IQ/A;      //This is the current density per particle in A/m2. It is only used for the mysterious rhosum variable.
++
++    ibsimu.message( 1 ) << "Defining a spherical beam\n";
++    _particles.reserve( _particles.size()+N );
++    _rhosum += (I/A)/v; //This is just copied from earlier routines, there it is J/V. J is the current density, or (I/A).
++
++    ndrx.normalize(); //These vectors are the normal vectors of the sphere. The y and z direction are arbitrary, but this should be fine for a sphere. 
++    Vec3D ndry = ndrx.arb_perpendicular(); //The x vector points from the center to the pole. 
++    Vec3D ndrz = cross(ndry, ndrx);
++
++    // Random number generator for two angles and three velocities (gaussian)
++    Random *rng;
++    if( ibsimu.get_rng_type() == RNG_SOBOL )
++    rng = new QRandom( 5 );
++    else
++    rng = new MTRandom( 5 );
++    rng->set_transformation( 2, Gaussian_Transformation() );
++    rng->set_transformation( 3, Gaussian_Transformation() );
++    rng->set_transformation( 4, Gaussian_Transformation() );
++    double qx[5];
++    double vx[3];
++
++    ParticleP3D x; // Prepare particle (double t, double x, double vx, double y, double vy, double z, double vz)
++    x[0] = 0.0;
++
++    double Isum = 0.0;
++    uint32_t a = 0;
++    rng->get( qx ); //To initialize the random number generator, it is used once before, seems to be needed. 
++    while( a < N ) //Loop over the particles that are requested.
++    {   //See https://math.stackexchange.com/questions/1585975/how-to-generate-random-points-on-a-sphere for an excellent explanation.
++        rng->get( qx ); //The first two uniformly distributed numbers are used for the angle (location). First they are converted to latitude and longitude (on the full sphere)
++        double lat = acos(2.0*qx[0] - 1.0) - 0.5*M_PI; //This angle is now between -pi/2 and +pi/2
++        double lon = 2.0*M_PI*qx[1]; //This angle is between 0 and 2 pi.
++
++        Vec3D plo(r*cos(lat)*cos(lon), r*cos(lat)*sin(lon), r*sin(lat)); //Position of point on sphere with radius r. 
++        if( acos(plo[0]/r) > angl ) // Reject points outside spherical cap. Sounds inefficient, but compressing the whole sphere on the cap doesn't give a homogeneous distribution. 
++        {
++            continue; //This makes use of the fact that the points are generated in the x direction, the dot product of plo*(1,0,0) is just plo[0]. The length is always r.
++        }
++        else
++        {
++            x[1] = ndrx[0]*plo[0] + ndry[0]*plo[1] + ndrz[0]*plo[2] + cent[0]; //Transforms the basis directions. https://en.wikipedia.org/wiki/Transformation_matrix
++            x[3] = ndrx[1]*plo[0] + ndry[1]*plo[1] + ndrz[1]*plo[2] + cent[1]; //Translate so that the center is at center. Now the position is made. Time to make the basis vectors of the random point.
++            x[5] = ndrx[2]*plo[0] + ndry[2]*plo[1] + ndrz[2]*plo[2] + cent[2]; //The positions are now properly taken care of.
++
++            Vec3D ntpx(cent[0] - x[1], cent[1] - x[3], cent[2] - x[5]); //Vector pointing from transformed position to the center.
++            ntpx.normalize();
++            Vec3D ntpy = ntpx.arb_perpendicular();
++            Vec3D ntpz = cross(ntpy, ntpx);
++
++            double pveld = dvp*qx[2]; //Velocities in natural (nx,ny,nz) coordinates. This is copied from other routines in the ParticleDataBase3DImp class. Note, nx is assumed to be the beam direction!
++            vx[0] = sqrt( 2.0*E/m + pveld*pveld );
++            vx[1] = dvt*qx[3];
++            vx[2] = dvt*qx[4];
++
++            x[2] = ntpx[0]*vx[0] + ntpy[0]*vx[1] + ntpz[0]*vx[2]; //Map velocity to world coordinates
++            x[4] = ntpx[1]*vx[0] + ntpy[1]*vx[1] + ntpz[1]*vx[2];
++            x[6] = ntpx[2]*vx[0] + ntpy[2]*vx[1] + ntpz[2]*vx[2];
++
++            add_particle( Particle3D( IQ, q, m, x ) );
++            Isum += IQ;
++            a++;
++        }
++    }
++
++    delete( rng );
++
++    ibsimu.message( 1 ) << "Defined a 3d spherical beam with energy\n";
++    ibsimu.message( 1 ) << "  Total beam current " << Isum << " A\n";
++
++}
++
++
+ void ParticleDataBase3DImp::trajectories_at_free_plane( TrajectoryDiagnosticData &tdata, 
+ 							Vec3D c, Vec3D o, Vec3D p,
+ 							const std::vector<trajectory_diagnostic_e> &diagnostics ) const
+@@ -2103,7 +2369,6 @@ void ParticleDataBase3DImp::trajectories_at_free_plane( TrajectoryDiagnosticData
+     }
+ 
+     // Scan through particle trajectory points
+-    uint32_t pcount = 0;
+     double Isum = 0.0;
+     for( size_t a = 0; a < _particles.size(); a++ ) {
+ 	size_t N = _particles[a]->traj_size();
+@@ -2129,7 +2394,6 @@ void ParticleDataBase3DImp::trajectories_at_free_plane( TrajectoryDiagnosticData
+ 	    
+ 	    if( K[0] >= 0.0 && K[0] < 1.0 ) {
+ 		// Crossing found between x1 and x2, accumulate total current
+-		pcount++;
+ 		Isum += _particles[a]->IQ();
+ 
+ 		// Position and velocity in xyz coordinates
+@@ -2232,7 +2496,7 @@ void ParticleDataBase3DImp::trajectories_at_free_plane( TrajectoryDiagnosticData
+ 	}
+     }
+ 
+-    ibsimu.message( 1 ) << "  number of trajectories = " << pcount << "\n";
++    ibsimu.message( 1 ) << "  number of trajectories = " << tdata.traj_size() << "\n";
+     ibsimu.message( 1 ) << "  total current = " << Isum << " A\n";
+ }
+ 
+diff --git a/src/particledatabaseimp.hpp b/src/particledatabaseimp.hpp
+index 5576f1f..a0216d4 100644
+--- a/src/particledatabaseimp.hpp
++++ b/src/particledatabaseimp.hpp
+@@ -2,7 +2,7 @@
+  *  \brief Particle database implementation
+  */
+ 
+-/* Copyright (c) 2005-2013,2015,2022 Taneli Kalvas. All rights reserved.
++/* Copyright (c) 2005-2013,2015 Taneli Kalvas. All rights reserved.
+  *
+  * You can redistribute this software and/or modify it under the terms
+  * of the GNU General Public License as published by the Free Software
+@@ -50,7 +50,6 @@
+ #include "file.hpp"
+ #include "particles.hpp"
+ #include "particleiterator.hpp"
+-#include "particlestepper.hpp"
+ #include "trajectorydiagnostics.hpp"
+ 
+ 
+@@ -628,7 +627,7 @@ public:
+ 	_scheduler.lock_mutex();
+ 	try {
+ 	    _particles.push_back( new Particle<PP>( pp ) );
+-	} catch( const std::bad_alloc & ) {
++	} catch( std::bad_alloc ) {
+ 	    throw( ErrorNoMem( ERROR_LOCATION, "Out of memory adding particle" ) );
+ 	}
+ 	_scheduler.unlock_mutex();
+@@ -638,6 +637,10 @@ public:
+ 	add_particle( Particle<PP>( IQ, CHARGE_E*q, MASS_U*m, x ) );
+     }
+ 
++    void add_particle( double IQ, double q, double m, int gen, const PP &x ) {	
++	add_particle( Particle<PP>( IQ, CHARGE_E*q, MASS_U*m, gen, x ) );
++    }
++
+     virtual void iterate_trajectories( MeshScalarField &scharge, const VectorField &efield, 
+ 				       const VectorField &bfield ) {
+ 
+@@ -664,8 +667,6 @@ public:
+ 	// Check geometry mode
+ 	if( _geom.geom_mode() != PP::geom_mode() )
+ 	    throw( Error( ERROR_LOCATION, "Differing geometry modes" ) );
+-	if( _geom != scharge )
+-	    throw( Error( ERROR_LOCATION, "Space charge mesh differs from geometry" ) );
+ 
+ 	// Clear space charge
+ 	scharge.clear();
+@@ -689,7 +690,8 @@ public:
+ 							   _intrp, _scharge_dep, _maxsteps, _maxt, 
+ 							   _save_points, _trajdiv, _mirror, &scharge, 
+ 							   &scharge_mutex, &efield, &bfield, &_geom ) );
+-	    iterators[a]->set_trajectory_handler_callback( _thand_cb );
++	    // iterators[a]->set_trajectory_handler_callback( _thand_cb );
++      iterators[a]->set_trajectory_handler_callback( _thand_cb, _pdb );
+ 	    iterators[a]->set_trajectory_end_callback( _tend_cb, _pdb );
+ 	    iterators[a]->set_trajectory_surface_collision_callback( _tsur_cb );
+ 	    iterators[a]->set_bfield_suppression_callback( _bsup_cb );
+@@ -758,32 +760,10 @@ public:
+ 	ibsimu.dec_indent();
+     }
+ 
+-
+     virtual void step_particles( MeshScalarField &scharge, const VectorField &efield, 
+ 				 const VectorField &bfield, double dt ) {
+ 
+-	Timer t;
+-	ibsimu.message( 1 ) << "Stepping particles\n";
+-	ibsimu.inc_indent();
+-
+-	// Clear space charge
+-	scharge.clear();
+-	
+-	// Go through particles
+-	ParticleStepper<PP> ps( dt, _trajdiv, _mirror, &scharge, 
+-			    &efield, &bfield, &_geom );
+-	for( uint32_t a = 0; a < _particles.size(); a++ ) {
+-	    if( (*_particles[a])[0] == 0 )
+-		ps.initialize( _particles[a], a );
+-	    ps.step( _particles[a], a );
+-	}
+-
+-	// Finalize charge
+-	scharge_finalize_step_pic( scharge );
+-
+-	t.stop();
+-	ibsimu.message( 1 ) << "time used = " << t << "\n";
+-	ibsimu.dec_indent();
++	throw( ErrorUnimplemented( ERROR_LOCATION ) );
+     }
+ 
+ 
+@@ -975,6 +955,15 @@ public:
+ 					      double a2, double b2, double e2,
+ 					      Vec3D c, Vec3D dir1, Vec3D dir2 );
+ 
++    void add_3d_plane_cosine_beam_with_partps( uint32_t N, double I, double m, double T, 
++                          Vec3D c, Vec3D dir1, Vec3D dir2, double size1, double size2 );
++
++    void add_3d_cylindrical_cosine_beam_with_partps( uint32_t N, double I, double m, double T, 
++                          Vec3D c, Vec3D dir1, Vec3D dir2, double r );
++
++    void add_3d_spherical_beam_with_energy( uint32_t N, double I, double q, double m, 
++             double E, double Tp, double Tt, Vec3D cent, Vec3D pole, double angl);
++
+     void trajectories_at_free_plane( TrajectoryDiagnosticData &tdata, 
+ 				     Vec3D c, Vec3D o, Vec3D p,
+ 				     const std::vector<trajectory_diagnostic_e> &diagnostics ) const;
+diff --git a/src/particlegraph.cpp b/src/particlegraph.cpp
+index 4bfabee..b7429c5 100644
+--- a/src/particlegraph.cpp
++++ b/src/particlegraph.cpp
+@@ -63,14 +63,15 @@ ParticleGraph::ParticleGraph( const Geometry &geom, const ParticleDataBase &pdb,
+     // Add default colors
+     _color.push_back( Vec3D( 1.0, 0.2, 0.2 ) ); // Red
+ 
+-    _color.push_back( Vec3D( 1.0, 1.0, 0.2 ) ); // Yellow
+-    _color.push_back( Vec3D( 1.0, 0.2, 1.0 ) ); // Magenta
+     _color.push_back( Vec3D( 0.2, 1.0, 1.0 ) ); // Cyan
++    _color.push_back( Vec3D( 1.0, 0.2, 1.0 ) ); // Magenta
++    _color.push_back( Vec3D( 1.0, 1.0, 0.2 ) ); // Yellow
+ 
+     _color.push_back( Vec3D( 1.0, 0.5, 0.2 ) ); // Orange
+     _color.push_back( Vec3D( 0.5, 0.2, 1.0 ) ); // Purple
+     _color.push_back( Vec3D( 0.2, 1.0, 0.5 ) ); // Bluish green
+     _color.push_back( Vec3D( 1.0, 0.2, 0.5 ) ); // Pink
++
+ }
+ 
+ 
+diff --git a/src/particleiterator.hpp b/src/particleiterator.hpp
+index 464ae6f..af0925e 100644
+--- a/src/particleiterator.hpp
++++ b/src/particleiterator.hpp
+@@ -2,7 +2,7 @@
+  *  \brief %Particle iterator
+  */
+ 
+-/* Copyright (c) 2005-2013,2018,2022 Taneli Kalvas, Tobin Jones. All rights reserved.
++/* Copyright (c) 2005-2013,2018 Taneli Kalvas, Tobin Jones. All rights reserved.
+  *
+  * You can redistribute this software and/or modify it under the terms
+  * of the GNU General Public License as published by the Free Software
+@@ -303,6 +303,7 @@ template <class PP> class ParticleIterator {
+     TrajectoryEndCallback     *_tend_cb;       /*!< \brief Trajectory end callback. */
+     TrajectorySurfaceCollisionCallback *_tsur_cb;   /*!< \brief Trajectory surface collision callback. */
+     const TrajectoryEndCallback *_bsup_cb;     /*!< \brief B-field plasma suppression callback. */
++    const TrajectoryEndCallback *_esup_cb;     /*!< \brief E-field plasma suppression callback. */
+     ParticleDataBase          *_pdb;           /*!< \brief Particle database pointer for adding secondary particles. */
+     pthread_mutex_t           *_scharge_mutex; /*!< \brief Space charge mutex. */
+ 
+@@ -323,7 +324,7 @@ template <class PP> class ParticleIterator {
+ 
+ 	try {
+ 	    _traj.push_back( x );
+-	} catch( const std::bad_alloc & ) {
++	} catch( std::bad_alloc ) {
+ 	    throw( ErrorNoMem( ERROR_LOCATION, "Out of memory saving trajectory" ) );
+ 	}
+     }
+@@ -826,7 +827,7 @@ template <class PP> class ParticleIterator {
+ 		ColData<PP>::build_coldata_poly( _coldata, *_pidata._geom, x1, x2 );
+ 	    else
+ 		ColData<PP>::build_coldata_linear( _coldata, *_pidata._geom, x1, x2 );
+-	} catch( const std::bad_alloc & ) {
++	} catch( std::bad_alloc ) {
+ 	    throw( ErrorNoMem( ERROR_LOCATION, "out of memory building collision data" ) );
+ 	}
+     }
+@@ -871,9 +872,28 @@ template <class PP> class ParticleIterator {
+ 	// code to skip the collision detection for these particles
+ 
+ 	// No intersections, nothing to do
+-	if( _coldata.size() == 0 ) {
++  //NdH: I added also here a TrajectoryHandlerCallback, and a check to exit this function with false if the particle is neutralized. 
++	if( _coldata.size() == 0 ) 
++  	{
+ 	    DEBUG_MESSAGE( "No coldata\n" );
+ 	    DEBUG_DEC_INDENT();
++		if( _thand_cb )
++		{
++			if( _pidata._geom->inside( x2.location() ) == 0 ) //NdH: Only call TrajectoryHandlerCallback if the end point is a vacuum node. Not sure why this is not checked by IBSimu itself.
++			{
++				PP x1temp = PP(); 
++				x1temp.clear(); 
++				x1temp = x1temp + x1; 
++				(*_thand_cb)( &particle, &x1temp, &x2 ); // CP 20240521 back to previous definition of the trajectory handler operator
++          	}
++      
++			if( particle.get_status() != PARTICLE_OK ) // Particle can be charge-exchanged: status = (2, PARTICLE_COLL). So build in detection here.
++			{
++				// ibsimu.message( 1 ) << "Coldata length zero, and CX event: special case! Size of pdb: " << to_string( _pdb->size() ) << "\n";
++				save_trajectory_point( x2 );
++				return( false );
++          	}
++      	}
+ 	    return( true );
+ 	}
+ 
+@@ -913,18 +933,37 @@ template <class PP> class ParticleIterator {
+ 						 _xi, _coldata[a]._x );
+ 	    }
+ 
+-	    // Call trajectory handler callback
+-	    if( _thand_cb )
+-		(*_thand_cb)( &particle, &_coldata[a]._x, &x2 );
++      	if( (_thand_cb) && (particle.get_status() == PARTICLE_OK) )  //As a result of this being 'in the loop', the TrajectoryHandlerCallback is called every intersection with the grid. Maybe to speed up, this can be moved outwards later.
++      	{                //But then the step size need to be limited, and/or the trajectory integrated. It also might cause problems with the space charge deposition.
++          if( a == 0 ) //Since for _coldata.size() of n, there are n+1 trajectory pieces, the first piece gets treated differently.
++          {
++              PP x1temp = PP(); 
++              x1temp.clear();   //Not sure if this is needed.
++              x1temp = x1temp + x1; 
++
++              (*_thand_cb)( &particle, &x1temp, &_coldata[a]._x );  // CP 20240521 back to previous definition of the trajectory handler operator
++          }
++          else 
++          {
++              (*_thand_cb)( &particle, &_coldata[a - 1]._x, &_coldata[a]._x ); // CP 20240521 back to previous definition of the trajectory handler operator
++          }
++
++          if( (a == (_coldata.size() - 1 )) && ( _pidata._geom->inside( x2.location() ) == 0 ) && (particle.get_status() == PARTICLE_OK) ) //Note the if instead of the else if -> there could be only 1 coldata point in between the first and last point of the trajectory!
++          {   //NdH: Only call TrajectoryHandlerCallback if the end point is a vacuum node. Not sure why this is not checked by IBSimu itself.
++              (*_thand_cb)( &particle, &_coldata[a]._x, &x2 );  // CP 20240521 back to previous definition of the trajectory handler operator
++          }
++
++      	} // (*_thand_cb)( &particle, &_coldata[a]._x, &x2 ); //This was the original function call.
+ 
+ 	    // Clear coldata and exit if particle collided.
+ 	    if( particle.get_status() != PARTICLE_OK ) {
+-		save_trajectory_point( x2 );
+-		_coldata.clear();
+-		DEBUG_DEC_INDENT();
+-		DEBUG_MESSAGE( "Interrupting coldata processing\n" );
+-		DEBUG_DEC_INDENT();
+-		return( false );
++			// save_trajectory_point( x2 );
++			save_trajectory_point( _coldata[a]._x ); // CP 20240522 save the location at which the particle has changed status
++			_coldata.clear();
++			DEBUG_DEC_INDENT();
++			DEBUG_MESSAGE( "Interrupting coldata processing\n" );
++			DEBUG_DEC_INDENT();
++			return( false );
+ 	    }
+ 
+ 	    // Update last accepted intersection point xi.
+@@ -1029,6 +1068,7 @@ template <class PP> class ParticleIterator {
+ 	    if( comp_isnan( x[a] ) ) {
+ 		DEBUG_MESSAGE( "Particle coordinate NaN\n" );
+ 		DEBUG_DEC_INDENT();
++    // ibsimu.message( 1 ) << "NdH: BADDEF detected, Particle coordinate NaN\n";
+ 		return( false );
+ 	    }
+ 	}
+@@ -1038,12 +1078,14 @@ template <class PP> class ParticleIterator {
+ 	    if( _pidata._geom->surface_inside( x.location() ) ) {
+ 		DEBUG_MESSAGE( "Particle inside solid or outside simulation\n" );
+ 		DEBUG_DEC_INDENT();
++    // ibsimu.message( 1 ) << "NdH: BADDEF detected, Particle inside solid or outside simulation " << to_string(_pidata._geom->surface_inside( x.location() )) << "\n";
+ 		return( false );
+ 	    }
+ 	} else { 
+ 	    if( _pidata._geom->inside( x.location() ) ) {
+ 		DEBUG_MESSAGE( "Particle inside solid or outside simulation\n" );
+ 		DEBUG_DEC_INDENT();
++    // ibsimu.message( 1 ) << "NdH: BADDEF detected, Particle inside solid or outside simulation " << to_string( _pidata._geom->inside( x.location() ) )<< "\n";
+ 		return( false );
+ 	    }
+ 	}
+@@ -1102,12 +1144,34 @@ template <class PP> class ParticleIterator {
+ 	    //ibsimu.message(MSG_DEBUG_GENERAL,1) << "acc += " << x[3]*x[3]*dxdt[4]*dxdt[4] << "\n";
+ 	    acc += x[3]*x[3]*dxdt[4]*dxdt[4];
+ 	}
++	double v2 = spd;
+ 	//ibsimu.message(MSG_DEBUG_GENERAL,1) << "spd = " << sqrt(spd) << "\n";
+ 	//ibsimu.message(MSG_DEBUG_GENERAL,1) << "acc = " << sqrt(acc) << "\n";
+ 	spd = _pidata._geom->h() / sqrt(spd);
+ 	acc = sqrt( 2.0*_pidata._geom->h() / sqrt(acc) );
++	double dt = ( spd < acc ? spd : acc );
++
++	if( _pidata._relativistic && _pidata._bfield ) {
++	    Vec3D xc = x.location();
++	    Vec3D B = (*_pidata._bfield)( xc );
++	    if( _pidata._bsup_cb ) {
++		double factor = (*_pidata._bsup_cb)( xc );
++		B *= factor;
++	    }
++	    double b2 = B[0]*B[0] + B[1]*B[1] + B[2]*B[2];
++	    double qm = fabs( _pidata._qm );
++	    if( comp_isfinite(v2) && v2 >= 0.0 && v2 < SPEED_C2 &&
++		comp_isfinite(b2) && b2 > 0.0 && qm > 0.0 ) {
++		// CPI patch on 20260604: resolve the first relativistic trial step below
++		// one twentieth of the local gyroperiod in strong B fields.
++		double gamma = 1.0/sqrt( 1.0 - v2/SPEED_C2 );
++		double gyro_dt = 2.0*M_PI*gamma / ( 20.0*qm*sqrt(b2) );
++		if( comp_isfinite(gyro_dt) && gyro_dt > 0.0 )
++		    dt = ( dt < gyro_dt ? dt : gyro_dt );
++	    }
++	}
+ 
+-	return( spd < acc ? spd : acc );
++	return( dt );
+     }
+ 
+ public:
+@@ -1149,7 +1213,7 @@ public:
+ 	: _type(type), _intrp(intrp), _scharge_dep(scharge_dep), _epsabs(epsabs), _epsrel(epsrel), 
+ 	  _maxsteps(maxsteps), _maxt(maxt), _save_points(save_points), _trajdiv(trajdiv), 
+ 	  _surface_collision(false), _pidata(scharge,efield,bfield,geom), 
+-	  _thand_cb(0), _tend_cb(0), _tsur_cb(0), _bsup_cb(0), _pdb(0), _scharge_mutex(scharge_mutex), 
++	  _thand_cb(0), _tend_cb(0), _tsur_cb(0), _bsup_cb(0), _esup_cb(0), _pdb(0), _scharge_mutex(scharge_mutex), 
+ 	  _stat(geom->number_of_boundaries()) {
+ 	
+ 	// Initialize mirroring
+@@ -1208,8 +1272,9 @@ public:
+ 
+     /*! \brief Set trajectory handler callback. 
+      */
+-    void set_trajectory_handler_callback( TrajectoryHandlerCallback *thand_cb ) {
++    void set_trajectory_handler_callback( TrajectoryHandlerCallback *thand_cb, ParticleDataBase *pdb ) {
+ 	_thand_cb = thand_cb;
++  _pdb = pdb;
+     }
+ 
+ 
+@@ -1234,6 +1299,12 @@ public:
+ 	_pidata.set_bfield_suppression_callback( bsup_cb );
+     }
+ 
++    /*! \brief Set E-field potential dependent suppression callback.
++     */
++    void set_efield_suppression_callback( const CallbackFunctorD_V *esup_cb ) {
++    _pidata.set_efield_suppression_callback( esup_cb );
++    }
++
+     /*! \brief Set relativistic particle iteration.
+      */
+     void set_relativistic( bool enable ) {
+@@ -1271,7 +1342,9 @@ public:
+ 
+ 	// Check particle definition
+ 	if( !check_particle_definition( x ) ) {
++      // ibsimu.message( 1 ) << "NdH: BADDEF encountered in particle " << to_string(pi) << "\n";
+ 	    particle->set_status( PARTICLE_BADDEF );
++      // particle->set_status( PARTICLE_TIME ); //NdH: THIS IS ONLY DONE FOR DEBUGGING PURPOSES, SO SEE THE PARTICLE TRACK! IT SHOULD BE REVERTED IMMEDIATELY AFTERWARDS!!1!
+ 	    _stat.inc_end_baddef();
+ 	    DEBUG_DEC_INDENT();
+ 	    return;
+diff --git a/src/particles.cpp b/src/particles.cpp
+index 493186a..b128cba 100644
+--- a/src/particles.cpp
++++ b/src/particles.cpp
+@@ -249,6 +249,8 @@ int ParticleP3D::get_derivatives( double t, const double *x, double *dxdt, void
+ 
+     if( comp_isnan(E[0]) || comp_isnan(E[1]) || comp_isnan(E[2]) )
+ 	return( IBSIMU_DERIV_ERROR );
++    if( !comp_isfinite(B[0]) || !comp_isfinite(B[1]) || !comp_isfinite(B[2]) )
++	return( IBSIMU_DERIV_ERROR );
+ 
+     /* Positions: dx/dt = vx, dy/dt = vy, dz/dt = vz */
+     dxdt[0] = x[1];
+@@ -257,20 +259,44 @@ int ParticleP3D::get_derivatives( double t, const double *x, double *dxdt, void
+     
+     /* Velocities: dvx/dt = ax, dvy/dt = ay, dvz/dt = az */
+     if( pidata->_relativistic ) {
++	// CPI patch on 20260604: avoid NaN timestep in relativistic tracing.
+ 	double v2 = x[1]*x[1] + x[3]*x[3] + x[5]*x[5];
+-	double gamma = 1.0/sqrt( 1.0 - v2/SPEED_C2 );
++    if( !comp_isfinite(v2) || v2 >= SPEED_C2 ) {
++        return( IBSIMU_DERIV_ERROR );
++    }
++    double inv_gamma2 = 1.0 - v2/SPEED_C2;
++    if( !comp_isfinite(inv_gamma2) || inv_gamma2 <= 0.0 ) {
++        return( IBSIMU_DERIV_ERROR );
++    }
++    double gamma = 1.0/sqrt( inv_gamma2 );
++    if( !comp_isfinite(gamma) ) {
++        return( IBSIMU_DERIV_ERROR );
++    }
+ 	double gamma3c = gamma*gamma*gamma/SPEED_C2;
++    if( !comp_isfinite(gamma3c) ) {
++        return( IBSIMU_DERIV_ERROR );
++    }
+ 	double a12 = gamma3c*x[1]*x[3];
+ 	double a13 = gamma3c*x[1]*x[5];
+ 	double a23 = gamma3c*x[3]*x[5];
+ 	Mat3D m( gamma3c*x[1]*x[1] + gamma, a12, a13,
+ 		 a12, gamma3c*x[3]*x[3] + gamma, a23,
+ 		 a13, a23, gamma3c*x[5]*x[5] + gamma );
+-	Mat3D minv = m.inverse();
++    double mdet = m.determinant();
++    if( !comp_isfinite(mdet) || mdet == 0.0 ) {
++        return( IBSIMU_DERIV_ERROR );
++    }
++    Mat3D minv = m.inverse( mdet );
+ 	Vec3D pm( pidata->_qm * (E[0] + x[3]*B[2] - x[5]*B[1]),
+ 		  pidata->_qm * (E[1] + x[5]*B[0] - x[1]*B[2]),
+ 		  pidata->_qm * (E[2] + x[1]*B[1] - x[3]*B[0]) );
++    if( !comp_isfinite(pm[0]) || !comp_isfinite(pm[1]) || !comp_isfinite(pm[2]) ) {
++        return( IBSIMU_DERIV_ERROR );
++    }
+ 	Vec3D dvdt = minv*pm;
++    if( !comp_isfinite(dvdt[0]) || !comp_isfinite(dvdt[1]) || !comp_isfinite(dvdt[2]) ) {
++        return( IBSIMU_DERIV_ERROR );
++    }
+ 	dxdt[1] = dvdt(0);
+ 	dxdt[3] = dvdt(1);
+ 	dxdt[5] = dvdt(2);
+diff --git a/src/particles.hpp b/src/particles.hpp
+index 8735893..bb69c80 100644
+--- a/src/particles.hpp
++++ b/src/particles.hpp
+@@ -74,7 +74,9 @@ enum particle_status_e {
+     PARTICLE_COLL,
+     PARTICLE_BADDEF,
+     PARTICLE_TIME,
+-    PARTICLE_NSTP 
++    PARTICLE_NSTP,
++    PARTICLE_STRIP,
++    PARTICLE_PERIODIC
+ };
+ 
+ 
+@@ -667,6 +669,7 @@ protected:
+ 					*/
+     double              _q;            /*!< \brief Charge q [C] */
+     double              _m;            /*!< \brief Mass m [kg] */
++    int                 _gen;            /*!< \brief Particle generation [#] */
+ 
+     ParticleBase( double IQ, double q, double m ) 
+ 	: _status(PARTICLE_OK), _q(q) {
+@@ -675,6 +678,17 @@ protected:
+ 	    _IQ = -fabs(IQ);
+ 	else
+ 	    _IQ = fabs(IQ);
++    _gen=0;
++    }
++
++    ParticleBase( double IQ, double q, double m, int gen ) 
++	: _status(PARTICLE_OK), _q(q) {
++	_m = fabs(m);
++	if( _q < 0 )
++	    _IQ = -fabs(IQ);
++	else
++	    _IQ = fabs(IQ);
++    _gen = gen; // Constructor for adding also the generation of the particles
+     }
+ 
+     /*! \brief Constructor for loading particle from a file.
+@@ -684,6 +698,7 @@ protected:
+ 	_IQ = read_double( s );
+ 	_q = read_double( s );
+ 	_m = read_double( s );	
++	_gen = read_int32( s );	
+     }
+ 
+     ~ParticleBase() {}
+@@ -717,6 +732,10 @@ public:
+      */
+     double qm() const { return( _q/_m ); }
+ 
++    /*! \brief Return charge per mass ratio (q/m) [C/kg].
++     */
++    int gen() const { return( _gen ); }
++
+     /*! \brief Saves data to stream.
+      */
+     void save( std::ostream &s ) const {
+@@ -724,6 +743,7 @@ public:
+ 	write_double( s, _IQ );
+ 	write_double( s, _q );
+ 	write_double( s, _m );
++	write_int32( s, _gen );
+     }
+ };
+ 
+@@ -752,6 +772,8 @@ public:
+      */
+     Particle( double IQ, double q, double m, const PP &x ) 
+ 	: ParticleBase(IQ,q,m), _x(x) {}
++    Particle( double IQ, double q, double m, int gen, const PP &x ) 
++	: ParticleBase(IQ,q,m,gen), _x(x) {}
+ 
+     /*! \brief Constructor for loading particle from a file.
+      */
+@@ -873,6 +895,9 @@ public:
+ 	case PARTICLE_NSTP:
+ 	    os << "stat = PARTICLE_NSTP\n";
+ 	    break;
++	case PARTICLE_STRIP:
++	    os << "stat = PARTICLE_STRIP\n";
++	    break;
+ 	}
+ 	os << "IQ   = " << _IQ << "\n";
+ 	os << "q    = " << _q << "\n";
+@@ -932,6 +957,7 @@ struct ParticleIteratorData {
+     const Geometry           *_geom;     /*!< \brief Geometry. */
+     double                    _qm;       /*!< \brief Precalculated q/m. */
+     const CallbackFunctorD_V *_bsup_cb;  /*!< \brief B-field plasma suppression callback. */
++    const CallbackFunctorD_V *_esup_cb;  /*!< \brief E-field plasma suppression callback. */ // CP 20240517
+     bool                      _relativistic; /*!< \brief Do relativistic particle calc? */
+ 
+     ParticleIteratorData( MeshScalarField *scharge, const VectorField *efield, 
+@@ -945,6 +971,13 @@ struct ParticleIteratorData {
+ 	_bsup_cb = bsup_cb;
+     }
+ 
++    // CP 20240517
++    /*! \brief Set E-field potential dependent suppression callback.
++     */
++    void set_efield_suppression_callback( const CallbackFunctorD_V *esup_cb ) {
++	_esup_cb = esup_cb;
++    }
++
+     /*! \brief Set relativistic particle iteration.
+      */
+     void set_relativistic( bool enable ) {
