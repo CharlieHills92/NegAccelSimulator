@@ -18,7 +18,8 @@ export IBSIMU_DIR="${IBSIMU_ROOT}/libibsimu_patched"
 
 # Library paths
 export LDFLAGS="${LDFLAGS} -L${IBSIMU_DIR}/src/.libs -Wl,-rpath,${IBSIMU_DIR}/src/.libs"
-export LD_LIBRARY_PATH="${IBSIMU_DIR}/src/.libs${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+# export LD_LIBRARY_PATH="${IBSIMU_DIR}/src/.libs${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+LD_LIBRARY_PATH="$PWD/libibsimu_patched/src/.libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # PKG_CONFIG paths
 export PKG_CONFIG_PATH="${IBSIMU_DIR}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
