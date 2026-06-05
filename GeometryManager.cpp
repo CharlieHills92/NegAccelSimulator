@@ -42,18 +42,27 @@ void GeometryManager::resetGeometry() {
 }
 
 void GeometryManager::createGeometry(const SimulationParameters& params, const string& geomfile) {
-    // Default geometry parameters
-    constexpr double DEFAULT_Z_START = 0.0;
-    constexpr double DEFAULT_Z_END = 0.568;
-    constexpr double DEFAULT_MESH_MULTIPLIER = 1.0;
-    
-    createGeometry(params, geomfile, DEFAULT_Z_START, DEFAULT_Z_END, DEFAULT_MESH_MULTIPLIER);
+    createGeometry(params, geomfile, 0.0, params.getDomainZSizeOrDefault(), 1.0);
 }
 
 void GeometryManager::createGeometry(const SimulationParameters& params, const string& geomfile,
                                     double z_start, double z_end, double meshsize_multiplier) {
-    int accel_type = static_cast<int>(params.getAcceleratorIdx());
-    
+    const string& geometry_template = params.getGeometryTemplate();
+
+    if (geometry_template == "SPIDER") {
+            createGeometrySPIDER(params, geomfile, z_start, z_end, meshsize_multiplier);
+            return;
+    }
+    if (geometry_template == "MITICA") {
+            createGeometryMITICA(params, geomfile, z_start, z_end, meshsize_multiplier);
+            return;
+    }
+    if (geometry_template == "MTF") {
+            createGeometryMTF(params, geomfile, z_start, z_end, meshsize_multiplier);
+            return;
+    }
+
+    const int accel_type = static_cast<int>(params.getAcceleratorIdx());
     switch(accel_type) {
         case 1:
             createGeometrySPIDER(params, geomfile, z_start, z_end, meshsize_multiplier);
@@ -65,10 +74,9 @@ void GeometryManager::createGeometry(const SimulationParameters& params, const s
             createGeometryMTF(params, geomfile, z_start, z_end, meshsize_multiplier);
             break;
         default:
-            ibsimu.message(1) << "Unknown accelerator type " << accel_type 
-                              << ", defaulting to MTF for testing" << endl;
-            createGeometryMTF(params, geomfile, z_start, z_end, meshsize_multiplier);
-            break;
+            throw Error(ERROR_LOCATION,
+                        "No supported geometry selection found. geometry.source.template='" +
+                            geometry_template + "', accelerator index=" + std::to_string(accel_type));
     }
 }
 
@@ -166,10 +174,10 @@ void GeometryManager::createGeometryMITICA(const SimulationParameters& params, c
     // Use configurable domain sizes with accelerator-specific defaults
     double x_size = params.getDomainXSizeOrDefault();
     double y_size = params.getDomainYSizeOrDefault();
-    double z_size = params.getDomainZSizeOrDefault();
+    double z_size = (z_end - z_start > 0.0) ? (z_end - z_start) : params.getDomainZSizeOrDefault();
     
-    cout << "DEBUG MITICA Geometry: Using domain sizes X=" << x_size << "m, Y=" << y_size << "m, Z=" << z_size << "m" << endl;
-    cout << "DEBUG MITICA Geometry: z_start=" << start << "m, z_end=" << z_end << "m, z_end-start=" << (z_end - start) << "m" << endl;
+    if (debug) cout << "DEBUG MITICA Geometry: Using domain sizes X=" << x_size << "m, Y=" << y_size << "m, Z=" << z_size << "m" << endl;
+    if (debug) cout << "DEBUG MITICA Geometry: z_start=" << start << "m, z_end=" << z_end << "m, z_end-start=" << (z_end - start) << "m" << endl;
     
     double sizereq[3] = { x_size, y_size, z_size };
     
@@ -239,10 +247,10 @@ void GeometryManager::createGeometryMTF(const SimulationParameters& params, cons
     // Use configurable domain sizes with accelerator-specific defaults
     double x_size = params.getDomainXSizeOrDefault();
     double y_size = params.getDomainYSizeOrDefault();
-    double z_size = params.getDomainZSizeOrDefault();
+    double z_size = (z_end - z_start > 0.0) ? (z_end - z_start) : params.getDomainZSizeOrDefault();
     
-    cout << "DEBUG MTF Geometry: Using domain sizes X=" << x_size << "m, Y=" << y_size << "m, Z=" << z_size << "m" << endl;
-    cout << "DEBUG MTF Geometry: z_start=" << start << "m, z_end=" << z_end << "m, z_end-start=" << (z_end - start) << "m" << endl;
+    if (debug) cout << "DEBUG MTF Geometry: Using domain sizes X=" << x_size << "m, Y=" << y_size << "m, Z=" << z_size << "m" << endl;
+    if (debug) cout << "DEBUG MTF Geometry: z_start=" << start << "m, z_end=" << z_end << "m, z_end-start=" << (z_end - start) << "m" << endl;
     
     double sizereq[3] = { x_size, y_size, z_size };
     

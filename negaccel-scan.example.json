@@ -1,0 +1,42 @@
+{
+  "$schema": "./negaccel-scan.schema.json",
+  "metadata": {
+    "schemaVersion": "1.0.0",
+    "scanTag": "MTF_EG_voltage_sweep",
+    "title": "MTF extraction-grid voltage sweep",
+    "description": "Python-side scan specification that expands the organized authoring template into one folder per resolved runtime case."
+  },
+  "template": {
+    "kind": "authoring-case",
+    "path": "./negaccel-authoring.example.json"
+  },
+  "overrides": [
+    {
+      "path": "run.particleCount",
+      "value": 20000
+    }
+  ],
+  "scan": {
+    "parameterPath": "boundaryConditions.gridVoltagesVolts.extractionGrid",
+    "values": [
+      6800.0,
+      7200.0,
+      7600.0
+    ],
+    "labels": [
+      "6p8kV",
+      "7p2kV",
+      "7p6kV"
+    ],
+    "caseTagTemplate": "{scan}_{label}"
+  },
+  "outputs": {
+    "directory": "generated/MTF_EG_voltage_sweep",
+    "manifestFile": "scan-manifest.json"
+  },
+  "execution": {
+    "simulator": "./runtest_new_v2",
+    "loadExisting": false,
+    "stopOnError": true
+  }
+}

@@ -18,35 +18,78 @@
 
 using namespace std;
 
-FileManager::FileManager(const string& foldername) {
-    createDirectoryStructure(foldername);
+namespace {
+
+string trimTrailingSlashes(const string& path) {
+    string normalized = path;
+    while (!normalized.empty() && normalized[normalized.size() - 1] == '/') {
+        normalized.erase(normalized.size() - 1);
+    }
+    return normalized;
 }
 
-void FileManager::createDirectoryStructure(const string& foldername) {
-    // Create main directory
-    if (mkdir(foldername.c_str(), 0777) == -1) {
-        if (errno != EEXIST) {
-            throw Error(ERROR_LOCATION, "Could not create directory " + foldername + ": " + strerror(errno));
-        }
-    } else {
-        logfile << "\t" << foldername << " directory created" << endl;
+string normalizeSubdirectory(const string& directory, const string& fallback) {
+    const string trimmed = trimTrailingSlashes(directory);
+    return trimmed.empty() ? fallback : trimmed;
+}
+
+void ensureDirectoryExists(const string& path) {
+    if (path.empty()) {
+        return;
     }
 
+    string current;
+    for (size_t index = 0; index < path.size(); ++index) {
+        const char ch = path[index];
+        current += ch;
+        if (ch != '/' && index + 1 != path.size()) {
+            continue;
+        }
+
+        const string directory = trimTrailingSlashes(current);
+        if (directory.empty()) {
+            continue;
+        }
+
+        if (mkdir(directory.c_str(), 0777) == -1 && errno != EEXIST) {
+            throw Error(ERROR_LOCATION, "Could not create directory " + directory + ": " + strerror(errno));
+        }
+    }
+}
+
+string joinDirectory(const string& root, const string& child) {
+    return trimTrailingSlashes(root) + "/" + trimTrailingSlashes(child) + "/";
+}
+
+} // namespace
+
+FileManager::FileManager(const string& foldername,
+                         const string& summary_dir,
+                         const string& plot_dir,
+                         const string& data_dir,
+                         const string& vtk_dir) {
+    createDirectoryStructure(foldername, summary_dir, plot_dir, data_dir, vtk_dir);
+}
+
+void FileManager::createDirectoryStructure(const string& foldername,
+                                           const string& summary_dir,
+                                           const string& plot_dir,
+                                           const string& data_dir,
+                                           const string& vtk_dir) {
+    ensureDirectoryExists(foldername);
+
     // Set up directory structure
-    ref_fold = foldername + "/";
-    outsummary_fold = ref_fold + "Summary/";
-    plot_fold = ref_fold + "Plots/";
-    data_fold = ref_fold + "Data/";
+    ref_fold = trimTrailingSlashes(foldername) + "/";
+    outsummary_fold = joinDirectory(ref_fold, normalizeSubdirectory(summary_dir, "Summary"));
+    plot_fold = joinDirectory(ref_fold, normalizeSubdirectory(plot_dir, "Plots"));
+    data_fold = joinDirectory(ref_fold, normalizeSubdirectory(data_dir, "Data"));
+    vtk_fold = joinDirectory(ref_fold, normalizeSubdirectory(vtk_dir, "VTK"));
     
     // Create subdirectories
-    const vector<string> subdirs = {outsummary_fold, plot_fold, data_fold};
+    const vector<string> subdirs = {outsummary_fold, plot_fold, data_fold, vtk_fold};
     
     for (const string& dir : subdirs) {
-        if (mkdir(dir.c_str(), 0777) == -1 && errno != EEXIST) {
-            throw Error(ERROR_LOCATION, "Could not create directory " + dir + ": " + strerror(errno));
-        } else if (errno != EEXIST) {
-            logfile << "\t" << dir << " directory created" << endl;
-        }
+        ensureDirectoryExists(dir);
     }
 }
 
@@ -56,7 +99,7 @@ void FileManager::setFileTag(const string& filetag) {
 }
 
 void FileManager::updateFilePaths() {
-    inputfile = ref_fold + file_tag + ".inp";
+    inputfile = ref_fold + file_tag + ".json";
     geomfile = data_fold + file_tag + "_geom.dat";
     pdbfile = data_fold + file_tag + "_pdb.dat";
     epotfile = data_fold + file_tag + "_epot.dat";

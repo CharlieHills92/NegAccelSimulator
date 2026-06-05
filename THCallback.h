@@ -29,7 +29,7 @@ using namespace std;
 //~ };
 
 
-int check_periodicity( ParticleDataBase3D* _pdb, ParticleBase *particle, ParticleP3D *pcur, ParticleP3D *pend, vector<double>& _periodicity );
+int check_periodicity( ParticleDataBase3D* _pdb, ParticleBase *particle, ParticleP3D *pcur, ParticleP3D *pend, const vector<double>& _periodicity );
 
 class THCallback_test : public TrajectoryHandlerCallback {
 public:
@@ -73,18 +73,12 @@ private:
 
 public:
 
-    THCallback_strip( bool debugprint, ParticleDataBase3D* pdb, double& mass ) {
-        vector<double> period_empty;
-        period_empty.clear();
-        _periodic=false;
-        THCallback_strip( debugprint, pdb, mass, period_empty, "densprofiles/MITICA_dens.txt" );
-    }
+    THCallback_strip( bool debugprint, ParticleDataBase3D* pdb, double& mass,
+                      const std::string& density_filename )
+        : THCallback_strip( debugprint, pdb, mass, vector<double>(), density_filename ) {}
 
-    THCallback_strip( bool debugprint, ParticleDataBase3D* pdb, double& mass, vector<double>& periodicity ) {
-        THCallback_strip( debugprint, pdb, mass, periodicity, "densprofiles/MITICA_dens.txt" );
-    }
-
-    THCallback_strip( bool debugprint, ParticleDataBase3D* pdb, double& mass, vector<double>& periodicity, string density_filename ) {
+    THCallback_strip( bool debugprint, ParticleDataBase3D* pdb, double& mass,
+                      const vector<double>& periodicity, const std::string& density_filename ) {
         //Random *rng; // Random number generator for two uniform random positions, and three Gaussian velocity components (to get a Maxwell-Boltzmann distribution for the total velocity).
         // if( ibsimu.get_rng_type() == RNG_SOBOL )  //In addition, two more numbers are needed for the cosine distribution and the angles.
         // 	_rng = new QRandom( 0 );
@@ -345,19 +339,13 @@ private:
 
 public:
 
-    THCallback_secondaries( ParticleDataBase3D* pdb, double& mass ) {
-        vector<double> period_empty;
-        period_empty.clear();
-        _periodic=false;
-        THCallback_secondaries( pdb, mass, period_empty, "densprofiles/MITICA_dens.txt" );
-    }
+    THCallback_secondaries( ParticleDataBase3D* pdb, double& mass,
+                            const std::string& density_filename,
+                            double secondary_z_min = 7.0e-3 )
+        : THCallback_secondaries( pdb, mass, vector<double>(), density_filename, secondary_z_min ) {}
 
-    THCallback_secondaries( ParticleDataBase3D* pdb, double& mass, vector<double>& periodicity ) {
-        THCallback_secondaries( pdb, mass, periodicity, "densprofiles/MITICA_dens.txt" );
-    }
-
-    THCallback_secondaries( ParticleDataBase3D* pdb, double& mass, vector<double>& periodicity,
-                            string density_filename, double secondary_z_min = 7.0e-3 ) {
+    THCallback_secondaries( ParticleDataBase3D* pdb, double& mass, const vector<double>& periodicity,
+                            const std::string& density_filename, double secondary_z_min = 7.0e-3 ) {
         _pdb=pdb;
         _mass=mass;
         _secondary_z_min = secondary_z_min;

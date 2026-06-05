@@ -8,8 +8,13 @@ Simulator_shield
 main.cpp_OLD
 
 # ibsimu library - exclude static archive (large) and backup headers
+lib/
 lib/*.a
 include/ibsimu-1.0.6dev_ori/
+include/*
+!include/nlohmann/
+include/nlohmann/*
+!include/nlohmann/json.hpp
 
 # Bootstrapped IBSimu tree
 libibsimu_patched/
@@ -39,6 +44,10 @@ THCdebug.txt
 
 # IDE / editor
 .vscode/
+
+# Python cache
+__pycache__/
+*.pyc
 
 # OS files
 .DS_Store

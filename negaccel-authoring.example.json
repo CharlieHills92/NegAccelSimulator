@@ -1,0 +1,120 @@
+{
+  "$schema": "./negaccel-authoring.schema.json",
+  "metadata": {
+    "schemaVersion": "1.0.0",
+    "caseTag": "MTF_authoring_example",
+    "title": "MTF authoring example",
+    "description": "User-facing Python-side input file organized by geometry, boundary conditions, source, gas, physics, run controls, and outputs."
+  },
+  "geometry": {
+    "template": "MTF",
+    "meshSizeMeters": 0.002,
+    "domain": {
+      "xSizeMeters": 0.08,
+      "ySizeMeters": 0.08,
+      "zSizeMeters": 0.567
+    },
+    "gaps": {
+      "accelerationGapMeters": 0.088
+    }
+  },
+  "boundaryConditions": {
+    "gridVoltagesVolts": {
+      "extractionGrid": 7200.0,
+      "acceleratorStages": [
+        165600.0,
+        324000.0,
+        482400.0,
+        640800.0,
+        799200.0
+      ]
+    }
+  },
+  "particleSource": {
+    "species": "H-",
+    "chargeState": -1,
+    "massU": 1.0,
+    "currentDensityAm2": 270.0,
+    "perpendicularTemperatureEV": 0.0,
+    "axialEnergyEV": 3.0,
+    "sourceModel": "uniform"
+  },
+  "magneticField": {
+    "enabled": true,
+    "case": 1,
+    "scale": 1.0,
+    "sourceMode": "auto-by-accelerator"
+  },
+  "gasInteractions": {
+    "densityProfile": {
+      "name": "mtf-background",
+      "species": "H2",
+      "path": "densprofiles/MTF_dens.txt",
+      "useFor": [
+        "stripping",
+        "secondaryEmission",
+        "diagnostics"
+      ]
+    },
+    "stripping": {
+      "enabled": true,
+      "generateSecondaries": true,
+      "minimumZMeters": 0.009
+    }
+  },
+  "surfaceInteractions": {
+    "enabled": false,
+    "model": "EAMCC",
+    "minimumImpactZMeters": 0.007,
+    "maximumSecondaryElectrons": 26,
+    "secondaryElectronEnergyEV": 10.0,
+    "debug": false
+  },
+  "run": {
+    "particleCount": 50000,
+    "iterations": 4,
+    "solver": {
+      "type": "bicgstab",
+      "shieldModel": "nsimp"
+    },
+    "spaceCharge": {
+      "alphaCoeff": 0.5,
+      "pgFilterScale": 0.0,
+      "cesmadcmScale": 0.0
+    },
+    "convergence": {
+      "currentDensityTolerance": 1.0
+    },
+    "domainDecomposition": {
+      "splitDomain": false
+    }
+  },
+  "outputs": {
+    "summary": {
+      "enabled": true,
+      "directory": "Summary"
+    },
+    "plots": {
+      "enabled": true,
+      "directory": "Plots"
+    },
+    "data": {
+      "enabled": true,
+      "directory": "Data"
+    },
+    "vtk": {
+      "enabled": true,
+      "directory": "VTK",
+      "exportGeometry": true,
+      "exportSimulationState": true,
+      "exportTracedParticles": true
+    },
+    "logging": {
+      "consoleLevel": "info",
+      "fileLevel": "debug",
+      "captureStdout": true,
+      "writeDebugArtifacts": false,
+      "structuredLogFile": "run.log"
+    }
+  }
+}

@@ -57,31 +57,27 @@ ManageSimulation::~ManageSimulation() {
 void ManageSimulation::initializeComponents(const std::string& scan_name, const std::string& foldername) {
     // Initialize managers in dependency order
     parameters = std::unique_ptr<SimulationParameters>(new SimulationParameters());
-    fileManager = std::unique_ptr<FileManager>(new FileManager(foldername));
+
+    const string input_file = foldername + "/" + scan_name + ".json";
+    cout << "INPUT FILENAME: " << input_file << endl;
+
+    // Read parameters from the generated JSON case file before configuring output paths.
+    parameters->readParametersFromFile(input_file);
+
+    fileManager = std::unique_ptr<FileManager>(new FileManager(
+        foldername,
+        parameters->getOutputSummaryDirectory(),
+        parameters->getOutputPlotsDirectory(),
+        parameters->getOutputDataDirectory(),
+        parameters->getOutputVTKDirectory()));
     geometryManager = std::unique_ptr<GeometryManager>(new GeometryManager());
     fieldManager = std::unique_ptr<FieldManager>(new FieldManager());
     particleManager = std::unique_ptr<ParticleManager>(new ParticleManager());
     diagnosticsManager = std::unique_ptr<DiagnosticsManager>(new DiagnosticsManager());
     
-    // Set file tag and read parameters
+    // Set file tag after directories are configured.
     fileManager->setFileTag(scan_name);
-    
-    cout << "INPUT FILENAME: " << fileManager->getInputFile() << endl;
-    
-    // First parse optional parameters from scenario file (.scn)
-    // Extract base name by removing _N suffix if present
-    string base_name = scan_name;
-    size_t underscore_pos = base_name.find_last_of('_');
-    if (underscore_pos != string::npos) {
-        string suffix = base_name.substr(underscore_pos + 1);
-        // Check if suffix is a number (indicating it's a _N suffix)
-        if (!suffix.empty() && suffix.find_first_not_of("0123456789") == string::npos) {
-            base_name = base_name.substr(0, underscore_pos);
-        }
-    }
-    
-    // Read parameters from the input file (.inp or .scn)
-    parameters->readParametersFromFile(fileManager->getInputFile());
+    diagnosticsManager->setDensityProfileFilename(parameters->getStrippingDensityProfile());
 }
 
 void ManageSimulation::initializeIbsimu() {
@@ -100,21 +96,21 @@ void ManageSimulation::ResetSimulation() {
 
 void ManageSimulation::create_geometry() {
     geometryManager->createGeometry(*parameters, fileManager->getGeomFile());
-    
-    // Export VTK files immediately after geometry creation
-    string vtk_folder = fileManager->getRefFolder() + "/VTK";
-    string vtk_base = vtk_folder + "/" + fileManager->getFileTag() + "_geometry";
-    export_geometry_to_vtk(vtk_base);
+
+    if (parameters->getOutputVTKEnabled() && parameters->getOutputVTKExportGeometry()) {
+        const string vtk_base = fileManager->getVTKFolder() + fileManager->getFileTag() + "_geometry";
+        export_geometry_to_vtk(vtk_base);
+    }
 }
 
 void ManageSimulation::create_geometry(double z_start, double z_end, double meshsize_multiplier) {
     geometryManager->createGeometry(*parameters, fileManager->getGeomFile(), 
                                    z_start, z_end, meshsize_multiplier);
-    
-    // Export VTK files immediately after geometry creation
-    string vtk_folder = fileManager->getRefFolder() + "/VTK";
-    string vtk_base = vtk_folder + "/" + fileManager->getFileTag() + "_geometry";
-    export_geometry_to_vtk(vtk_base);
+
+    if (parameters->getOutputVTKEnabled() && parameters->getOutputVTKExportGeometry()) {
+        const string vtk_base = fileManager->getVTKFolder() + fileManager->getFileTag() + "_geometry";
+        export_geometry_to_vtk(vtk_base);
+    }
 }
 
 void ManageSimulation::add_Bfield() {
@@ -310,19 +306,13 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         solver->solve(*epot, scharge_ave);
         efield->recalculate();
 
-        bool save_fields_each_iteration = true; // Set this to true to enable saving
-
-        if (save_fields_each_iteration) {
-            std::string vtk_folder = fileManager->getRefFolder() + "/VTK";
+        if (parameters->getOutputVTKEnabled() && parameters->getOutputVTKExportSimulationState()) {
+            const std::string& vtk_folder = fileManager->getVTKFolder();
             std::string iter_tag = fileManager->getFileTag() + "_it" + std::to_string(i+1);
 
-            // Create VTK directory if it doesn't exist
-            std::string mkdir_cmd = "mkdir -p " + vtk_folder;
-            system(mkdir_cmd.c_str());
-
             // Save epot and scharge_ave as VTK
-            geometryManager->exportPotentialToVTK(*epot, vtk_folder + "/" + iter_tag);
-            geometryManager->exportSpacechargeToVTK(scharge_ave, vtk_folder + "/" + iter_tag);
+            geometryManager->exportPotentialToVTK(*epot, vtk_folder + iter_tag);
+            geometryManager->exportSpacechargeToVTK(scharge_ave, vtk_folder + iter_tag);
         }
 
         if (i > 0) {
@@ -339,7 +329,7 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         // pdb->set_accuracy(1e-9, 1e-9);
         pdb->set_max_steps(10000);
         
-        vector<double> periodicity = {0.04,-0.04,0.04,-0.04};
+        const vector<double> periodicity = parameters->getPeriodicityBounds();
         vector<double> periodicity_empty; // no periodicity considered for stripping callbacks
         
         // Initialize stripping callbacks if stripping is enabled
@@ -350,14 +340,14 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
             // Create stripping callback objects if not already created
             if (thcstr == nullptr) {
                 static double mass = parameters->getMIons();
-                string density_profile = getDensityProfileFilename((int)parameters->getAcceleratorIdx());
+                string density_profile = parameters->getStrippingDensityProfile();
                 thcstr = new THCallback_strip(debugprint, pdb, mass, periodicity_empty, density_profile);
             }
             if (thcsec == nullptr) {
                 static double mass = parameters->getMIons();
-                string density_profile = getDensityProfileFilename((int)parameters->getAcceleratorIdx());
-                double secondary_z_min = 7.0e-3 + parameters->getMeshSize();
-                thcsec = new THCallback_secondaries(pdb, mass, periodicity_empty, density_profile,
+                string density_profile = parameters->getStrippingDensityProfile();
+                double secondary_z_min = parameters->getStrippingMinimumZ();
+                thcsec = new THCallback_secondaries(pdb, mass, periodicity, density_profile,
                                                     secondary_z_min);
             }
             
@@ -381,10 +371,15 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
                 // Last iteration: enable surface collisions
                 if (thc_surf_static == nullptr) {
                     double mass = parameters->getMIons();
-                    bool debug_surf = debugprint;
+                    bool debug_surf = debugprint || parameters->getSurfaceCollisionsDebug();
                     Geometry* geom = geometryManager->getGeometry();
                     if (geom) {
-                        thc_surf_static = new THCallback_surf_EAMCC(*geom, pdb, mass, debug_surf);
+                        thc_surf_static = new THCallback_surf_EAMCC(
+                            *geom,
+                            pdb,
+                            mass,
+                            debug_surf,
+                            parameters->getSurfaceCollisionsMinimumZ());
                         pdb->set_trajectory_end_callback(thc_surf_static);
                         if (debug) logfile << "DEBUG: Surface collision callback (EAMCC) enabled on last iteration" << endl;
                     }
@@ -479,7 +474,7 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         
         ibsimu.message(1) << " DONE!" << endl;
 
-        bool saveITperf = true;
+        bool saveITperf = parameters->getOutputSummaryEnabled();
         if (saveITperf) {
             // Update field manager with current fields
             fieldManager->setPotential(epot);
@@ -511,33 +506,36 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         if (debug) logfile << "DEBUG:  Iteration " << i+1 << "/" << n_iterations << " completed. Continuing...\n" << flush;
     }
 
-    // Save final simulation results
-    string epotfile = fileManager->getDataFolder() + fileManager->getFileTag() + "_epot.dat";
-    string pdbfile = fileManager->getDataFolder() + fileManager->getFileTag() + "_pdb.dat";
-    string schargefile = fileManager->getDataFolder() + fileManager->getFileTag() + "_scharge.dat";
-    string bfieldfile = fileManager->getDataFolder() + fileManager->getFileTag() + "_bfield.dat";
-
-    epot->save(epotfile);
-    pdb->save(pdbfile);
-    scharge->save(schargefile);
-    
-    // Only save magnetic field if it exists and is not the zero field we created
-    if (bfield != nullptr && zero_bfield == nullptr) {
-        bfield->save(bfieldfile);
-    } else {
-        // Create empty file to maintain consistency
-        ofstream bfield_empty(bfieldfile);
-        bfield_empty.close();
-    }
-
     // Update managers with final fields
     fieldManager->setPotential(epot);
-    ibsimu.message(1) << " Electrostatic potential saved" << endl;
     fieldManager->setSpacecharge(scharge);
-    ibsimu.message(1) << " Space-charge distribution saved" << endl;
     fieldManager->setElectric(efield);
-    ibsimu.message(1) << " Electric field saved" << endl;
-    ibsimu.message(1) << " Magnetic field saved" << endl;
+
+    if (parameters->getOutputDataEnabled()) {
+        const string epotfile = fileManager->getDataFolder() + fileManager->getFileTag() + "_epot.dat";
+        const string pdbfile = fileManager->getDataFolder() + fileManager->getFileTag() + "_pdb.dat";
+        const string schargefile = fileManager->getDataFolder() + fileManager->getFileTag() + "_scharge.dat";
+        const string bfieldfile = fileManager->getDataFolder() + fileManager->getFileTag() + "_bfield.dat";
+
+        epot->save(epotfile);
+        pdb->save(pdbfile);
+        scharge->save(schargefile);
+
+        // Only save magnetic field if it exists and is not the zero field we created.
+        if (bfield != nullptr && zero_bfield == nullptr) {
+            bfield->save(bfieldfile);
+        } else {
+            ofstream bfield_empty(bfieldfile);
+            bfield_empty.close();
+        }
+
+        ibsimu.message(1) << " Electrostatic potential saved" << endl;
+        ibsimu.message(1) << " Space-charge distribution saved" << endl;
+        ibsimu.message(1) << " Electric field saved" << endl;
+        ibsimu.message(1) << " Magnetic field saved" << endl;
+    } else {
+        ibsimu.message(1) << "Data output disabled by outputs.data settings; skipping .dat file writes" << endl;
+    }
 
     // Cleanup zero magnetic field if we created it
     if (zero_bfield != nullptr) {
@@ -558,6 +556,11 @@ bool ManageSimulation::check_EGext(double oriJ, double& extsimJ) {
 }
 
 bool ManageSimulation::load_simulation() {
+    if (!parameters->getOutputDataEnabled()) {
+        ibsimu.message(1) << "Loading from .dat files is disabled because outputs.data.enabled is false" << endl;
+        return false;
+    }
+
     ibsimu.message(1) << "Loading simulation from .dat files..." << endl;
     
     // Get file paths
@@ -725,15 +728,15 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
             ibsimu.message(1) << "Setting up stripping callbacks..." << endl;
             
             double mass = parameters->getMIons();
-            string density_profile = getDensityProfileFilename((int)parameters->getAcceleratorIdx());
+            string density_profile = parameters->getStrippingDensityProfile();
             vector<double> periodicity_empty; // no periodicity for main stripping
             
             thcstr = new THCallback_strip(false, pdb, mass, periodicity_empty, density_profile);
             
             // if (parameters->getIncludeStripping() > 1) {
             if (true) { // Always create secondaries callback for tracing if stripping is enabled
-                vector<double> periodicity = {0.04, -0.04, 0.04, -0.04};
-                double secondary_z_min = 7.0e-3 + parameters->getMeshSize();
+                const vector<double> periodicity = parameters->getPeriodicityBounds();
+                double secondary_z_min = parameters->getStrippingMinimumZ();
                 thcsec = new THCallback_secondaries(pdb, mass, periodicity, density_profile,
                                                     secondary_z_min);
                 pdb->set_trajectory_handler_callback(thcsec);
@@ -759,9 +762,14 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
             ibsimu.message(1) << "Setting up surface collision callback (EAMCC)..." << endl;
             
             double mass = parameters->getMIons();
-            bool debug_surf = debug;  // Use debug flag for surface callback
+            bool debug_surf = debug || parameters->getSurfaceCollisionsDebug();
             
-            thc_surf = new THCallback_surf_EAMCC(*geometry, pdb, mass, debug_surf);
+            thc_surf = new THCallback_surf_EAMCC(
+                *geometry,
+                pdb,
+                mass,
+                debug_surf,
+                parameters->getSurfaceCollisionsMinimumZ());
             pdb->set_trajectory_end_callback(thc_surf);
             
             ibsimu.message(1) << "Surface collision callback enabled (EAMCC model)" << endl;
@@ -781,21 +789,16 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
         pdb->iterate_trajectories(*scharge, *efield, *bfield);
         ibsimu.message(1) << "Particle trajectory iteration completed successfully!" << endl;
         
-        // Save updated particle database
-        string pdb_traced_file = fileManager->getDataFolder() + fileManager->getFileTag() + "_traced_pdb.dat";
-        pdb->save(pdb_traced_file);
-        ibsimu.message(1) << "Traced particle database saved to: " << pdb_traced_file << endl;
-        
-        // Export VTK results
-        string vtk_folder = fileManager->getRefFolder() + "/VTK";
-        string vtk_base = vtk_folder + "/" + fileManager->getFileTag() + "_traced";
-        
-        // Create VTK directory if it doesn't exist
-        string mkdir_cmd = "mkdir -p " + vtk_folder;
-        system(mkdir_cmd.c_str());
+        if (parameters->getOutputDataEnabled()) {
+            const string pdb_traced_file = fileManager->getDataFolder() + fileManager->getFileTag() + "_traced_pdb.dat";
+            pdb->save(pdb_traced_file);
+            ibsimu.message(1) << "Traced particle database saved to: " << pdb_traced_file << endl;
+        }
         
         // Export traced particle trajectories
-        if (particleManager && particleManager->getParticles() && particleManager->getParticles()->size() > 0) {
+        if (parameters->getOutputVTKEnabled() && parameters->getOutputVTKExportTracedParticles() &&
+            particleManager && particleManager->getParticles() && particleManager->getParticles()->size() > 0) {
+            const string vtk_base = fileManager->getVTKFolder() + fileManager->getFileTag() + "_traced";
             particleManager->exportTrajectoriesToVTK(vtk_base);
             ibsimu.message(1) << "Traced trajectories exported to VTK: " << vtk_base << "_trajectories.vtk" << endl;
         }
@@ -835,6 +838,11 @@ void ManageSimulation::diagnostic_data_alongZ(const vector<double>& diagzpos, in
 }
 
 void ManageSimulation::plot_simulation(int argc, char **argv) {
+    if (!parameters->getOutputPlotsEnabled()) {
+        ibsimu.message(1) << "Plot generation disabled by outputs.plots settings" << endl;
+        return;
+    }
+
     diagnosticsManager->createPlots(argc, argv, 
                                    geometryManager->getGeometry(),
                                    fieldManager->getPotential(),
@@ -847,6 +855,11 @@ void ManageSimulation::plot_simulation(int argc, char **argv) {
 }
 
 void ManageSimulation::plot_simulation(int argc, char **argv, particle_kind pk) {
+    if (!parameters->getOutputPlotsEnabled()) {
+        ibsimu.message(1) << "Plot generation disabled by outputs.plots settings" << endl;
+        return;
+    }
+
     diagnosticsManager->createPlots(argc, argv,
                                    geometryManager->getGeometry(),
                                    fieldManager->getPotential(),
@@ -861,6 +874,11 @@ void ManageSimulation::plot_simulation(int argc, char **argv, particle_kind pk) 
 }
 
 void ManageSimulation::analysis(double zlocsummary) {
+    if (!parameters->getOutputSummaryEnabled()) {
+        ibsimu.message(1) << "Summary output disabled by outputs.summary settings" << endl;
+        return;
+    }
+
     // Use enhanced analysis with field calculations
     diagnosticsManager->performAnalysis(particleManager->getParticles(), *parameters,
                                        geometryManager->getGeometry(),
@@ -880,6 +898,11 @@ void ManageSimulation::print_traj_to_txt(const std::string& filename) {
 }
 
 std::string ManageSimulation::save_emitter(const std::string& emitname, double zloc) {
+    if (!parameters->getOutputSummaryEnabled()) {
+        ibsimu.message(1) << "Emitter export disabled by outputs.summary settings" << endl;
+        return std::string();
+    }
+
     return particleManager->saveEmitter(fileManager->getFileTag()+emitname, zloc, fileManager->getOutputSummaryFolder());
 }
 
@@ -1119,6 +1142,11 @@ void ManageSimulation::export_for_paraview(const std::string& base_filename) {
 }
 
 void ManageSimulation::export_geometry_to_vtk(const std::string& base_filename) {
+    if (!parameters->getOutputVTKEnabled() || !parameters->getOutputVTKExportGeometry()) {
+        ibsimu.message(1) << "Geometry VTK export disabled by outputs.vtk settings" << endl;
+        return;
+    }
+
     // Create VTK directory if it doesn't exist
     string vtk_dir = base_filename.substr(0, base_filename.find_last_of('/'));
     string mkdir_cmd = "mkdir -p " + vtk_dir;
@@ -1142,9 +1170,20 @@ void ManageSimulation::export_geometry_to_vtk(const std::string& base_filename) 
 }
 
 void ManageSimulation::save_results_to_vtk() {
+    if (!parameters->getOutputVTKEnabled()) {
+        ibsimu.message(1) << "VTK export disabled by outputs.vtk settings" << endl;
+        return;
+    }
+
+    if (!parameters->getOutputVTKExportSimulationState() &&
+        !parameters->getOutputVTKExportTracedParticles() &&
+        !parameters->getOutputVTKExportGeometry()) {
+        ibsimu.message(1) << "All end-of-run VTK exports disabled by outputs.vtk settings" << endl;
+        return;
+    }
+
     // Export complete simulation results to VTK format for ParaView visualization
-    string vtk_folder = fileManager->getRefFolder() + "/VTK";
-    string vtk_base = vtk_folder + "/" + fileManager->getFileTag() + "_simulation";
+    string vtk_base = fileManager->getVTKFolder() + fileManager->getFileTag() + "_simulation";
 
     export_simulation_results_to_vtk(vtk_base, fieldManager->getSpacecharge());
 
@@ -1165,28 +1204,35 @@ void ManageSimulation::export_simulation_results_to_vtk(const std::string& base_
     ibsimu.message(1) << "Exporting complete simulation results to VTK format..." << endl;
     
     // Export space-charge field
-    if (scharge) {
-        geometryManager->exportSpacechargeToVTK(*scharge, base_filename);
-    } else {
-        ibsimu.message(1) << "Warning: No space-charge field available for VTK export" << endl;
+    if (parameters->getOutputVTKExportSimulationState()) {
+        if (scharge) {
+            geometryManager->exportSpacechargeToVTK(*scharge, base_filename);
+        } else {
+            ibsimu.message(1) << "Warning: No space-charge field available for VTK export" << endl;
+        }
     }
     
     // Export particle trajectories
-    if (particleManager && particleManager->getParticles() && particleManager->getParticles()->size() > 0) {
+    if (parameters->getOutputVTKExportTracedParticles() &&
+        particleManager && particleManager->getParticles() && particleManager->getParticles()->size() > 0) {
         particleManager->exportTrajectoriesToVTK(base_filename);
-    } else {
+    } else if (parameters->getOutputVTKExportTracedParticles()) {
         ibsimu.message(1) << "Warning: No particle trajectories available for VTK export" << endl;
     }
     
     // Export potential field (already available but let's add it for completeness)
-    if (fieldManager && fieldManager->getPotential()) {
-        geometryManager->exportPotentialToVTK(*fieldManager->getPotential(), base_filename);
-    } else {
-        ibsimu.message(1) << "Warning: No potential field available for VTK export" << endl;
+    if (parameters->getOutputVTKExportSimulationState()) {
+        if (fieldManager && fieldManager->getPotential()) {
+            geometryManager->exportPotentialToVTK(*fieldManager->getPotential(), base_filename);
+        } else {
+            ibsimu.message(1) << "Warning: No potential field available for VTK export" << endl;
+        }
     }
     
-    // Export geometry boundaries
-    geometryManager->exportSolidsToVTK(base_filename);
+    // Export geometry boundaries when requested.
+    if (parameters->getOutputVTKExportGeometry()) {
+        geometryManager->exportSolidsToVTK(base_filename);
+    }
     
     ibsimu.message(1) << "VTK export completed! Files created in " << vtk_dir << ":" << endl;
     ibsimu.message(1) << "  - " << base_filename.substr(base_filename.find_last_of('/')+1) << "_scharge.vtk (space-charge field)" << endl;

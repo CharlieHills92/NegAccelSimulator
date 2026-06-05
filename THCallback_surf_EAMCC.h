@@ -51,6 +51,7 @@ private:
     Random* _rng;
     ParticleDataBase3D* _pdb;
     double _mass;
+    double _minimum_z;
     bool _debugprint;
     
     // Helper function for safe velocity scaling
@@ -565,8 +566,12 @@ public:
      * @param mass Reference mass for particle type identification
      * @param debugprint Enable debug output
      */
-    THCallback_surf_EAMCC(Geometry &geom, ParticleDataBase3D* pdb, double mass = 1.0, bool debugprint = false)
-        : _geom(geom), _pdb(pdb), _mass(mass), _debugprint(debugprint) {
+    THCallback_surf_EAMCC(Geometry &geom,
+                          ParticleDataBase3D* pdb,
+                          double mass = 1.0,
+                          bool debugprint = false,
+                          double minimum_z = 7.0e-3)
+        : _geom(geom), _pdb(pdb), _mass(mass), _minimum_z(minimum_z), _debugprint(debugprint) {
         _rng = new MTRandom(1);
         double qx[1];
         _rng->get(qx);  // Initialize RNG
@@ -595,8 +600,8 @@ public:
             return;
         }
         
-        // Only generate secondary particles if z coordinate > 0.007m
-        if (loc[2] <= 0.007) {
+        // Only generate secondary particles beyond the configured impact plane.
+        if (loc[2] <= _minimum_z) {
             return;
         }
         

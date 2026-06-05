@@ -9,74 +9,266 @@
 #include <fstream>
 #include <string>
 #include <sstream>
-#include <sys/stat.h> 
-#include <sys/types.h> 
+#include <memory>
+#include <streambuf>
+#include <algorithm>
+#include <cctype>
+#include <cerrno>
+#include <cstring>
+#include <sys/stat.h>
 
 #include "ManageSimulation_New.h"
-#include "ScanManager.h"
-#include "readinputs.h"
+#include "error.hpp"
+#include "ibsimu.hpp"
 //#include "particleiterator_MOD.hpp"
 #include "globals.h"
 //~ #include "sammy/sammy.h"
 
 using namespace std;
 
+namespace {
+
+bool fileExists(const string& path) {
+    ifstream file(path.c_str());
+    return file.good();
+}
+
+string stemFromPath(const string& path) {
+	const size_t slash = path.find_last_of("/\\");
+	const size_t start = (slash == string::npos) ? 0 : slash + 1;
+	const size_t dot = path.find_last_of('.');
+
+	if (dot != string::npos && dot > start) {
+		return path.substr(start, dot - start);
+	}
+
+	return path.substr(start);
+}
+
+string folderFromPath(const string& path) {
+	const size_t slash = path.find_last_of("/\\");
+	if (slash == string::npos) {
+		return ".";
+	}
+
+	if (slash == 0) {
+		return "/";
+	}
+
+	return path.substr(0, slash);
+}
+
+string resolveConfigFilePath(const string& input) {
+    if (input.size() >= 5 && input.substr(input.size() - 5) == ".json") {
+        return input;
+    }
+
+    if (fileExists(input)) {
+        return input;
+    }
+
+    return input + ".json";
+}
+
+string toLowerCopy(const string& value) {
+	string normalized = value;
+	std::transform(normalized.begin(), normalized.end(), normalized.begin(),
+				   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+	return normalized;
+}
+
+bool isAbsolutePath(const string& path) {
+	return !path.empty() && path[0] == '/';
+}
+
+void ensureDirectoryExists(const string& path) {
+	if (path.empty()) {
+		return;
+	}
+
+	string current;
+	for (size_t index = 0; index < path.size(); ++index) {
+		current += path[index];
+		if (path[index] != '/' && index + 1 != path.size()) {
+			continue;
+		}
+
+		string directory = current;
+		while (!directory.empty() && directory[directory.size() - 1] == '/') {
+			directory.erase(directory.size() - 1);
+		}
+		if (directory.empty()) {
+			continue;
+		}
+
+		if (mkdir(directory.c_str(), 0777) == -1 && errno != EEXIST) {
+			throw Error(ERROR_LOCATION, "Could not create directory " + directory + ": " + strerror(errno));
+		}
+	}
+}
+
+string resolveLogFilePath(const string& foldname, const string& configured_log_file, const string& case_tag) {
+	string filename = configured_log_file.empty() ? case_tag + "_log.log" : configured_log_file;
+	if (!isAbsolutePath(filename)) {
+		filename = foldname + "/" + filename;
+	}
+
+	const size_t slash = filename.find_last_of('/');
+	if (slash != string::npos) {
+		ensureDirectoryExists(filename.substr(0, slash));
+	}
+	return filename;
+}
+
+void configureConsoleVerbosity(const string& configured_level) {
+	const string level = toLowerCopy(configured_level);
+
+	int verbose_level = 1;
+	int warning_level = 1;
+	int error_level = 1;
+	int debug_general_level = 0;
+	int debug_dxf_level = 0;
+
+	if (level == "trace") {
+		verbose_level = 2;
+		debug_general_level = 2;
+		debug_dxf_level = 2;
+	} else if (level == "debug") {
+		verbose_level = 2;
+		debug_general_level = 1;
+	} else if (level == "info") {
+		verbose_level = 1;
+	} else if (level == "warning") {
+		verbose_level = 0;
+	} else if (level == "error" || level == "critical") {
+		verbose_level = 0;
+		warning_level = 0;
+	}
+
+	ibsimu.set_message_threshold(MSG_VERBOSE, verbose_level);
+	ibsimu.set_message_threshold(MSG_WARNING, warning_level);
+	ibsimu.set_message_threshold(MSG_ERROR, error_level);
+	ibsimu.set_message_threshold(MSG_DEBUG_GENERAL, debug_general_level);
+	ibsimu.set_message_threshold(MSG_DEBUG_DXF, debug_dxf_level);
+}
+
+bool levelEnablesDebug(const string& configured_level) {
+	const string level = toLowerCopy(configured_level);
+	return level == "debug" || level == "trace";
+}
+
+class TeeStreambuf : public std::streambuf {
+public:
+	TeeStreambuf(std::streambuf* primary, std::streambuf* secondary)
+		: primary_(primary), secondary_(secondary) {}
+
+protected:
+	virtual int overflow(int ch) {
+		if (ch == traits_type::eof()) {
+			return traits_type::not_eof(ch);
+		}
+
+		const int primary_result = primary_ ? primary_->sputc(static_cast<char>(ch)) : ch;
+		const int secondary_result = secondary_ ? secondary_->sputc(static_cast<char>(ch)) : ch;
+		if (primary_result == traits_type::eof() || secondary_result == traits_type::eof()) {
+			return traits_type::eof();
+		}
+		return ch;
+	}
+
+	virtual int sync() {
+		const int primary_sync = primary_ ? primary_->pubsync() : 0;
+		const int secondary_sync = secondary_ ? secondary_->pubsync() : 0;
+		return (primary_sync == 0 && secondary_sync == 0) ? 0 : -1;
+	}
+
+private:
+	std::streambuf* primary_;
+	std::streambuf* secondary_;
+};
+
+class ScopedStreamRedirect {
+public:
+	ScopedStreamRedirect(std::ostream& stream, std::streambuf* secondary)
+		: stream_(stream), original_(stream.rdbuf()), tee_(original_, secondary) {
+		stream_.rdbuf(&tee_);
+	}
+
+	~ScopedStreamRedirect() {
+		stream_.rdbuf(original_);
+	}
+
+private:
+	std::ostream& stream_;
+	std::streambuf* original_;
+	TeeStreambuf tee_;
+};
+
+} // namespace
+
 int main( int argc, char **argv )
 {
+	if (argc < 2) {
+		cerr << "Usage: " << argv[0] << " <case.json|case_stem> [load_existing]" << endl;
+		return 1;
+	}
 
-	char* input_cmd = argv[1];
-	string scan_file_tag;
-	stringstream ss;
-	ss << input_cmd;
-	ss >> scan_file_tag;
+	const string config_file = resolveConfigFilePath(argv[1]);
+	if (!fileExists(config_file)) {
+		cerr << "Resolved JSON case file does not exist: " << config_file << endl;
+		return 1;
+	}
 
-	//string scan_file_name = scan_file_tag+".scn";
-	string foldname=scan_file_tag;
-	
-    if (mkdir(foldname.c_str(), 0777) == -1) cerr << "Warning :  " << strerror(errno) << endl; 
-    else cout << "Directory created"; 
+	SimulationParameters startup_parameters;
+	try {
+		startup_parameters.readParametersFromFile(config_file);
+	} catch (Error& e) {
+		e.print_error_message(cerr, false);
+		return 1;
+	}
 
-	string logfilename=foldname+"/"+scan_file_tag+"_log.log";
+	const string case_tag = stemFromPath(config_file);
+	const string foldname = folderFromPath(config_file);
+	const string logfilename = resolveLogFilePath(
+		foldname,
+		startup_parameters.getOutputLoggingStructuredLogFile(),
+		case_tag);
 
 	logfile.open( logfilename.c_str() );
+	if (!logfile.is_open()) {
+		cerr << "Could not open log file: " << logfilename << endl;
+		return 1;
+	}
+
+	std::unique_ptr<ScopedStreamRedirect> cout_redirect;
+	std::unique_ptr<ScopedStreamRedirect> cerr_redirect;
+	if (startup_parameters.getOutputLoggingCaptureStdout()) {
+		cout_redirect.reset(new ScopedStreamRedirect(cout, logfile.rdbuf()));
+		cerr_redirect.reset(new ScopedStreamRedirect(cerr, logfile.rdbuf()));
+	}
+
+	configureConsoleVerbosity(startup_parameters.getOutputLoggingConsoleLevel());
+	debug = startup_parameters.getOutputLoggingWriteDebugArtifacts() ||
+		levelEnablesDebug(startup_parameters.getOutputLoggingConsoleLevel()) ||
+		levelEnablesDebug(startup_parameters.getOutputLoggingFileLevel());
+	ibsimu.set_message_output(cout);
 // logfile << "\tDisplacement grid created. Xdispl " << xdisplacementSG << " Ydispl " << ydisplacementSG << endl; 
 	
-	logfile << " SCAN TAG: " << scan_file_tag << "\n";
+	logfile << " CONFIG FILE: " << config_file << "\n";
+	logfile << " CASE TAG: " << case_tag << "\n";
+	logfile << " LOG FILE: " << logfilename << "\n";
+	logfile << " OUTPUT FLAGS: summary=" << startup_parameters.getOutputSummaryEnabled()
+	       << " plots=" << startup_parameters.getOutputPlotsEnabled()
+	       << " data=" << startup_parameters.getOutputDataEnabled()
+	       << " vtk=" << startup_parameters.getOutputVTKEnabled() << "\n";
 
-	// Try to use new ScanManager first, fallback to old system if needed
-	vector<string> input_file_tags;
-	
-	// Check if .scn file exists to determine which system to use
-	string scn_file = scan_file_tag + ".scn";
-	ifstream scn_check(scn_file);
-	bool use_new_scan = scn_check.good();
-	scn_check.close();
-	
-	if (use_new_scan) {
-		logfile << "Using ScanManager for file: " << scn_file << "\n";
-		ScanManager scanManager;
-		
-		if (scanManager.loadScanFile(scn_file)) {
-			input_file_tags = scanManager.createInputFileFromScan();
-			logfile << "Created " << input_file_tags.size() << " input files using ScanManager\n";
-		} else {
-			logfile << "ScanManager failed, falling back to original method\n";
-			input_file_tags = create_input_file_from_scan(scan_file_tag);
-		}
-	} else {
-		logfile << "Using original scan system\n";
-		input_file_tags = create_input_file_from_scan(scan_file_tag);
-	}
-	
-	uint nscans = input_file_tags.size();
-		
+	const uint nscans = 1;
 	for ( size_t scan_index=0; scan_index<nscans; scan_index++ ) {
 
 		logfile << "*** Starting simulation " << scan_index+1 << "/" << nscans << " ***\n";
-		logfile << "*** Input file: " << input_file_tags[scan_index] << ".inp ***\n" << flush;
-		string input_file_tag = input_file_tags[scan_index];
+		logfile << "*** Input file: " << config_file << " ***\n" << flush;
 
-		ManageSimulation Simulation( input_file_tag, foldname );
+		ManageSimulation Simulation( case_tag, foldname );
 
 		bool dosim=true;
 		int dosimnum=0;
@@ -91,6 +283,14 @@ int main( int argc, char **argv )
 		if ( dosimnum == 1 ) {
 			dosim=false;
 	 		ibsimu.message(1) << "	LOADING THE SIMULATION \n";
+			if (!startup_parameters.getOutputDataEnabled()) {
+				cerr << "Cannot use load_existing when outputs.data.enabled is false" << endl;
+				logfile << "Cannot use load_existing when outputs.data.enabled is false\n";
+				cout_redirect.reset();
+				cerr_redirect.reset();
+				logfile.close();
+				return 1;
+			}
 		}
 
 		if (dosim) {
@@ -139,35 +339,46 @@ int main( int argc, char **argv )
 			else logfile << " --> OUTSIDE " << tol*100. << "% AFTER " 
 						 << JEXTiterations << " iterations ***\n" << flush;
 
-			logfile << "*** Start the analysis... " << flush;
 			logfile << "*** Getting details of particles at end location... " << endl << flush;
 			Simulation.particles_end_location();
 			logfile << "Done! ***\n" << flush;
-			Simulation.fill_particle_dbs();
+			if (startup_parameters.getOutputSummaryEnabled() ||
+			    (startup_parameters.getOutputPlotsEnabled() && Simulation.get_stripping()>1)) {
+				Simulation.fill_particle_dbs();
+			}
 			
 			// Use the actual domain exit plane instead of a hardcoded value.
 			// 0.565m is only valid for MITICA/MTF (567mm domain); SPIDER domain is ~85mm.
 			double zlocsummary = Simulation.get_domain_z_size() - Simulation.get_MESH_SIZE();
 
-			Simulation.analysis(zlocsummary);
-			Simulation.plot_simulation(argc, argv);
-			if (Simulation.get_stripping()>1) {
-				Simulation.plot_simulation(argc, argv, PARTICLE_HM);
-				Simulation.plot_simulation(argc, argv, PARTICLE_H0);
-				Simulation.plot_simulation(argc, argv, PARTICLE_HP);
-				Simulation.plot_simulation(argc, argv, PARTICLE_H2P);
-				Simulation.plot_simulation(argc, argv, PARTICLE_H20);
-				Simulation.plot_simulation(argc, argv, PARTICLE_E);
+			if (startup_parameters.getOutputSummaryEnabled()) {
+				logfile << "*** Start the analysis... " << flush;
+				Simulation.analysis(zlocsummary);
 			}
-			logfile << "Done! ***\n" << flush;
+
+			if (startup_parameters.getOutputPlotsEnabled()) {
+				Simulation.plot_simulation(argc, argv);
+				if (Simulation.get_stripping()>1) {
+					Simulation.plot_simulation(argc, argv, PARTICLE_HM);
+					Simulation.plot_simulation(argc, argv, PARTICLE_H0);
+					Simulation.plot_simulation(argc, argv, PARTICLE_HP);
+					Simulation.plot_simulation(argc, argv, PARTICLE_H2P);
+					Simulation.plot_simulation(argc, argv, PARTICLE_H20);
+					Simulation.plot_simulation(argc, argv, PARTICLE_E);
+				}
+			}
+			if (startup_parameters.getOutputSummaryEnabled() || startup_parameters.getOutputPlotsEnabled()) {
+				logfile << "Done! ***\n" << flush;
+			}
 			
-			// Create individual simulation summary for ALL particles with error handling
-			try {
-				Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-					zlocsummary, PARTICLE_ALL);
-				logfile << " Individual summary for ALL particles done! ***\n" << flush;
-			} catch (const std::exception& e) {
-				logfile << " ERROR in individual summary for ALL particles: " << e.what() << "\n" << flush;
+			if (startup_parameters.getOutputSummaryEnabled()) {
+				try {
+					Simulation.create_individual_simulation_summary(scan_index, case_tag, 
+						zlocsummary, PARTICLE_ALL);
+					logfile << " Individual summary for ALL particles done! ***\n" << flush;
+				} catch (const std::exception& e) {
+					logfile << " ERROR in individual summary for ALL particles: " << e.what() << "\n" << flush;
+				}
 			}
 			
 			// // Add to scan-level beam properties summary for ALL particles with error handling
@@ -247,8 +458,12 @@ int main( int argc, char **argv )
 			// 	}
 			// }
 
-			string finaloutput = Simulation.save_emitter("final_map_outside.txt", zlocsummary);
-			logfile << "*** Output location of particles saved to file " << finaloutput << " ***\n" << flush;
+			if (startup_parameters.getOutputSummaryEnabled()) {
+				const string finaloutput = Simulation.save_emitter("final_map_outside.txt", zlocsummary);
+				if (!finaloutput.empty()) {
+					logfile << "*** Output location of particles saved to file " << finaloutput << " ***\n" << flush;
+				}
+			}
 			logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans <<" COMPLETED ***\n" << flush;
 
 			Simulation.save_results_to_vtk();
@@ -259,36 +474,52 @@ int main( int argc, char **argv )
 			Simulation.create_geometry(0., Simulation.get_domain_z_size(), 1);
 			logfile << "----- Loading simulation of the full domain -----\n" << flush;
 			logfile << "*** Geometry defined ***\n" << flush;
-			Simulation.load_simulation();
+			if (!Simulation.load_simulation()) {
+				cerr << "Failed to load saved simulation data" << endl;
+				cout_redirect.reset();
+				cerr_redirect.reset();
+				logfile.close();
+				return 1;
+			}
 			logfile << "*** Simulation loaded ***\n" << flush;
 			
 			Simulation.particles_end_location();
-			Simulation.fill_particle_dbs();
+			if (startup_parameters.getOutputSummaryEnabled() ||
+			    (startup_parameters.getOutputPlotsEnabled() && Simulation.get_stripping()>1)) {
+				Simulation.fill_particle_dbs();
+			}
 			
 			// Use the actual domain exit plane instead of a hardcoded value.
 			double zlocsummary = Simulation.get_domain_z_size() - Simulation.get_MESH_SIZE();
 
-			Simulation.analysis(zlocsummary);
-			Simulation.plot_simulation(argc, argv);
-			if (Simulation.get_stripping()>1) {
-				Simulation.plot_simulation(argc, argv, PARTICLE_HM);
-				Simulation.plot_simulation(argc, argv, PARTICLE_H0);
-				Simulation.plot_simulation(argc, argv, PARTICLE_HP);
-				Simulation.plot_simulation(argc, argv, PARTICLE_H2P);
-				Simulation.plot_simulation(argc, argv, PARTICLE_H20);
-				Simulation.plot_simulation(argc, argv, PARTICLE_E);
+			if (startup_parameters.getOutputSummaryEnabled()) {
+				Simulation.analysis(zlocsummary);
 			}
-			logfile << "Done! ***\n" << flush;
+			if (startup_parameters.getOutputPlotsEnabled()) {
+				Simulation.plot_simulation(argc, argv);
+				if (Simulation.get_stripping()>1) {
+					Simulation.plot_simulation(argc, argv, PARTICLE_HM);
+					Simulation.plot_simulation(argc, argv, PARTICLE_H0);
+					Simulation.plot_simulation(argc, argv, PARTICLE_HP);
+					Simulation.plot_simulation(argc, argv, PARTICLE_H2P);
+					Simulation.plot_simulation(argc, argv, PARTICLE_H20);
+					Simulation.plot_simulation(argc, argv, PARTICLE_E);
+				}
+			}
+			if (startup_parameters.getOutputSummaryEnabled() || startup_parameters.getOutputPlotsEnabled()) {
+				logfile << "Done! ***\n" << flush;
+			}
 			logfile << "*** Getting details of particles at end location... " << endl << flush;
 			logfile << "Done! ***\n" << flush;
 			
-			// Create individual simulation summary for ALL particles with error handling
-			try {
-				Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-					zlocsummary, PARTICLE_ALL);
-				logfile << " Individual summary for ALL particles done! ***\n" << flush;
-			} catch (const std::exception& e) {
-				logfile << " ERROR in individual summary for ALL particles: " << e.what() << "\n" << flush;
+			if (startup_parameters.getOutputSummaryEnabled()) {
+				try {
+					Simulation.create_individual_simulation_summary(scan_index, case_tag, 
+						zlocsummary, PARTICLE_ALL);
+					logfile << " Individual summary for ALL particles done! ***\n" << flush;
+				} catch (const std::exception& e) {
+					logfile << " ERROR in individual summary for ALL particles: " << e.what() << "\n" << flush;
+				}
 			}
 			logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans <<" COMPLETED ***\n" << flush;
 		}
@@ -297,6 +528,8 @@ int main( int argc, char **argv )
 	}
 
 	logfile << "*** ALL SIMULATIONS COMPLETED ***";
+	cout_redirect.reset();
+	cerr_redirect.reset();
 	logfile.close();
 
 	

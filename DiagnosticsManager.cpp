@@ -36,7 +36,7 @@ using namespace std;
 void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, int iteration, 
                                                const string& outfile, bool append_at_end, 
                                                const ParticleDataBase3D* pdb) {
-    std::cerr << "DEBUG: generateDiagnosticData called with " << diagzpos.size() << " z-positions" << std::endl << std::flush;
+    if (debug) std::cerr << "DEBUG: generateDiagnosticData called with " << diagzpos.size() << " z-positions" << std::endl << std::flush;
     
     if (debug) logfile << "DEBUG: Printing diagnostic data to " << outfile << " file\n" << flush;
     
@@ -70,11 +70,11 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
 
     for (size_t ii = 0; ii < diagzpos.size(); ii++) {
         double zloc = diagzpos[ii];
-        std::cerr << "DEBUG: Processing z-position " << ii+1 << "/" << diagzpos.size() << " at z=" << zloc << " m" << std::endl << std::flush;
+        if (debug) std::cerr << "DEBUG: Processing z-position " << ii+1 << "/" << diagzpos.size() << " at z=" << zloc << " m" << std::endl << std::flush;
         
-        std::cerr << "DEBUG: About to enter try block" << std::endl << std::flush;
+        if (debug) std::cerr << "DEBUG: About to enter try block" << std::endl << std::flush;
         try {
-            std::cerr << "DEBUG: Inside try block, creating TransverseData" << std::endl << std::flush;
+            if (debug) std::cerr << "DEBUG: Inside try block, creating TransverseData" << std::endl << std::flush;
             // Trajectory diagnostics at specific z location
             TrajectoryDiagnosticData tdata;
             vector<trajectory_diagnostic_e> diagnostics = {
@@ -82,26 +82,28 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                 DIAG_CURR, DIAG_MASS, DIAG_CHARGE, DIAG_NO
             };
             
-            std::cerr << "  About to call trajectories_at_plane..." << std::endl << std::flush;
+            if (debug) std::cerr << "  About to call trajectories_at_plane..." << std::endl << std::flush;
             pdb->trajectories_at_plane(tdata, AXIS_Z, zloc, diagnostics);
-            std::cerr << "  trajectories_at_plane call completed successfully!" << std::endl << std::flush;
+            if (debug) std::cerr << "  trajectories_at_plane call completed successfully!" << std::endl << std::flush;
             
             // Debug: Check the size immediately after the call
             size_t particle_count = tdata.traj_size();
-            std::cerr << "  DEBUG: tdata.traj_size() = " << particle_count << std::endl << std::flush;
+            if (debug) std::cerr << "  DEBUG: tdata.traj_size() = " << particle_count << std::endl << std::flush;
             
             // Write count to file for debugging
-            ofstream debugfile("debug_particle_count.txt", ios::app);
-            size_t pdb_size = pdb->size();
-            debugfile << "z=" << zloc << " count=" << particle_count << " pdb_size=" << pdb_size << endl;
-            debugfile.flush();
-            debugfile.close();
+            if (debug) {
+                ofstream debugfile("debug_particle_count.txt", ios::app);
+                size_t pdb_size = pdb->size();
+                debugfile << "z=" << zloc << " count=" << particle_count << " pdb_size=" << pdb_size << endl;
+                debugfile.flush();
+                debugfile.close();
+            }
             
-            std::cerr << "  Retrieved " << tdata.traj_size() << " particles at z=" << zloc << std::endl << std::flush;
-            std::cerr << "  Particle database size: " << pdb->size() << std::endl << std::flush;
+            if (debug) std::cerr << "  Retrieved " << tdata.traj_size() << " particles at z=" << zloc << std::endl << std::flush;
+            if (debug) std::cerr << "  Particle database size: " << pdb->size() << std::endl << std::flush;
             
             if (tdata.traj_size() > 0) {
-            std::cerr << "  Processing " << tdata.traj_size() << " particles for diagnostic calculations..." << std::endl << std::flush;
+            if (debug) std::cerr << "  Processing " << tdata.traj_size() << " particles for diagnostic calculations..." << std::endl << std::flush;
             
             // Extract data into vectors using the correct access pattern (i,column) from ManageSimulation.cpp
             vector<double> x_data, y_data, z_data, vx_data, vy_data, vz_data, curr_data;
@@ -119,15 +121,15 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
             
             // Calculate statistics using the proper diagnostic functions
             double current_sum = sumcurrent(curr_data);
-            std::cerr << "  Current data size: " << curr_data.size() << std::endl << std::flush;
-            if (curr_data.size() > 0) {
+            if (debug) std::cerr << "  Current data size: " << curr_data.size() << std::endl << std::flush;
+            if (debug && curr_data.size() > 0) {
                 std::cerr << "  First few current values: ";
                 for (size_t ii = 0; ii < std::min(size_t(5), curr_data.size()); ++ii) {
                     std::cerr << curr_data[ii] << " ";
                 }
                 std::cerr << std::endl << std::flush;
             }
-            std::cerr << "  Current sum calculated: " << current_sum << " A (" << 1000*current_sum << " mA)" << std::endl << std::flush;
+            if (debug) std::cerr << "  Current sum calculated: " << current_sum << " A (" << 1000*current_sum << " mA)" << std::endl << std::flush;
             
             double x_ave = Average(x_data, curr_data);
             double y_ave = Average(y_data, curr_data);
@@ -168,7 +170,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                   << sigma_val << " "
                   << "\n" << flush;
         } else {
-            std::cerr << "  No particles found at z=" << zloc << ". Writing zeros." << std::endl << std::flush;
+            if (debug) std::cerr << "  No particles found at z=" << zloc << ". Writing zeros." << std::endl << std::flush;
             if (debug) logfile << "DEBUG: No particles intercepting at z position " << zloc << " m. Skipping." << endl;
             // Write zeros for this z position (17 columns total)
             pout5 << iteration << " "
@@ -176,7 +178,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                   << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
         }
         } catch (const Error& e) {
-            std::cerr << "DEBUG: IBSimu Error caught at z=" << zloc << " m" << std::endl << std::flush;
+            if (debug) std::cerr << "DEBUG: IBSimu Error caught at z=" << zloc << " m" << std::endl << std::flush;
             if (debug) logfile << "DEBUG: Error in trajectory diagnostics at z=" << zloc 
                                << " m: IBSIMU Error. Writing zeros." << endl;
             // Write zeros for this z position due to error (17 columns total)
@@ -184,7 +186,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                   << 1000*zloc << " "
                   << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
         } catch (const std::exception& e) {
-            std::cerr << "DEBUG: Standard exception caught at z=" << zloc << " m: " << e.what() << std::endl << std::flush;
+            if (debug) std::cerr << "DEBUG: Standard exception caught at z=" << zloc << " m: " << e.what() << std::endl << std::flush;
             if (debug) logfile << "DEBUG: Standard exception in trajectory diagnostics at z=" << zloc 
                                << " m: " << e.what() << ". Writing zeros." << endl;
             // Write zeros for this z position due to error (17 columns total)
@@ -752,7 +754,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                                                const Geometry* /*geometry*/,
                                                const EpotField* potential,
                                                const MeshVectorField* magnetic) {
-    std::cerr << "DEBUG: generateDiagnosticData called with " << diagzpos.size() << " z-positions (with field calculations)" << std::endl << std::flush;
+    if (debug) std::cerr << "DEBUG: generateDiagnosticData called with " << diagzpos.size() << " z-positions (with field calculations)" << std::endl << std::flush;
     
     if (debug) logfile << "DEBUG: Printing diagnostic data to " << outfile << " file\n" << flush;
     
@@ -767,10 +769,14 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
     vector<double> charge[1];
     vector<double> no_part[1];
 
-    // Load density profile for calculations
+    // Load the same runtime-selected density profile used by stripping callbacks.
+    if (density_profile_filename_.empty()) {
+        throw Error(ERROR_LOCATION,
+                    "Diagnostics density profile is not configured");
+    }
+
     vector<double> pos, dens;
-    string filedens = "densprofiles/MTF_dens.txt";
-    load_density_profile(filedens, pos, dens);
+    load_density_profile(density_profile_filename_, pos, dens);
 
     ofstream pout5;
     if (append_at_end) {
@@ -783,7 +789,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
 
     for (size_t i = 0; i < diagzpos.size(); ++i) {
         double zloc = diagzpos[i];
-        std::cerr << "DEBUG: Processing z-position " << (i+1) << "/" << diagzpos.size() 
+        if (debug) std::cerr << "DEBUG: Processing z-position " << (i+1) << "/" << diagzpos.size() 
                   << " at z=" << zloc << " m" << std::endl << std::flush;
         
         // Clear vectors for this z-position
@@ -791,9 +797,9 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
         vx[0].clear(); vy[0].clear(); vz[0].clear();
         curr[0].clear(); mass[0].clear(); charge[0].clear(); no_part[0].clear();
         
-        std::cerr << "DEBUG: About to enter try block" << std::endl << std::flush;
+        if (debug) std::cerr << "DEBUG: About to enter try block" << std::endl << std::flush;
         try {
-            std::cerr << "DEBUG: Inside try block, creating TransverseData" << std::endl << std::flush;
+            if (debug) std::cerr << "DEBUG: Inside try block, creating TransverseData" << std::endl << std::flush;
             
             // Trajectory diagnostics at specific z location
             TrajectoryDiagnosticData tdata;
@@ -802,26 +808,28 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                 DIAG_CURR, DIAG_MASS, DIAG_CHARGE, DIAG_NO
             };
             
-            std::cerr << "  About to call trajectories_at_plane..." << std::endl << std::flush;
+            if (debug) std::cerr << "  About to call trajectories_at_plane..." << std::endl << std::flush;
             pdb->trajectories_at_plane(tdata, AXIS_Z, zloc, diagnostics);
-            std::cerr << "  trajectories_at_plane call completed successfully!" << std::endl << std::flush;
+            if (debug) std::cerr << "  trajectories_at_plane call completed successfully!" << std::endl << std::flush;
             
             // Debug: Check the size immediately after the call
             size_t particle_count = tdata.traj_size();
-            std::cerr << "  DEBUG: tdata.traj_size() = " << particle_count << std::endl << std::flush;
+            if (debug) std::cerr << "  DEBUG: tdata.traj_size() = " << particle_count << std::endl << std::flush;
             
             // Write count to file for debugging
-            ofstream debugfile("debug_particle_count.txt", ios::app);
-            size_t pdb_size = pdb->size();
-            debugfile << "z=" << zloc << " count=" << particle_count << " pdb_size=" << pdb_size << endl;
-            debugfile.flush();
-            debugfile.close();
+            if (debug) {
+                ofstream debugfile("debug_particle_count.txt", ios::app);
+                size_t pdb_size = pdb->size();
+                debugfile << "z=" << zloc << " count=" << particle_count << " pdb_size=" << pdb_size << endl;
+                debugfile.flush();
+                debugfile.close();
+            }
             
-            std::cerr << "  Retrieved " << particle_count << " particles at z=" << zloc << std::endl << std::flush;
-            std::cerr << "  Particle database size: " << pdb->size() << std::endl << std::flush;
+            if (debug) std::cerr << "  Retrieved " << particle_count << " particles at z=" << zloc << std::endl << std::flush;
+            if (debug) std::cerr << "  Particle database size: " << pdb->size() << std::endl << std::flush;
             
             if (particle_count > 0) {
-                std::cerr << "  Processing " << particle_count << " particles for diagnostic calculations..." << std::endl << std::flush;
+                if (debug) std::cerr << "  Processing " << particle_count << " particles for diagnostic calculations..." << std::endl << std::flush;
                 
                 // Extract data into vectors using the correct access pattern
                 vector<double> x_data, y_data, z_data, vx_data, vy_data, vz_data, curr_data;
@@ -838,15 +846,15 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                 
                 // Calculate statistics using the proper diagnostic functions
                 double current_sum = sumcurrent(curr_data);
-                std::cerr << "  Current data size: " << curr_data.size() << std::endl << std::flush;
-                if (curr_data.size() > 0) {
+                if (debug) std::cerr << "  Current data size: " << curr_data.size() << std::endl << std::flush;
+                if (debug && curr_data.size() > 0) {
                     std::cerr << "  First few current values: ";
                     for (size_t ii = 0; ii < std::min(size_t(5), curr_data.size()); ++ii) {
                         std::cerr << curr_data[ii] << " ";
                     }
                     std::cerr << std::endl << std::flush;
                 }
-                std::cerr << "  Current sum calculated: " << current_sum << " A (" << 1000*current_sum << " mA)" << std::endl << std::flush;
+                if (debug) std::cerr << "  Current sum calculated: " << current_sum << " A (" << 1000*current_sum << " mA)" << std::endl << std::flush;
                 
                 double x_ave = Average(x_data, curr_data);
                 double y_ave = Average(y_data, curr_data);
@@ -876,7 +884,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                         // std::cerr << "  DEBUG: Potential at (" << pos3d[0] << "," << pos3d[1] << "," << pos3d[2] 
                         //           << ") = " << potential_val << " V" << std::endl << std::flush;
                     } catch (const std::exception& e) {
-                        std::cerr << "  DEBUG: Error evaluating potential: " << e.what() << std::endl << std::flush;
+                        if (debug) std::cerr << "  DEBUG: Error evaluating potential: " << e.what() << std::endl << std::flush;
                     }
                 }
                 
@@ -890,7 +898,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                         //           << ") = (" << B_at_given_z[0] << "," << B_at_given_z[1] << "," << B_at_given_z[2] 
                         //           << ") T, using B_y=" << bfield_val << " T" << std::endl << std::flush;
                     } catch (const std::exception& e) {
-                        std::cerr << "  DEBUG: Error evaluating magnetic field: " << e.what() << std::endl << std::flush;
+                        if (debug) std::cerr << "  DEBUG: Error evaluating magnetic field: " << e.what() << std::endl << std::flush;
                     }
                 }
                 
@@ -902,7 +910,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                     // std::cerr << "  DEBUG: Density at z=" << zloc << " m = " << density_val 
                     //           << " kg/m³ (density profile loaded with " << pos.size() << " points)" << std::endl << std::flush;
                 } else {
-                    std::cerr << "  DEBUG: No density profile loaded (pos.size=" << pos.size() 
+                    if (debug) std::cerr << "  DEBUG: No density profile loaded (pos.size=" << pos.size() 
                               << ", dens.size=" << dens.size() << ")" << std::endl << std::flush;
                 }
                 
@@ -920,10 +928,10 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                         //           << " eV = " << sigma_val << " m² (single=" << sigma_single 
                         //           << ", double=" << sigma_double << ")" << std::endl << std::flush;
                     } catch (const std::exception& e) {
-                        std::cerr << "  DEBUG: Error calculating stripping cross section: " << e.what() << std::endl << std::flush;
+                        if (debug) std::cerr << "  DEBUG: Error calculating stripping cross section: " << e.what() << std::endl << std::flush;
                     }
                 } else {
-                    std::cerr << "  DEBUG: No potential field for cross section calculation" << std::endl << std::flush;
+                    if (debug) std::cerr << "  DEBUG: No potential field for cross section calculation" << std::endl << std::flush;
                 }
                 
                 pout5 << iteration << " "
@@ -945,7 +953,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                       << sigma_val << " "          // m²
                       << endl << flush;
             } else {
-                std::cerr << "  No particles found at z=" << zloc << std::endl << std::flush;
+                if (debug) std::cerr << "  No particles found at z=" << zloc << std::endl << std::flush;
                 
                 // Write zeros for empty locations
                 pout5 << iteration << " "
@@ -955,7 +963,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
             }
             
         } catch (Error& e) {
-            std::cerr << "  IBSimu Error caught: [Error in grid power analysis]" << std::endl << std::flush;
+            if (debug) std::cerr << "  IBSimu Error caught: [Error in grid power analysis]" << std::endl << std::flush;
             
             // Write error entry
             pout5 << iteration << " "
@@ -963,7 +971,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                   << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
                   << endl << flush;
         } catch (std::exception& e) {
-            std::cerr << "  Standard exception caught: " << e.what() << std::endl << std::flush;
+            if (debug) std::cerr << "  Standard exception caught: " << e.what() << std::endl << std::flush;
             
             // Write error entry
             pout5 << iteration << " "

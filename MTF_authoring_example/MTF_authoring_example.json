@@ -1,0 +1,173 @@
+{
+  "metadata": {
+    "schemaVersion": "1.0.0",
+    "caseTag": "MTF_authoring_example",
+    "title": "MTF authoring example",
+    "description": "User-facing Python-side input file organized by geometry, boundary conditions, source, gas, physics, run controls, and outputs."
+  },
+  "accelerator": {
+    "type": "MTF",
+    "legacyIndex": 3,
+    "useBuiltInDefaults": true
+  },
+  "geometry": {
+    "source": {
+      "mode": "builtin-generator",
+      "template": "MTF"
+    },
+    "mesh": {
+      "sizeMeters": 0.002,
+      "exportGeometryVtk": true
+    },
+    "domain": {
+      "xSizeMeters": 0.08,
+      "ySizeMeters": 0.08,
+      "zSizeMeters": 0.567
+    },
+    "gaps": {
+      "accelerationGapMeters": 0.088
+    }
+  },
+  "particleSources": {
+    "negativeIonBeam": {
+      "species": "H-",
+      "chargeState": -1.0,
+      "massU": 1.0,
+      "currentDensityAm2": 270.0,
+      "perpendicularTemperatureEV": 0.0,
+      "axialEnergyEV": 3.0,
+      "sourceModel": "uniform",
+      "parallelTemperatureEV": 0.0,
+      "plasmaPotentialVolts": 0.0,
+      "electronsModelWeight": 0.0
+    }
+  },
+  "simulation": {
+    "particleCount": 50000,
+    "iterations": 4,
+    "domainDecomposition": {
+      "splitDomain": false
+    },
+    "solver": {
+      "type": "bicgstab",
+      "shieldModel": "nsimp"
+    },
+    "spaceCharge": {
+      "alphaCoeff": 0.5,
+      "pgFilterScale": 0.0,
+      "cesmadcmScale": 0.0
+    },
+    "convergence": {
+      "currentDensityTolerance": 1.0
+    }
+  },
+  "boundaryConditions": {
+    "electrodes": [
+      {
+        "name": "EG",
+        "role": "extraction_grid",
+        "stage": 0,
+        "voltageVolts": 7200.0
+      },
+      {
+        "name": "AG1",
+        "role": "accelerator_grid",
+        "stage": 1,
+        "voltageVolts": 165600.0
+      },
+      {
+        "name": "AG2",
+        "role": "accelerator_grid",
+        "stage": 2,
+        "voltageVolts": 324000.0
+      },
+      {
+        "name": "AG3",
+        "role": "accelerator_grid",
+        "stage": 3,
+        "voltageVolts": 482400.0
+      },
+      {
+        "name": "AG4",
+        "role": "accelerator_grid",
+        "stage": 4,
+        "voltageVolts": 640800.0
+      },
+      {
+        "name": "AG5",
+        "role": "accelerator_grid",
+        "stage": 5,
+        "voltageVolts": 799200.0
+      }
+    ]
+  },
+  "externalMagneticField": {
+    "enabled": true,
+    "sourceMode": "auto-by-accelerator",
+    "scale": 1.0,
+    "case": 1
+  },
+  "gasDensity": {
+    "defaultProfile": "mtf-background",
+    "profiles": [
+      {
+        "name": "mtf-background",
+        "species": "H2",
+        "source": {
+          "mode": "file",
+          "path": "densprofiles/MTF_dens.txt",
+          "format": "z-density-columns"
+        },
+        "useFor": [
+          "stripping",
+          "secondaryEmission",
+          "diagnostics"
+        ]
+      }
+    ]
+  },
+  "physics": {
+    "stripping": {
+      "mode": "withSecondaries",
+      "minimumZMeters": 0.009,
+      "densityProfile": "mtf-background"
+    },
+    "surfaceCollisions": {
+      "enabled": false,
+      "model": "EAMCC",
+      "minimumImpactZMeters": 0.007,
+      "maximumSecondaryElectrons": 26,
+      "secondaryElectronEnergyEV": 10.0,
+      "debug": false
+    }
+  },
+  "outputs": {
+    "rootDirectory": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/MTF_authoring_example",
+    "summary": {
+      "enabled": true,
+      "directory": "Summary"
+    },
+    "plots": {
+      "enabled": true,
+      "directory": "Plots"
+    },
+    "data": {
+      "enabled": true,
+      "directory": "Data"
+    },
+    "vtk": {
+      "enabled": true,
+      "directory": "VTK",
+      "exportGeometry": true,
+      "exportSimulationState": true,
+      "exportTracedParticles": true
+    },
+    "logging": {
+      "consoleLevel": "info",
+      "fileLevel": "debug",
+      "captureStdout": true,
+      "writeDebugArtifacts": false,
+      "structuredLogFile": "run.log"
+    }
+  }
+}

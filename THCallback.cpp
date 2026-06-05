@@ -3,7 +3,7 @@
 
 
 
-int check_periodicity( ParticleDataBase3D* _pdb, ParticleBase *particle, ParticleP3D *pcur, ParticleP3D *pend, vector<double>& _periodicity ) {
+int check_periodicity( ParticleDataBase3D* _pdb, ParticleBase *particle, ParticleP3D *pcur, ParticleP3D *pend, const vector<double>& _periodicity ) {
 	
 	int bound=0;
 

@@ -1,453 +1,710 @@
-/*
- * SimulationParameters.cpp
- *
- *  Created on: Aug 04, 2025
- *      Author: GitHub Copilot (Refactored from ManageSimulation)
- */
-
 #include "SimulationParameters.h"
+
+#include "StrippingUtils.h"
 #include "error.hpp"
-#include "ibsimu.hpp"
 
+#include <nlohmann/json.hpp>
+
+#include <fstream>
 #include <iostream>
-#include <sstream>
-#include <algorithm>
+#include <stdexcept>
 
+using json = nlohmann::json;
 using namespace std;
 
-SimulationParameters::SimulationParameters() :
-    ACCELERATOR_IDX(0), B_ISON(0), INCLUDE_STRIPPING(0), INCLUDE_SURFACE_COLLISIONS(0), ELECTRONS(0),
-    M_IONS(0), Q_IONS(0), J_ION(0), TPERP(0), TPAR(0), E0_Z(0), U_PLASMA(0), N_PARTICLES(0),
-    EG_VOLTAGE(0), GG_VOLTAGE(0), REP_VOLTAGE(0), G1_VOLTAGE(0), G2_VOLTAGE(0), 
-    G3_VOLTAGE(0), G4_VOLTAGE(0), G5_VOLTAGE(0),
-    MESH_SIZE(0), ITERATIONS(0), PGFILTER_SCALE(0), CESMADCM_SCALE(0), MGSOLVER(0),
-    EXTFIELD_CASE(0), EXTFIELD_SCALE(0), SPLIT_DOMAIN(0), JTOLERANCE(0), 
-    ALPHA_COEFF(0), T_POSITIVE(0), SHIELD_MODEL(0), N_SOLIDS(0),
-    EXT_GAP(0), ACC_GAP(0), DOMAIN_X_SIZE(-1), DOMAIN_Y_SIZE(-1), DOMAIN_Z_SIZE(-1),
-    EGEXTJ(0), domain_ii(0) {
+namespace {
+
+const char* geometryTemplateFromAcceleratorIndex(uint accelerator_index) {
+    switch (accelerator_index) {
+        case 1U:
+            return "SPIDER";
+        case 2U:
+            return "MITICA";
+        case 3U:
+            return "MTF";
+        default:
+            return "";
+    }
+}
+
+bool isKnownGeometryTemplate(const string& geometry_template) {
+    return geometry_template == "SPIDER" || geometry_template == "MITICA" || geometry_template == "MTF";
+}
+
+string defaultGeometryTemplate(uint accelerator_index) {
+    return geometryTemplateFromAcceleratorIndex(accelerator_index);
+}
+
+double defaultDomainXSizeMeters(const string& geometry_template) {
+    if (geometry_template == "SPIDER") {
+        return 26.0e-3;
+    }
+    if (geometry_template == "MITICA") {
+        return 30.0e-3;
+    }
+    if (geometry_template == "MTF") {
+        return 80.0e-3;
+    }
+
+    return 30.0e-3;
+}
+
+double defaultDomainYSizeMeters(const string& geometry_template) {
+    if (geometry_template == "SPIDER") {
+        return 28.0e-3;
+    }
+    if (geometry_template == "MITICA") {
+        return 30.0e-3;
+    }
+    if (geometry_template == "MTF") {
+        return 80.0e-3;
+    }
+
+    return 30.0e-3;
+}
+
+double defaultDomainZSizeMeters(const string& geometry_template) {
+    if (geometry_template == "SPIDER") {
+        return 80.0e-3;
+    }
+    if (geometry_template == "MITICA") {
+        return 554.0e-3;
+    }
+    if (geometry_template == "MTF") {
+        return 567.0e-3;
+    }
+
+    return 567.0e-3;
+}
+
+void applyDefaultPeriodicity(const string& geometry_template,
+                             double& x_min,
+                             double& x_max,
+                             double& y_min,
+                             double& y_max,
+                             uint& enabled) {
+    if (geometry_template == "SPIDER") {
+        x_min = -10.0e-3;
+        x_max = 10.0e-3;
+        y_min = -11.0e-3;
+        y_max = 11.0e-3;
+        enabled = 1U;
+        return;
+    }
+    if (geometry_template == "MITICA") {
+        x_min = -15.0e-3;
+        x_max = 15.0e-3;
+        y_min = -15.0e-3;
+        y_max = 15.0e-3;
+        enabled = 1U;
+        return;
+    }
+    if (geometry_template == "MTF") {
+        x_min = -40.0e-3;
+        x_max = 40.0e-3;
+        y_min = -40.0e-3;
+        y_max = 40.0e-3;
+        enabled = 1U;
+        return;
+    }
+
+    x_min = 0.0;
+    x_max = 0.0;
+    y_min = 0.0;
+    y_max = 0.0;
+    enabled = 0U;
+}
+
+uint acceleratorIndexFromType(const string& acceleratorType) {
+    if (acceleratorType == "SPIDER") {
+        return 1U;
+    }
+    if (acceleratorType == "MITICA") {
+        return 2U;
+    }
+    if (acceleratorType == "MTF") {
+        return 3U;
+    }
+    if (acceleratorType == "ELISE") {
+        return 4U;
+    }
+    if (acceleratorType == "NIO1") {
+        return 5U;
+    }
+    if (acceleratorType == "BUG" || acceleratorType == "CUSTOM") {
+        return 0U;
+    }
+
+    throw runtime_error("Unsupported accelerator type: " + acceleratorType);
+}
+
+uint shieldModelFromType(const string& shieldType) {
+    return shieldType == "shield" ? 1U : 0U;
+}
+
+uint solverFromType(const string& solverType) {
+    return solverType == "multigrid" ? 1U : 0U;
+}
+
+uint strippingModeFromString(const string& mode) {
+    if (mode == "disabled") {
+        return 0U;
+    }
+    if (mode == "primaryOnly") {
+        return 1U;
+    }
+    if (mode == "withSecondaries") {
+        return 2U;
+    }
+
+    throw runtime_error("Unsupported stripping mode: " + mode);
+}
+
+bool hasObject(const json& root, const char* key) {
+    return root.contains(key) && root.at(key).is_object();
+}
+
+const json* findDensityProfile(const json& profiles, const string& profile_name) {
+    if (!profiles.is_array()) {
+        return nullptr;
+    }
+
+    for (json::const_iterator it = profiles.begin(); it != profiles.end(); ++it) {
+        if (!it->is_object()) {
+            continue;
+        }
+        if (it->value("name", string()) == profile_name) {
+            return &(*it);
+        }
+    }
+
+    return nullptr;
+}
+
+} // namespace
+
+SimulationParameters::SimulationParameters()
+    : ACCELERATOR_IDX(0),
+      B_ISON(0),
+      INCLUDE_STRIPPING(0),
+      INCLUDE_SURFACE_COLLISIONS(0),
+      ELECTRONS(0.0),
+      M_IONS(0.0),
+      Q_IONS(0.0),
+      J_ION(0.0),
+      TPERP(0.0),
+      TPAR(0.0),
+      E0_Z(0.0),
+      U_PLASMA(0.0),
+      N_PARTICLES(0U),
+      EG_VOLTAGE(0.0),
+      GG_VOLTAGE(0.0),
+      REP_VOLTAGE(0.0),
+      G1_VOLTAGE(0.0),
+      G2_VOLTAGE(0.0),
+      G3_VOLTAGE(0.0),
+      G4_VOLTAGE(0.0),
+      G5_VOLTAGE(0.0),
+      MESH_SIZE(0.0),
+      ITERATIONS(0U),
+      PGFILTER_SCALE(0.0),
+      CESMADCM_SCALE(0.0),
+      EXTFIELD_CASE(0U),
+      EXTFIELD_SCALE(0.0),
+      SPLIT_DOMAIN(0U),
+      JTOLERANCE(0.0),
+      ALPHA_COEFF(0.0),
+      T_POSITIVE(0.0),
+      N_SOLIDS(0U),
+      MGSOLVER(0U),
+      SHIELD_MODEL(0U),
+      EXT_GAP(0.0),
+      ACC_GAP(0.0),
+      DOMAIN_X_SIZE(-1.0),
+      DOMAIN_Y_SIZE(-1.0),
+      DOMAIN_Z_SIZE(-1.0),
+      EGEXTJ(0.0),
+            domain_ii(0U),
+            GEOMETRY_TEMPLATE(),
+            STRIPPING_DENSITY_PROFILE(),
+            STRIPPING_MIN_Z(-1.0),
+            SURFACE_COLLISIONS_MIN_Z(7.0e-3),
+            SURFACE_COLLISIONS_DEBUG(0U),
+            PERIODIC_BOUNDARIES_ENABLED(0U),
+            PERIODIC_X_MIN(0.0),
+            PERIODIC_X_MAX(0.0),
+            PERIODIC_Y_MIN(0.0),
+            PERIODIC_Y_MAX(0.0),
+            OUTPUT_SUMMARY_DIRECTORY("Summary"),
+            OUTPUT_PLOTS_DIRECTORY("Plots"),
+            OUTPUT_DATA_DIRECTORY("Data"),
+            OUTPUT_VTK_DIRECTORY("VTK"),
+            OUTPUT_SUMMARY_ENABLED(1U),
+            OUTPUT_PLOTS_ENABLED(1U),
+            OUTPUT_DATA_ENABLED(1U),
+            OUTPUT_VTK_ENABLED(1U),
+            OUTPUT_VTK_EXPORT_GEOMETRY(1U),
+            OUTPUT_VTK_EXPORT_SIMULATION_STATE(1U),
+            OUTPUT_VTK_EXPORT_TRACED_PARTICLES(1U),
+            OUTPUT_LOGGING_CONSOLE_LEVEL("info"),
+            OUTPUT_LOGGING_FILE_LEVEL("debug"),
+            OUTPUT_LOGGING_CAPTURE_STDOUT(1U),
+            OUTPUT_LOGGING_WRITE_DEBUG_ARTIFACTS(0U),
+            OUTPUT_LOGGING_STRUCTURED_LOG_FILE("run.log") {
 }
 
 void SimulationParameters::readParametersFromFile(const string& input) {
-    // Check if input is a scenario file (.scn) or input file (.inp)
-    size_t ext_pos = input.find_last_of('.');
-    string extension = (ext_pos != string::npos) ? input.substr(ext_pos) : "";
-    
-    if (extension == ".scn") {
-        // Parse scenario file directly
-        parseScenarioFile(input);
-        
-        cout << "Using scenario-based configuration from: " << input << endl;
-    } else {
-        // Parse legacy .inp file
-        parseInputFile(input);
-        
-        cout << "Using legacy input file configuration from: " << input << endl;
+    const size_t ext_pos = input.find_last_of('.');
+    const string extension = (ext_pos != string::npos) ? input.substr(ext_pos) : "";
+
+    if (extension != ".json") {
+        throw Error(ERROR_LOCATION, "Only JSON configuration files are supported: " + input);
     }
+
+    parseJsonFile(input);
+    cout << "Using JSON configuration from: " << input << endl;
 }
 
-void SimulationParameters::parseInputFile(const string& inputFile) {
-    cout << "Parsing legacy input file: " << inputFile << endl;
-    
-    // First set all default values
-    setDefaultValues();
-    
-    ifstream file(inputFile);
+void SimulationParameters::parseJsonFile(const string& configFile) {
+    ifstream file(configFile.c_str());
     if (!file.is_open()) {
-        throw Error(ERROR_LOCATION, "Could not open input file: " + inputFile);
+        throw Error(ERROR_LOCATION, "Could not open JSON configuration: " + configFile);
     }
 
-    string line;
-    int line_number = 0;
-    
-    while (getline(file, line)) {
-        // Skip empty lines and comments
-        if (line.empty() || line[0] == '#') continue;
-        
-        line_number++;
-        
-        // Extract value from "VALUE // DESCRIPTION" format
-        string value;
-        size_t comment_pos = line.find("//");
-        if (comment_pos != string::npos) {
-            value = line.substr(0, comment_pos);
-        } else {
-            value = line;
-        }
-        
-        // Trim whitespace
-        value.erase(0, value.find_first_not_of(" \t"));
-        value.erase(value.find_last_not_of(" \t") + 1);
-        
-        if (value.empty()) continue;
-        
-        // Handle special KEY=VALUE format for domain sizes
-        if (value.find("DOMAIN_") != string::npos && value.find("=") != string::npos) {
-            size_t equals_pos = value.find('=');
-            string key = value.substr(0, equals_pos);
-            string val = value.substr(equals_pos + 1);
-            
-            // Trim whitespace
-            key.erase(0, key.find_first_not_of(" \t"));
-            key.erase(key.find_last_not_of(" \t") + 1);
-            val.erase(0, val.find_first_not_of(" \t"));
-            val.erase(val.find_last_not_of(" \t") + 1);
-            
-            if (key == "DOMAIN_X_SIZE") {
-                DOMAIN_X_SIZE = stod(val) * 1e-3; // Convert mm to m
-                cout << "Set " << key << " = " << val << "mm (" << DOMAIN_X_SIZE << "m)" << endl;
-            } else if (key == "DOMAIN_Y_SIZE") {
-                DOMAIN_Y_SIZE = stod(val) * 1e-3; // Convert mm to m
-                cout << "Set " << key << " = " << val << "mm (" << DOMAIN_Y_SIZE << "m)" << endl;
-            } else if (key == "DOMAIN_Z_SIZE") {
-                DOMAIN_Z_SIZE = stod(val) * 1e-3; // Convert mm to m
-                cout << "Set " << key << " = " << val << "mm (" << DOMAIN_Z_SIZE << "m)" << endl;
-            }
-            continue;
-        }
-        
-        // Map line position to parameter assignment (based on .inp file format)
-        try {
-            if (line_number == 1) {
-                ACCELERATOR_IDX = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": ACCELERATOR_IDX = " << value << endl;
-            } else if (line_number == 2) {
-                B_ISON = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": B_ISON = " << value << endl;
-            } else if (line_number == 3) {
-                INCLUDE_STRIPPING = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": INCLUDE_STRIPPING = " << value << endl;
-            } else if (line_number == 4) {
-                INCLUDE_SURFACE_COLLISIONS = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": INCLUDE_SURFACE_COLLISIONS = " << value << endl;
-            } else if (line_number == 5) {
-                ELECTRONS = stod(value);
-                cout << "Line " << line_number << ": ELECTRONS = " << value << endl;
-            } else if (line_number == 6) {
-                M_IONS = stod(value);
-                cout << "Line " << line_number << ": M_IONS = " << value << endl;
-            } else if (line_number == 7) {
-                Q_IONS = stod(value);
-                cout << "Line " << line_number << ": Q_IONS = " << value << endl;
-            } else if (line_number == 8) {
-                J_ION = stod(value);
-                cout << "Line " << line_number << ": J_ION = " << value << endl;
-            } else if (line_number == 9) {
-                TPERP = stod(value);
-                cout << "Line " << line_number << ": TPERP = " << value << endl;
-            } else if (line_number == 10) {
-                TPAR = stod(value);
-                cout << "Line " << line_number << ": TPAR = " << value << endl;
-            } else if (line_number == 11) {
-                E0_Z = stod(value);
-                cout << "Line " << line_number << ": E0_Z = " << value << endl;
-            } else if (line_number == 12) {
-                U_PLASMA = stod(value);
-                cout << "Line " << line_number << ": U_PLASMA = " << value << endl;
-            } else if (line_number == 13) {
-                N_PARTICLES = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": N_PARTICLES = " << value << endl;
-            } else if (line_number == 14) {
-                EG_VOLTAGE = stod(value);
-                cout << "Line " << line_number << ": EG_VOLTAGE = " << value << endl;
-            } else if (line_number == 15) {
-                GG_VOLTAGE = stod(value);
-                cout << "Line " << line_number << ": GG_VOLTAGE = " << value << endl;
-            } else if (line_number == 16) {
-                REP_VOLTAGE = stod(value);
-                cout << "Line " << line_number << ": REP_VOLTAGE = " << value << endl;
-            } else if (line_number == 17) {
-                G3_VOLTAGE = stod(value);
-                cout << "Line " << line_number << ": G3_VOLTAGE = " << value << endl;
-            } else if (line_number == 18) {
-                G4_VOLTAGE = stod(value);
-                cout << "Line " << line_number << ": G4_VOLTAGE = " << value << endl;
-            } else if (line_number == 19) {
-                G5_VOLTAGE = stod(value);
-                cout << "Line " << line_number << ": G5_VOLTAGE = " << value << endl;
-            } else if (line_number == 20) {
-                MESH_SIZE = stod(value);
-                cout << "Line " << line_number << ": MESH_SIZE = " << value << endl;
-            } else if (line_number == 21) {
-                ITERATIONS = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": ITERATIONS = " << value << endl;
-            } else if (line_number == 22) {
-                PGFILTER_SCALE = stod(value);
-                cout << "Line " << line_number << ": PGFILTER_SCALE = " << value << endl;
-            } else if (line_number == 23) {
-                CESMADCM_SCALE = stod(value);
-                cout << "Line " << line_number << ": CESMADCM_SCALE = " << value << endl;
-            } else if (line_number == 24) {
-                EXTFIELD_CASE = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": EXTFIELD_CASE = " << value << endl;
-            } else if (line_number == 25) {
-                EXTFIELD_SCALE = stod(value);
-                cout << "Line " << line_number << ": EXTFIELD_SCALE = " << value << endl;
-            } else if (line_number == 26) {
-                SPLIT_DOMAIN = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": SPLIT_DOMAIN = " << value << endl;
-            } else if (line_number == 27) {
-                JTOLERANCE = stod(value);
-                cout << "Line " << line_number << ": JTOLERANCE = " << value << endl;
-            } else if (line_number == 28) {
-                ALPHA_COEFF = stod(value);
-                cout << "Line " << line_number << ": ALPHA_COEFF = " << value << endl;
-            } else if (line_number == 29) {
-                T_POSITIVE = stod(value);
-                cout << "Line " << line_number << ": T_POSITIVE = " << value << endl;
-            } else if (line_number == 30) {
-                EXT_GAP = stod(value);
-                cout << "Line " << line_number << ": EXT_GAP = " << value << endl;
-            } else if (line_number == 31) {
-                ACC_GAP = stod(value);
-                cout << "Line " << line_number << ": ACC_GAP = " << value << endl;
-            } else if (line_number == 32) {
-                DOMAIN_X_SIZE = stod(value) * 1e-3; // Convert mm to m
-                cout << "Line " << line_number << ": DOMAIN_X_SIZE = " << value << "mm (" << DOMAIN_X_SIZE << "m)" << endl;
-            } else if (line_number == 33) {
-                DOMAIN_Y_SIZE = stod(value) * 1e-3; // Convert mm to m
-                cout << "Line " << line_number << ": DOMAIN_Y_SIZE = " << value << "mm (" << DOMAIN_Y_SIZE << "m)" << endl;
-            } else if (line_number == 34) {
-                DOMAIN_Z_SIZE = stod(value) * 1e-3; // Convert mm to m
-                cout << "Line " << line_number << ": DOMAIN_Z_SIZE = " << value << "mm (" << DOMAIN_Z_SIZE << "m)" << endl;
-            } else if (line_number == 35) {
-                MGSOLVER = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": MGSOLVER = " << value << endl;
-            } else if (line_number == 36) {
-                SHIELD_MODEL = static_cast<uint>(stod(value));
-                cout << "Line " << line_number << ": SHIELD_MODEL = " << value << endl;
-            } else if (line_number > 36) {
-                // Handle additional lines beyond the standard 36 parameters
-                // These might include domain size specifications or other extensions
-                cout << "Line " << line_number << ": " << line << " (additional parameter)" << endl;
-            }
-        } catch (const exception& e) {
-            cout << "Warning: Could not parse line " << line_number << " value '" << value << "': " << e.what() << endl;
+    json root;
+    try {
+        file >> root;
+    } catch (const json::exception& e) {
+        throw Error(ERROR_LOCATION, "Invalid JSON configuration " + configFile + ": " + string(e.what()));
+    }
+
+    if (!root.is_object()) {
+        throw Error(ERROR_LOCATION, "Top-level JSON configuration must be an object: " + configFile);
+    }
+
+    string selected_density_profile_name;
+    uint accelerator_index = 0U;
+    if (hasObject(root, "accelerator")) {
+        const json& accelerator = root.at("accelerator");
+        if (accelerator.contains("legacyIndex")) {
+            accelerator_index = accelerator.at("legacyIndex").get<uint>();
+        } else if (accelerator.contains("type")) {
+            accelerator_index = acceleratorIndexFromType(accelerator.at("type").get<string>());
         }
     }
-    
-    file.close();
-    
-    // Set dependent variables
-    G1_VOLTAGE = GG_VOLTAGE;
-    G2_VOLTAGE = REP_VOLTAGE;
-    
-    cout << "Input file parsed successfully." << endl;
+
+    *this = SimulationParameters();
+    ACCELERATOR_IDX = accelerator_index;
+    setDefaultValues();
+
+    if (hasObject(root, "gasDensity")) {
+        const json& gas_density = root.at("gasDensity");
+        if (gas_density.contains("defaultProfile")) {
+            selected_density_profile_name = gas_density.at("defaultProfile").get<string>();
+        }
+    }
+
+    if (hasObject(root, "accelerator")) {
+        const json& accelerator = root.at("accelerator");
+        if (accelerator.contains("legacyIndex")) {
+            ACCELERATOR_IDX = accelerator.at("legacyIndex").get<uint>();
+        } else if (accelerator.contains("type")) {
+            ACCELERATOR_IDX = acceleratorIndexFromType(accelerator.at("type").get<string>());
+        }
+    }
+
+    if (hasObject(root, "geometry")) {
+        const json& geometry = root.at("geometry");
+
+        if (hasObject(geometry, "source")) {
+            const json& source = geometry.at("source");
+            const string mode = source.value("mode", string());
+            if (mode == "builtin-generator" && source.contains("template")) {
+                GEOMETRY_TEMPLATE = source.at("template").get<string>();
+                if (!isKnownGeometryTemplate(GEOMETRY_TEMPLATE)) {
+                    throw Error(ERROR_LOCATION, "Unsupported built-in geometry template: " + GEOMETRY_TEMPLATE);
+                }
+
+                if (DOMAIN_X_SIZE <= 0.0 || DOMAIN_X_SIZE == defaultDomainXSizeMeters(defaultGeometryTemplate(ACCELERATOR_IDX))) {
+                    DOMAIN_X_SIZE = defaultDomainXSizeMeters(GEOMETRY_TEMPLATE);
+                }
+                if (DOMAIN_Y_SIZE <= 0.0 || DOMAIN_Y_SIZE == defaultDomainYSizeMeters(defaultGeometryTemplate(ACCELERATOR_IDX))) {
+                    DOMAIN_Y_SIZE = defaultDomainYSizeMeters(GEOMETRY_TEMPLATE);
+                }
+                if (DOMAIN_Z_SIZE <= 0.0 || DOMAIN_Z_SIZE == defaultDomainZSizeMeters(defaultGeometryTemplate(ACCELERATOR_IDX))) {
+                    DOMAIN_Z_SIZE = defaultDomainZSizeMeters(GEOMETRY_TEMPLATE);
+                }
+
+                applyDefaultPeriodicity(GEOMETRY_TEMPLATE,
+                                        PERIODIC_X_MIN,
+                                        PERIODIC_X_MAX,
+                                        PERIODIC_Y_MIN,
+                                        PERIODIC_Y_MAX,
+                                        PERIODIC_BOUNDARIES_ENABLED);
+            }
+        }
+
+        if (hasObject(geometry, "mesh")) {
+            const json& mesh = geometry.at("mesh");
+            if (mesh.contains("sizeMeters")) {
+                MESH_SIZE = mesh.at("sizeMeters").get<double>();
+            }
+        }
+
+        if (hasObject(geometry, "domain")) {
+            const json& domain = geometry.at("domain");
+            if (domain.contains("xSizeMeters")) {
+                DOMAIN_X_SIZE = domain.at("xSizeMeters").get<double>();
+            }
+            if (domain.contains("ySizeMeters")) {
+                DOMAIN_Y_SIZE = domain.at("ySizeMeters").get<double>();
+            }
+            if (domain.contains("zSizeMeters")) {
+                DOMAIN_Z_SIZE = domain.at("zSizeMeters").get<double>();
+            }
+        }
+
+        if (hasObject(geometry, "gaps")) {
+            const json& gaps = geometry.at("gaps");
+            if (gaps.contains("extractionGapMeters")) {
+                EXT_GAP = gaps.at("extractionGapMeters").get<double>();
+            }
+            if (gaps.contains("accelerationGapMeters")) {
+                ACC_GAP = gaps.at("accelerationGapMeters").get<double>();
+            }
+        }
+
+        if (geometry.contains("solids") && geometry.at("solids").is_array()) {
+            N_SOLIDS = static_cast<uint>(geometry.at("solids").size());
+        }
+    }
+
+    if (hasObject(root, "particleSources") && hasObject(root.at("particleSources"), "negativeIonBeam")) {
+        const json& beam = root.at("particleSources").at("negativeIonBeam");
+        if (beam.contains("massU")) {
+            M_IONS = beam.at("massU").get<double>();
+        }
+        if (beam.contains("chargeState")) {
+            Q_IONS = beam.at("chargeState").get<double>();
+        }
+        if (beam.contains("currentDensityAm2")) {
+            J_ION = beam.at("currentDensityAm2").get<double>();
+        }
+        if (beam.contains("perpendicularTemperatureEV")) {
+            TPERP = beam.at("perpendicularTemperatureEV").get<double>();
+        }
+        if (beam.contains("parallelTemperatureEV")) {
+            TPAR = beam.at("parallelTemperatureEV").get<double>();
+        }
+        if (beam.contains("axialEnergyEV")) {
+            E0_Z = beam.at("axialEnergyEV").get<double>();
+        }
+        if (beam.contains("plasmaPotentialVolts")) {
+            U_PLASMA = beam.at("plasmaPotentialVolts").get<double>();
+        }
+        if (beam.contains("electronsModelWeight")) {
+            ELECTRONS = beam.at("electronsModelWeight").get<double>();
+        }
+    }
+
+    if (hasObject(root, "simulation")) {
+        const json& simulation = root.at("simulation");
+        if (simulation.contains("particleCount")) {
+            N_PARTICLES = simulation.at("particleCount").get<uint>();
+        }
+        if (simulation.contains("iterations")) {
+            ITERATIONS = simulation.at("iterations").get<uint>();
+        }
+
+        if (hasObject(simulation, "domainDecomposition")) {
+            const json& decomposition = simulation.at("domainDecomposition");
+            if (decomposition.contains("splitDomain")) {
+                SPLIT_DOMAIN = decomposition.at("splitDomain").get<bool>() ? 1U : 0U;
+            }
+        }
+
+        if (hasObject(simulation, "solver")) {
+            const json& solver = simulation.at("solver");
+            if (solver.contains("type")) {
+                MGSOLVER = solverFromType(solver.at("type").get<string>());
+            }
+            if (solver.contains("shieldModel")) {
+                SHIELD_MODEL = shieldModelFromType(solver.at("shieldModel").get<string>());
+            }
+            if (solver.contains("positiveIonTemperatureEV")) {
+                T_POSITIVE = solver.at("positiveIonTemperatureEV").get<double>();
+            }
+            if (solver.contains("plasmaPotentialVolts")) {
+                U_PLASMA = solver.at("plasmaPotentialVolts").get<double>();
+            }
+        }
+
+        if (hasObject(simulation, "spaceCharge")) {
+            const json& space_charge = simulation.at("spaceCharge");
+            if (space_charge.contains("alphaCoeff")) {
+                ALPHA_COEFF = space_charge.at("alphaCoeff").get<double>();
+            }
+            if (space_charge.contains("pgFilterScale")) {
+                PGFILTER_SCALE = space_charge.at("pgFilterScale").get<double>();
+            }
+            if (space_charge.contains("cesmadcmScale")) {
+                CESMADCM_SCALE = space_charge.at("cesmadcmScale").get<double>();
+            }
+        }
+
+        if (hasObject(simulation, "convergence")) {
+            const json& convergence = simulation.at("convergence");
+            if (convergence.contains("currentDensityTolerance")) {
+                JTOLERANCE = convergence.at("currentDensityTolerance").get<double>();
+            }
+        }
+    }
+
+    if (hasObject(root, "boundaryConditions")) {
+        const json& boundary_conditions = root.at("boundaryConditions");
+
+        if (hasObject(boundary_conditions, "plasma")) {
+            const json& plasma = boundary_conditions.at("plasma");
+            if (plasma.contains("potentialV")) {
+                U_PLASMA = plasma.at("potentialV").get<double>();
+            }
+            if (plasma.contains("positiveIonTemperatureEv")) {
+                T_POSITIVE = plasma.at("positiveIonTemperatureEv").get<double>();
+            }
+        }
+
+        if (boundary_conditions.contains("electrodes") && boundary_conditions.at("electrodes").is_array()) {
+            const json& electrodes = boundary_conditions.at("electrodes");
+            for (json::const_iterator it = electrodes.begin(); it != electrodes.end(); ++it) {
+                if (!it->is_object() || !it->contains("voltageVolts")) {
+                    continue;
+                }
+
+                const json& electrode = *it;
+                const string name = electrode.value("name", string());
+                const string role = electrode.value("role", string());
+                const int stage = electrode.value("stage", -1);
+                const double voltage = electrode.at("voltageVolts").get<double>();
+
+                if (role == "extraction_grid" || name == "EG") {
+                    EG_VOLTAGE = voltage;
+                } else if (stage == 1 || role == "ground_grid" || name == "AG1" || name == "GG" || name == "G1") {
+                    GG_VOLTAGE = voltage;
+                } else if (stage == 2 || role == "repeller" || name == "AG2" || name == "REP" || name == "G2") {
+                    REP_VOLTAGE = voltage;
+                } else if (stage == 3 || name == "AG3" || name == "G3") {
+                    G3_VOLTAGE = voltage;
+                } else if (stage == 4 || name == "AG4" || name == "G4") {
+                    G4_VOLTAGE = voltage;
+                } else if (stage == 5 || name == "AG5" || name == "G5") {
+                    G5_VOLTAGE = voltage;
+                }
+            }
+        }
+
+        if (hasObject(boundary_conditions, "periodicBoundaries")) {
+            const json& periodic_boundaries = boundary_conditions.at("periodicBoundaries");
+            if (periodic_boundaries.contains("enabled")) {
+                PERIODIC_BOUNDARIES_ENABLED = periodic_boundaries.at("enabled").get<bool>() ? 1U : 0U;
+            }
+            if (periodic_boundaries.contains("xMinMeters")) {
+                PERIODIC_X_MIN = periodic_boundaries.at("xMinMeters").get<double>();
+            }
+            if (periodic_boundaries.contains("xMaxMeters")) {
+                PERIODIC_X_MAX = periodic_boundaries.at("xMaxMeters").get<double>();
+            }
+            if (periodic_boundaries.contains("yMinMeters")) {
+                PERIODIC_Y_MIN = periodic_boundaries.at("yMinMeters").get<double>();
+            }
+            if (periodic_boundaries.contains("yMaxMeters")) {
+                PERIODIC_Y_MAX = periodic_boundaries.at("yMaxMeters").get<double>();
+            }
+        }
+    }
+
+    if (hasObject(root, "externalMagneticField")) {
+        const json& magnetic_field = root.at("externalMagneticField");
+        if (magnetic_field.contains("enabled")) {
+            B_ISON = magnetic_field.at("enabled").get<bool>() ? 1U : 0U;
+        }
+        if (magnetic_field.contains("case")) {
+            EXTFIELD_CASE = magnetic_field.at("case").get<uint>();
+        }
+        if (magnetic_field.contains("scale")) {
+            EXTFIELD_SCALE = magnetic_field.at("scale").get<double>();
+        }
+    }
+
+    if (hasObject(root, "outputs")) {
+        const json& outputs = root.at("outputs");
+
+        if (hasObject(outputs, "summary")) {
+            const json& summary = outputs.at("summary");
+            if (summary.contains("enabled")) {
+                OUTPUT_SUMMARY_ENABLED = summary.at("enabled").get<bool>() ? 1U : 0U;
+            }
+            if (summary.contains("directory")) {
+                OUTPUT_SUMMARY_DIRECTORY = summary.at("directory").get<string>();
+            }
+        }
+        if (hasObject(outputs, "plots")) {
+            const json& plots = outputs.at("plots");
+            if (plots.contains("enabled")) {
+                OUTPUT_PLOTS_ENABLED = plots.at("enabled").get<bool>() ? 1U : 0U;
+            }
+            if (plots.contains("directory")) {
+                OUTPUT_PLOTS_DIRECTORY = plots.at("directory").get<string>();
+            }
+        }
+        if (hasObject(outputs, "data")) {
+            const json& data = outputs.at("data");
+            if (data.contains("enabled")) {
+                OUTPUT_DATA_ENABLED = data.at("enabled").get<bool>() ? 1U : 0U;
+            }
+            if (data.contains("directory")) {
+                OUTPUT_DATA_DIRECTORY = data.at("directory").get<string>();
+            }
+        }
+        if (hasObject(outputs, "vtk")) {
+            const json& vtk = outputs.at("vtk");
+            if (vtk.contains("enabled")) {
+                OUTPUT_VTK_ENABLED = vtk.at("enabled").get<bool>() ? 1U : 0U;
+            }
+            if (vtk.contains("directory")) {
+                OUTPUT_VTK_DIRECTORY = vtk.at("directory").get<string>();
+            }
+            if (vtk.contains("exportGeometry")) {
+                OUTPUT_VTK_EXPORT_GEOMETRY = vtk.at("exportGeometry").get<bool>() ? 1U : 0U;
+            }
+            if (vtk.contains("exportSimulationState")) {
+                OUTPUT_VTK_EXPORT_SIMULATION_STATE = vtk.at("exportSimulationState").get<bool>() ? 1U : 0U;
+            }
+            if (vtk.contains("exportTracedParticles")) {
+                OUTPUT_VTK_EXPORT_TRACED_PARTICLES = vtk.at("exportTracedParticles").get<bool>() ? 1U : 0U;
+            }
+        }
+        if (hasObject(outputs, "logging")) {
+            const json& logging = outputs.at("logging");
+            if (logging.contains("consoleLevel")) {
+                OUTPUT_LOGGING_CONSOLE_LEVEL = logging.at("consoleLevel").get<string>();
+            }
+            if (logging.contains("fileLevel")) {
+                OUTPUT_LOGGING_FILE_LEVEL = logging.at("fileLevel").get<string>();
+            }
+            if (logging.contains("captureStdout")) {
+                OUTPUT_LOGGING_CAPTURE_STDOUT = logging.at("captureStdout").get<bool>() ? 1U : 0U;
+            }
+            if (logging.contains("writeDebugArtifacts")) {
+                OUTPUT_LOGGING_WRITE_DEBUG_ARTIFACTS = logging.at("writeDebugArtifacts").get<bool>() ? 1U : 0U;
+            }
+            if (logging.contains("structuredLogFile")) {
+                OUTPUT_LOGGING_STRUCTURED_LOG_FILE = logging.at("structuredLogFile").get<string>();
+            }
+        }
+    }
+
+    if (hasObject(root, "physics")) {
+        const json& physics = root.at("physics");
+        if (hasObject(physics, "stripping")) {
+            const json& stripping = physics.at("stripping");
+            if (stripping.contains("mode")) {
+                INCLUDE_STRIPPING = strippingModeFromString(stripping.at("mode").get<string>());
+            }
+            if (stripping.contains("minimumZMeters")) {
+                STRIPPING_MIN_Z = stripping.at("minimumZMeters").get<double>();
+            }
+            if (stripping.contains("densityProfile")) {
+                selected_density_profile_name = stripping.at("densityProfile").get<string>();
+            }
+        }
+
+        if (hasObject(physics, "surfaceCollisions")) {
+            const json& surface_collisions = physics.at("surfaceCollisions");
+            if (surface_collisions.contains("enabled")) {
+                INCLUDE_SURFACE_COLLISIONS = surface_collisions.at("enabled").get<bool>() ? 1U : 0U;
+            }
+            if (surface_collisions.contains("debug")) {
+                SURFACE_COLLISIONS_DEBUG = surface_collisions.at("debug").get<bool>() ? 1U : 0U;
+            }
+            if (surface_collisions.contains("minimumImpactZMeters")) {
+                SURFACE_COLLISIONS_MIN_Z = surface_collisions.at("minimumImpactZMeters").get<double>();
+            }
+        }
+    }
+
+    if (INCLUDE_STRIPPING > 0 && !selected_density_profile_name.empty() && hasObject(root, "gasDensity")) {
+        const json& gas_density = root.at("gasDensity");
+        if (!gas_density.contains("profiles")) {
+            throw Error(ERROR_LOCATION, "gasDensity.profiles is required when selecting a density profile");
+        }
+
+        const json* selected_density_profile = findDensityProfile(
+            gas_density.at("profiles"), selected_density_profile_name);
+        if (!selected_density_profile) {
+            throw Error(ERROR_LOCATION,
+                        "Gas density profile not found: " + selected_density_profile_name);
+        }
+
+        if (!hasObject(*selected_density_profile, "source")) {
+            throw Error(ERROR_LOCATION,
+                        "Gas density profile '" + selected_density_profile_name + "' is missing a source object");
+        }
+
+        const json& density_source = selected_density_profile->at("source");
+        const string mode = density_source.value("mode", string());
+        if (mode != "file" || !density_source.contains("path")) {
+            throw Error(ERROR_LOCATION,
+                        "Gas density profile '" + selected_density_profile_name +
+                            "' must use source.mode='file' with a path for the current C++ runtime");
+        }
+
+        STRIPPING_DENSITY_PROFILE = density_source.at("path").get<string>();
+    }
+
+    finalizeDerivedParameters();
+}
+
+double SimulationParameters::getStrippingMinimumZ() const {
+    if (STRIPPING_MIN_Z >= 0.0) {
+        return STRIPPING_MIN_Z;
+    }
+
+    return 7.0e-3 + MESH_SIZE;
+}
+
+std::vector<double> SimulationParameters::getPeriodicityBounds() const {
+    if (!getPeriodicBoundariesEnabled()) {
+        return std::vector<double>();
+    }
+
+    return std::vector<double>{PERIODIC_X_MAX, PERIODIC_X_MIN, PERIODIC_Y_MAX, PERIODIC_Y_MIN};
 }
 
 double SimulationParameters::getDomainXSizeOrDefault() const {
-    if (DOMAIN_X_SIZE > 0) {
-        return DOMAIN_X_SIZE;
-    }
-    
-    // Return accelerator-specific defaults
-    switch (static_cast<uint>(ACCELERATOR_IDX)) {
-        case 1: // SPIDER
-        case 2: // MITICA  
-        case 3: // MTF
-        default:
-            return 30.0e-3; // 30mm default for all accelerators
-    }
+    return DOMAIN_X_SIZE > 0.0 ? DOMAIN_X_SIZE : defaultDomainXSizeMeters(GEOMETRY_TEMPLATE);
 }
 
 double SimulationParameters::getDomainYSizeOrDefault() const {
-    if (DOMAIN_Y_SIZE > 0) {
-        return DOMAIN_Y_SIZE;
-    }
-    
-    // Return accelerator-specific defaults
-    switch (static_cast<uint>(ACCELERATOR_IDX)) {
-        case 1: // SPIDER
-        case 2: // MITICA
-        case 3: // MTF
-        default:
-            return 30.0e-3; // 30mm default for all accelerators
-    }
+    return DOMAIN_Y_SIZE > 0.0 ? DOMAIN_Y_SIZE : defaultDomainYSizeMeters(GEOMETRY_TEMPLATE);
 }
 
 double SimulationParameters::getDomainZSizeOrDefault() const {
-    if (DOMAIN_Z_SIZE > 0) {
+    if (DOMAIN_Z_SIZE > 0.0) {
         return DOMAIN_Z_SIZE;
     }
-    
-    // Return accelerator-specific defaults
-    switch (static_cast<uint>(ACCELERATOR_IDX)) {
-        case 1: // SPIDER
-            return 80.0e-3;  // 80mm
-        case 2: // MITICA
-            return 567.0e-3; // 567mm
-        case 3: // MTF
-        default:
-            return 567.0e-3; // 567mm default
-    }
-}
 
-void SimulationParameters::parseScenarioFile(const string& scenarioFile) {
-    cout << "Parsing scenario file: " << scenarioFile << endl;
-    
-    // First set all default values
-    setDefaultValues();
-    
-    ifstream file(scenarioFile);
-    if (!file.is_open()) {
-        throw Error(ERROR_LOCATION, "Could not open scenario file: " + scenarioFile);
-    }
-    
-    string line;
-    while (getline(file, line)) {
-        // Remove comments and trim whitespace
-        size_t comment_pos = line.find('#');
-        if (comment_pos != string::npos) {
-            line = line.substr(0, comment_pos);
-        }
-        
-        // Trim whitespace
-        line.erase(0, line.find_first_not_of(" 	"));
-        line.erase(line.find_last_not_of(" 	") + 1);
-        
-        if (line.empty()) continue;
-        
-        // Parse key-value pairs (handle both "KEY=VALUE" and "KEY VALUE" formats)
-        string key, value;
-        size_t equals_pos = line.find('=');
-        
-        if (equals_pos != string::npos) {
-            // Handle "KEY=VALUE" format
-            key = line.substr(0, equals_pos);
-            value = line.substr(equals_pos + 1);
-        } else {
-            // Handle "KEY VALUE" format (typical for .scn files)
-            istringstream iss(line);
-            iss >> key >> value;
-        }
-        
-        // Trim whitespace from key and value
-        key.erase(0, key.find_first_not_of(" 	"));
-        key.erase(key.find_last_not_of(" 	") + 1);
-        value.erase(0, value.find_first_not_of(" 	"));
-        value.erase(value.find_last_not_of(" 	") + 1);
-        
-        if (key.empty() || value.empty()) continue;
-        
-        // Parse user-defined parameters
-        try {
-            if (key == "ACCELERATOR_IDX") {
-                ACCELERATOR_IDX = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "B_ISON") {
-                B_ISON = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "INCLUDE_STRIPPING" || key == "STRIPPING") {
-                INCLUDE_STRIPPING = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "INCLUDE_SURFACE_COLLISIONS" || key == "SURFACE_COLLISIONS" || key == "SURFACE") {
-                INCLUDE_SURFACE_COLLISIONS = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "ELECTRONS") {
-                ELECTRONS = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "M_IONS") {
-                M_IONS = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "Q_IONS") {
-                Q_IONS = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "J" || key == "J_ION") {
-                J_ION = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "N_PARTICLES") {
-                N_PARTICLES = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "MESH_SIZE") {
-                MESH_SIZE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "ITERATIONS") {
-                ITERATIONS = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "JTOLERANCE") {
-                JTOLERANCE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "PGFILTER_SCALE") {
-                PGFILTER_SCALE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "CESMADCM_SCALE") {
-                CESMADCM_SCALE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "EXTFIELD_SCALE") {
-                EXTFIELD_SCALE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "EXTFIELD_CASE") {
-                EXTFIELD_CASE = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "T_PERP") {
-                TPERP = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "E0_Z") {
-                E0_Z = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "SPLIT_DOMAIN") {
-                SPLIT_DOMAIN = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "ACC_GAP") {
-                ACC_GAP = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "EG_V") {
-                EG_VOLTAGE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "AG1_V") {
-                GG_VOLTAGE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "AG2_V") {
-                REP_VOLTAGE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "AG3_V") {
-                G3_VOLTAGE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "AG4_V") {
-                G4_VOLTAGE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "AG5_V") {
-                G5_VOLTAGE = stod(value);
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "DOMAIN_X_SIZE") {
-                DOMAIN_X_SIZE = stod(value) * 1e-3; // Convert mm to m
-                cout << "Set " << key << " = " << value << "mm (" << DOMAIN_X_SIZE << "m)" << endl;
-            } else if (key == "DOMAIN_Y_SIZE") {
-                DOMAIN_Y_SIZE = stod(value) * 1e-3; // Convert mm to m
-                cout << "Set " << key << " = " << value << "mm (" << DOMAIN_Y_SIZE << "m)" << endl;
-            } else if (key == "DOMAIN_Z_SIZE") {
-                DOMAIN_Z_SIZE = stod(value) * 1e-3; // Convert mm to m
-                cout << "Set " << key << " = " << value << "mm (" << DOMAIN_Z_SIZE << "m)" << endl;
-            } else if (key == "MGSOLVER") {
-                MGSOLVER = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            } else if (key == "SHIELD_MODEL") {
-                SHIELD_MODEL = static_cast<uint>(stod(value));
-                cout << "Set " << key << " = " << value << endl;
-            }
-            // Add more parameters as needed
-        } catch (const exception& e) {
-            cout << "Warning: Could not parse parameter " << key << " = " << value << endl;
-        }
-    }
-    
-    file.close();
-    
-    // Set dependent variables
-    G1_VOLTAGE = GG_VOLTAGE;
-    G2_VOLTAGE = REP_VOLTAGE;
-    
-    cout << "Scenario file parsed successfully." << endl;
+    return defaultDomainZSizeMeters(GEOMETRY_TEMPLATE);
 }
 
 void SimulationParameters::setDefaultValues() {
-    // Set defaults based on accelerator type
-    uint accel_type = static_cast<uint>(ACCELERATOR_IDX);
-    
-    // Default values common to all accelerators
-    B_ISON = 1;
-    INCLUDE_STRIPPING = 0;
-    INCLUDE_SURFACE_COLLISIONS = 0;  // Disabled by default
-    ELECTRONS = 0;
+    const uint accel_type = ACCELERATOR_IDX;
+
+    GEOMETRY_TEMPLATE = defaultGeometryTemplate(accel_type);
+
+    B_ISON = 1U;
+    INCLUDE_STRIPPING = 0U;
+    INCLUDE_SURFACE_COLLISIONS = 0U;
+    ELECTRONS = 0.0;
     M_IONS = 1.0;
     Q_IONS = -1.0;
     J_ION = 330.0;
@@ -455,183 +712,74 @@ void SimulationParameters::setDefaultValues() {
     TPAR = 0.0;
     E0_Z = 3.0;
     U_PLASMA = 3.0;
-    N_PARTICLES = 150000;
-    
-    // Default voltages for MTF
-    if (accel_type == 3) {
-        EG_VOLTAGE = 8000.0;
-        GG_VOLTAGE = 182000.0;
-        REP_VOLTAGE = 356000.0;
-        G3_VOLTAGE = 530000.0;
-        G4_VOLTAGE = 704000.0;
-        G5_VOLTAGE = 878000.0;
-    } else {
-        // Default voltages for other accelerators
-        EG_VOLTAGE = 8000.0;
-        GG_VOLTAGE = 182000.0;
-        REP_VOLTAGE = 356000.0;
-        G3_VOLTAGE = 530000.0;
-        G4_VOLTAGE = 704000.0;
-        G5_VOLTAGE = 878000.0;
-    }
-    
-    // Numerical defaults
+    N_PARTICLES = 150000U;
+
+    EG_VOLTAGE = 8000.0;
+    GG_VOLTAGE = 182000.0;
+    REP_VOLTAGE = 356000.0;
+    G3_VOLTAGE = 530000.0;
+    G4_VOLTAGE = 704000.0;
+    G5_VOLTAGE = 878000.0;
+
     MESH_SIZE = 0.0003;
-    ITERATIONS = 5;
+    ITERATIONS = 5U;
     PGFILTER_SCALE = 0.0;
     CESMADCM_SCALE = 0.0;
-    EXTFIELD_CASE = 0;
+    EXTFIELD_CASE = 0U;
     EXTFIELD_SCALE = 1.0;
-    SPLIT_DOMAIN = 0;
+    SPLIT_DOMAIN = 0U;
     JTOLERANCE = 1.0;
     ALPHA_COEFF = 0.3;
     T_POSITIVE = 0.8;
-    MGSOLVER = 0; // Default to no multigrid solver
-    SHIELD_MODEL = 0; // Default to no shield model (use nsimp)
+    MGSOLVER = 0U;
+    SHIELD_MODEL = 0U;
 
-    // Geometry defaults
     EXT_GAP = 0.006;
     ACC_GAP = 0.088;
-    
-    // Domain size defaults (if not already set)
-    if (DOMAIN_X_SIZE < 0) DOMAIN_X_SIZE = 30.0e-3; // 30mm
-    if (DOMAIN_Y_SIZE < 0) DOMAIN_Y_SIZE = 30.0e-3; // 30mm
-    if (DOMAIN_Z_SIZE < 0) {
-        switch (accel_type) {
-            case 1: DOMAIN_Z_SIZE = 80.0e-3; break;   // SPIDER: 80mm
-            case 2: DOMAIN_Z_SIZE = 567.0e-3; break;  // MITICA: 567mm
-            case 3: DOMAIN_Z_SIZE = 567.0e-3; break;  // MTF: 567mm
-            default: DOMAIN_Z_SIZE = 567.0e-3; break;
-        }
+
+    if (DOMAIN_X_SIZE < 0.0) {
+        DOMAIN_X_SIZE = defaultDomainXSizeMeters(GEOMETRY_TEMPLATE);
     }
-    
-    // Other defaults
+    if (DOMAIN_Y_SIZE < 0.0) {
+        DOMAIN_Y_SIZE = defaultDomainYSizeMeters(GEOMETRY_TEMPLATE);
+    }
+    if (DOMAIN_Z_SIZE < 0.0) {
+        DOMAIN_Z_SIZE = defaultDomainZSizeMeters(GEOMETRY_TEMPLATE);
+    }
+
     EGEXTJ = 0.0;
-    domain_ii = 0;
-    N_SOLIDS = 0;
+    domain_ii = 0U;
+    STRIPPING_DENSITY_PROFILE = getDensityProfileFilename(ACCELERATOR_IDX);
+    STRIPPING_MIN_Z = -1.0;
+    SURFACE_COLLISIONS_MIN_Z = 7.0e-3;
+    SURFACE_COLLISIONS_DEBUG = 0U;
+    applyDefaultPeriodicity(GEOMETRY_TEMPLATE,
+                            PERIODIC_X_MIN,
+                            PERIODIC_X_MAX,
+                            PERIODIC_Y_MIN,
+                            PERIODIC_Y_MAX,
+                            PERIODIC_BOUNDARIES_ENABLED);
+    OUTPUT_SUMMARY_DIRECTORY = "Summary";
+    OUTPUT_PLOTS_DIRECTORY = "Plots";
+    OUTPUT_DATA_DIRECTORY = "Data";
+    OUTPUT_VTK_DIRECTORY = "VTK";
+    OUTPUT_SUMMARY_ENABLED = 1U;
+    OUTPUT_PLOTS_ENABLED = 1U;
+    OUTPUT_DATA_ENABLED = 1U;
+    OUTPUT_VTK_ENABLED = 1U;
+    OUTPUT_VTK_EXPORT_GEOMETRY = 1U;
+    OUTPUT_VTK_EXPORT_SIMULATION_STATE = 1U;
+    OUTPUT_VTK_EXPORT_TRACED_PARTICLES = 1U;
+    OUTPUT_LOGGING_CONSOLE_LEVEL = "info";
+    OUTPUT_LOGGING_FILE_LEVEL = "debug";
+    OUTPUT_LOGGING_CAPTURE_STDOUT = 1U;
+    OUTPUT_LOGGING_WRITE_DEBUG_ARTIFACTS = 0U;
+    OUTPUT_LOGGING_STRUCTURED_LOG_FILE = "run.log";
+    N_SOLIDS = 0U;
+    finalizeDerivedParameters();
 }
 
-void SimulationParameters::generateInputFile(const string& inputFile) {
-    cout << "Generating complete input file: " << inputFile << endl;
-    
-    ofstream file(inputFile);
-    if (!file.is_open()) {
-        throw Error(ERROR_LOCATION, "Could not create input file: " + inputFile);
-    }
-    
-    // Write all parameters in the expected order
-    file << ACCELERATOR_IDX << "\t// ACCELERATOR_IDX" << endl;
-    file << B_ISON << "\t// B_ISON" << endl;
-    file << INCLUDE_STRIPPING << "\t// INCLUDE_STRIPPING" << endl;
-    file << INCLUDE_SURFACE_COLLISIONS << "\t// INCLUDE_SURFACE_COLLISIONS" << endl;
-    file << ELECTRONS << "\t// ELECTRONS" << endl;
-    file << M_IONS << "\t// M_IONS [amu]" << endl;
-    file << Q_IONS << "\t// Q_IONS [e]" << endl;
-    file << J_ION << "\t// J [A/m^2]" << endl;
-    file << TPERP << "\t// TPERP [eV]" << endl;
-    file << TPAR << "\t// TPAR [eV]" << endl;
-    file << E0_Z << "\t// AXIAL ENERGY [eV]" << endl;
-    file << U_PLASMA << "\t// PLASMA POTENTIAL [V]" << endl;
-    file << N_PARTICLES << "\t// N_PARTICLES" << endl;
-    file << EG_VOLTAGE << "\t// EG VOLTAGE [V]" << endl;
-    file << GG_VOLTAGE << "\t// GG/G1 VOLTAGE [V]" << endl;
-    file << REP_VOLTAGE << "\t// REP/G2 VOLTAGE [V]" << endl;
-    file << G3_VOLTAGE << "\t// G3 VOLTAGE [V]" << endl;
-    file << G4_VOLTAGE << "\t// G4 VOLTAGE [V]" << endl;
-    file << G5_VOLTAGE << "\t// G5 VOLTAGE [V]" << endl;
-    file << MESH_SIZE << "\t// MESH SIZE [m]" << endl;
-    file << ITERATIONS << "\t// ITERATIONS" << endl;
-    file << PGFILTER_SCALE << "\t// PG FILTER SCALE" << endl;
-    file << CESMADCM_SCALE << "\t// CESM+ADCM SCALE" << endl;
-    file << EXTFIELD_CASE << "\t// EXT FIELD CASE" << endl;
-    file << EXTFIELD_SCALE << "\t// EXT FIELD SCALE" << endl;
-    file << SPLIT_DOMAIN << "\t// SPLIT DOMAIN" << endl;
-    file << JTOLERANCE << "\t// J TOLERANCE" << endl;
-    file << ALPHA_COEFF << "\t// SC AVERAGING COEFFICIENT" << endl;
-    file << T_POSITIVE << "\t// POSITIVE ION TEMPERATURE [eV]" << endl;
-    file << EXT_GAP << "\t// EXTRACTION GAP LENGTH [m]" << endl;
-    file << ACC_GAP << "\t// ACCELERATOR GAP LENGTH [m]" << endl;
-    file << (DOMAIN_X_SIZE * 1e3) << "\t// DOMAIN X SIZE IN mm" << endl;
-    file << (DOMAIN_Y_SIZE * 1e3) << "\t// DOMAIN Y SIZE IN mm" << endl;
-    file << (DOMAIN_Z_SIZE * 1e3) << "\t// DOMAIN Z SIZE IN mm" << endl;
-    file << MGSOLVER << "\t// MGSOLVER (0 BICGSTAB, 1 MG)" << endl;
-    file << SHIELD_MODEL << "\t// MENISCUS MODEL (0 NSIMP, 1 SHIELD)" << endl;
-
-    file.close();
-    cout << "Input file generated successfully." << endl;
-}
-
-SimulationParameters::ScanParameters SimulationParameters::parseScanFile(const std::string& scnFile) {
-    ScanParameters scanParams;
-    ifstream file(scnFile);
-    
-    if (!file.is_open()) {
-        throw runtime_error("Could not open scenario file: " + scnFile);
-    }
-    
-    string line;
-    while (getline(file, line)) {
-        // Skip comments and empty lines
-        if (line.empty() || line[0] == '/' || line[0] == '#') continue;
-        
-        // Parse key-value pairs
-        string key, value_str;
-        size_t equals_pos = line.find('=');
-        
-        if (equals_pos != string::npos) {
-            key = line.substr(0, equals_pos);
-            value_str = line.substr(equals_pos + 1);
-        } else {
-            istringstream iss(line);
-            iss >> key >> value_str;
-        }
-        
-        // Trim whitespace
-        key.erase(0, key.find_first_not_of(" 	"));
-        key.erase(key.find_last_not_of(" 	") + 1);
-        value_str.erase(0, value_str.find_first_not_of(" 	"));
-        value_str.erase(value_str.find_last_not_of(" 	") + 1);
-        
-        if (key.empty()) continue;
-        
-        // Handle scan length
-        if (key == "SCAN_LENGTH") {
-            scanParams.scan_length = stoi(value_str);
-            continue;
-        }
-        
-        // // Parse multiple values for scan parameters
-        // if (key == "STRIPPING" || key == "INCLUDE_STRIPPING") {
-        //     scanParams.scan_parameter_name = "STRIPPING";
-        //     istringstream values_stream(value_str);
-        //     string val;
-        //     while (values_stream >> val) {
-        //         scanParams.stripping_values.push_back(stod(val));
-        //     }
-        // }
-        // Add other scan parameters as needed (voltage scans, current scans, etc.)
-    }
-    
-    file.close();
-    
-    // // If no scan parameters found but scan_length > 1, create default values
-    // if (scanParams.stripping_values.empty() && scanParams.scan_length > 1) {
-    //     // Default stripping scan: 0 and 1
-    //     scanParams.stripping_values = {0, 1};
-    //     scanParams.scan_parameter_name = "STRIPPING";
-    // }
-    
-    return scanParams;
-}
-
-SimulationParameters SimulationParameters::createScanCase(const ScanParameters& scanParams, int caseIndex) {
-    SimulationParameters caseParams = *this; // Copy current parameters
-    
-    // // Modify the varying parameter for this case
-    // if (scanParams.scan_parameter_name == "STRIPPING" && 
-    //     caseIndex < static_cast<int>(scanParams.stripping_values.size())) {
-    //     caseParams.setIncludeStripping(static_cast<uint>(scanParams.stripping_values[caseIndex]));
-    // }
-    
-    return caseParams;
+void SimulationParameters::finalizeDerivedParameters() {
+    G1_VOLTAGE = GG_VOLTAGE;
+    G2_VOLTAGE = REP_VOLTAGE;
 }

@@ -42,37 +42,48 @@ void FieldManager::resetFields() {
 }
 
 string FieldManager::getBFieldFolder(const SimulationParameters& params) {
-    // Mapping accelerator types to bfield folders
-    const map<int, string> accelerator_bfield_map = {
-        {0, "Bfield_MTF"},    // Temporarily map 0 to MTF to test
-        {1, "Bfield_SPIDER"},
-        {2, "Bfield_MITICA"},
-        {3, "Bfield_MTF"}
-    };
-    
-    int accel_type = static_cast<int>(params.getAcceleratorIdx());
-    ibsimu.message(1) << "Accelerator type from parameters: " << accel_type << endl;
-    
-    auto it = accelerator_bfield_map.find(accel_type);
-    
-    if (it != accelerator_bfield_map.end()) {
-        ibsimu.message(1) << "Using bfield folder: " << it->second << endl;
-        return it->second;
-    } else {
-        // Default to MITICA if unknown type
-        ibsimu.message(1) << "Unknown accelerator type " << accel_type 
-                          << ", defaulting to MITICA bfield folder" << endl;
+    if (params.getBIsOn() == 0U) {
+        return string();
+    }
+
+    const string& geometry_template = params.getGeometryTemplate();
+    if (geometry_template == "SPIDER") {
+        ibsimu.message(1) << "Using SPIDER default magnetic-field folder" << endl;
+        return "Bfield_SPIDER";
+    }
+    if (geometry_template == "MITICA") {
+        ibsimu.message(1) << "Using MITICA default magnetic-field folder" << endl;
         return "Bfield_MITICA";
+    }
+    if (geometry_template == "MTF") {
+        ibsimu.message(1) << "Using MTF default magnetic-field folder" << endl;
+        return "Bfield_MTF";
+    }
+
+    const int accel_type = static_cast<int>(params.getAcceleratorIdx());
+    switch (accel_type) {
+        case 1:
+            return "Bfield_SPIDER";
+        case 2:
+            return "Bfield_MITICA";
+        case 3:
+            return "Bfield_MTF";
+        default:
+            throw Error(ERROR_LOCATION,
+                        "No default magnetic-field folder for geometry template '" + geometry_template +
+                            "' and accelerator index " + std::to_string(accel_type));
     }
 }
 
 void FieldManager::addMagneticField(const SimulationParameters& params, const string& bfield_fold) {
-    string bfield_folder = bfield_fold + "/";
+    string bfield_folder = bfield_fold.empty() ? string() : (bfield_fold + "/");
 
     constexpr bool fout[3] = {true, true, true};
     constexpr double FIELD_SCALE = 1.0e-3;
     
-    ibsimu.message(1) << "Loading magnetic field from: " << bfield_folder << endl;
+    if (!bfield_folder.empty()) {
+        ibsimu.message(1) << "Loading magnetic field from: " << bfield_folder << endl;
+    }
     
     MeshVectorField* bfield = nullptr;
     

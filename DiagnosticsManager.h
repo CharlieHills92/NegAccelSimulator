@@ -40,6 +40,9 @@ struct PowerStruct;
  * - Outputting trajectory data
  */
 class DiagnosticsManager {
+private:
+    std::string density_profile_filename_;
+
 public:
     /**
      * @brief Constructor
@@ -50,6 +53,10 @@ public:
      * @brief Destructor
      */
     ~DiagnosticsManager() = default;
+
+    void setDensityProfileFilename(const std::string& density_profile_filename) {
+        density_profile_filename_ = density_profile_filename;
+    }
 
     /**
      * @brief Generate diagnostic data along z-axis
