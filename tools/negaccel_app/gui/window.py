@@ -15,7 +15,6 @@ from .common import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QMainWindow,
     QPushButton,
@@ -28,14 +27,13 @@ from .common import (
     QVBoxLayout,
     QWidget,
     Qt,
-    DEFAULT_SIMULATOR_PATH,
     EXAMPLE_AUTHORING_PATH,
     create_scrollable_form,
     default_runtime_path,
 )
 from .execution import ExecutionMixin
 from .results import ResultsMixin
-from .sections import FORM_SECTIONS
+from .sections import FORM_SECTIONS, geometry as geometry_section
 
 
 class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWindow):
@@ -43,7 +41,6 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         self,
         authoring_path: Path | None = None,
         runtime_path: Path | None = None,
-        simulator_path: Path | None = None,
     ) -> None:
         super().__init__()
         self.setWindowTitle("NegAccel Studio")
@@ -69,7 +66,7 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         self.widgets: dict[str, QWidget] = {}
         self.output_tabs: QTabWidget | None = None
 
-        self._build_ui(runtime_path, simulator_path)
+        self._build_ui(runtime_path)
         self._apply_style()
 
         if authoring_path is not None:
@@ -136,23 +133,15 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
                 padding: 5px;
                 selection-background-color: #c24d2c;
             }
-            QLabel#sectionHint {
-                color: #52606d;
-                font-style: italic;
-            }
             """
         )
 
-    def _build_ui(self, runtime_path: Path | None, simulator_path: Path | None) -> None:
+    def _build_ui(self, runtime_path: Path | None) -> None:
         central = QWidget()
         root_layout = QVBoxLayout(central)
 
         execution_box = QGroupBox("Execution")
         execution_form = QFormLayout(execution_box)
-
-        self.authoring_path_label = QLabel("Using bundled authoring example")
-        self.authoring_path_label.setObjectName("sectionHint")
-        execution_form.addRow("Authoring source", self.authoring_path_label)
 
         runtime_row = QHBoxLayout()
         self.runtime_path_edit = QLineEdit(str(runtime_path or default_runtime_path("negaccel_case")))
@@ -164,16 +153,6 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         runtime_wrapper = QWidget()
         runtime_wrapper.setLayout(runtime_row)
         execution_form.addRow("Runtime case JSON", runtime_wrapper)
-
-        simulator_row = QHBoxLayout()
-        self.simulator_path_edit = QLineEdit(str(simulator_path or DEFAULT_SIMULATOR_PATH))
-        simulator_browse = QPushButton("Browse")
-        simulator_browse.clicked.connect(self.choose_simulator_path)
-        simulator_row.addWidget(self.simulator_path_edit, 1)
-        simulator_row.addWidget(simulator_browse)
-        simulator_wrapper = QWidget()
-        simulator_wrapper.setLayout(simulator_row)
-        execution_form.addRow("Simulator executable", simulator_wrapper)
 
         self.load_existing_checkbox = QCheckBox("Load existing .dat outputs instead of solving a fresh case")
         execution_form.addRow("Run mode", self.load_existing_checkbox)
@@ -197,22 +176,39 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         button_row.addStretch(1)
         root_layout.addLayout(button_row)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self._build_form_tabs())
-        splitter.addWidget(self._build_detail_tabs())
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        root_layout.addWidget(splitter, 1)
+        self.output_tabs = self._build_main_tabs()
+        root_layout.addWidget(self.output_tabs, 1)
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("Ready")
 
-    def _build_form_tabs(self) -> QTabWidget:
+    def _build_main_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
         for section in FORM_SECTIONS:
-            tabs.addTab(create_scrollable_form(section.build_form(self)), section.title)
+            if section.title == "Metadata":
+                tabs.addTab(self._build_metadata_tab(section), section.title)
+            elif section.title == "Geometry":
+                tabs.addTab(geometry_section.build_workspace(self), section.title)
+            else:
+                tabs.addTab(create_scrollable_form(section.build_form(self)), section.title)
+        tabs.addTab(self._build_run_log_tab(), "Run Log")
+        tabs.addTab(self._build_visualization_tab(), "Visualization")
         self._connect_preview_updates()
         return tabs
+
+    def _build_metadata_tab(self, section) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(create_scrollable_form(section.build_form(self)))
+        splitter.addWidget(self._build_json_preview_panel())
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([250, 640])
+
+        layout.addWidget(splitter)
+        return page
 
     def _double_spin(self, minimum: float, maximum: float, decimals: int, step: float) -> QDoubleSpinBox:
         spin = QDoubleSpinBox()

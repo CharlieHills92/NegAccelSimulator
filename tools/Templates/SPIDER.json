@@ -1,0 +1,37 @@
+{
+  "name": "SPIDER",
+  "meshSizeMeters": 0.002,
+  "exportGeometryVtk": true,
+  "domain": {
+    "xSizeMeters": 0.026,
+    "ySizeMeters": 0.028,
+    "zSizeMeters": 0.08,
+    "zStartMeters": -0.003
+  },
+  "solids": [
+    {
+      "name": "PG",
+      "kind": "solid",
+      "boundaryId": 7,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "EG",
+      "kind": "solid",
+      "boundaryId": 8,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "GG",
+      "kind": "solid",
+      "boundaryId": 9,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    }
+  ]
+}

@@ -2,39 +2,16 @@
 
 from __future__ import annotations
 
+import ast
 import copy
 import json
 from pathlib import Path
-from typing import Any, Iterable, Sequence, Union
+from typing import Any, Iterable, Mapping, Sequence, Union
 
 
 JsonToken = Union[str, int]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-
-BUILTIN_TEMPLATE_TO_ACCELERATOR = {
-    "SPIDER": 1,
-    "MITICA": 2,
-    "MTF": 3,
-}
-
-DEFAULT_DOMAIN_BY_TEMPLATE = {
-    "SPIDER": {
-        "xSizeMeters": 26.0e-3,
-        "ySizeMeters": 28.0e-3,
-        "zSizeMeters": 80.0e-3,
-    },
-    "MITICA": {
-        "xSizeMeters": 30.0e-3,
-        "ySizeMeters": 30.0e-3,
-        "zSizeMeters": 554.0e-3,
-    },
-    "MTF": {
-        "xSizeMeters": 80.0e-3,
-        "ySizeMeters": 80.0e-3,
-        "zSizeMeters": 567.0e-3,
-    },
-}
 
 DEFAULT_OUTPUTS = {
     "rootDirectory": "",
@@ -69,6 +46,86 @@ DEFAULT_OUTPUTS = {
 
 class WorkflowError(RuntimeError):
     """Raised for invalid workflow inputs."""
+
+
+def normalize_symbol_name(name: str) -> str:
+    normalized: list[str] = []
+    previous_was_separator = True
+    for char in name.strip().upper():
+        if char.isalnum():
+            normalized.append(char)
+            previous_was_separator = False
+            continue
+        if not previous_was_separator:
+            normalized.append("_")
+        previous_was_separator = True
+
+    return "".join(normalized).strip("_")
+
+
+def normalize_expression_symbols(symbols: Mapping[str, float], context: str) -> dict[str, float]:
+    normalized: dict[str, float] = {}
+    for raw_name, raw_value in symbols.items():
+        normalized_name = normalize_symbol_name(str(raw_name))
+        if not normalized_name:
+            raise WorkflowError(f"{context} has an empty expression symbol name")
+        if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+            raise WorkflowError(f"{context}.{raw_name} must resolve to a numeric value")
+        if normalized_name in normalized:
+            raise WorkflowError(f"{context} has duplicate expression symbol '{normalized_name}'")
+        normalized[normalized_name] = float(raw_value)
+    return normalized
+
+
+def evaluate_numeric_expression(
+    expression: str,
+    symbols: Mapping[str, float] | None = None,
+    context: str = "expression",
+) -> float:
+    source = expression.strip()
+    if not source:
+        raise WorkflowError(f"{context} must not be empty")
+
+    try:
+        parsed = ast.parse(source, mode="eval")
+    except SyntaxError as exc:
+        raise WorkflowError(f"Invalid {context}: {expression}") from exc
+
+    normalized_symbols = normalize_expression_symbols(symbols or {}, context)
+
+    def _evaluate(node: ast.AST) -> float:
+        if isinstance(node, ast.Expression):
+            return _evaluate(node.body)
+
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+                raise WorkflowError(f"{context} only supports numeric literals")
+            return float(node.value)
+
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            operand = _evaluate(node.operand)
+            return operand if isinstance(node.op, ast.UAdd) else -operand
+
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            left = _evaluate(node.left)
+            right = _evaluate(node.right)
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            return left / right
+
+        if isinstance(node, ast.Name):
+            normalized_name = normalize_symbol_name(node.id)
+            if normalized_name not in normalized_symbols:
+                raise WorkflowError(f"Unknown name '{node.id}' in {context}")
+            return normalized_symbols[normalized_name]
+
+        raise WorkflowError(f"{context} only supports numbers, names, parentheses, and + - * /")
+
+    return float(_evaluate(parsed))
 
 
 def load_json(path: Path) -> Any:
@@ -209,20 +266,6 @@ def require_string(document: dict[str, Any], key: str, context: str) -> str:
     if not isinstance(value, str) or not value:
         raise WorkflowError(f"{context} requires non-empty string '{key}'")
     return value
-
-
-def normalize_template_name(template: str) -> str:
-    normalized = template.upper()
-    if normalized not in BUILTIN_TEMPLATE_TO_ACCELERATOR:
-        raise WorkflowError(
-            f"Unsupported geometry.template '{template}'. Supported templates are: "
-            f"{', '.join(sorted(BUILTIN_TEMPLATE_TO_ACCELERATOR))}"
-        )
-    return normalized
-
-
-def default_domain_for_template(template: str) -> dict[str, float]:
-    return copy.deepcopy(DEFAULT_DOMAIN_BY_TEMPLATE[template])
 
 
 def apply_override_pairs(document: Any, overrides: Iterable[dict[str, Any]]) -> None:

@@ -16,14 +16,12 @@ def build_form(window) -> QFormLayout:
     window.widgets["magnetic.scale"] = window._double_spin(0.0, 1.0e6, 6, 0.1)
     window.widgets["magnetic.directory"] = QLineEdit()
     window.widgets["magnetic.file"] = QLineEdit()
-    window.widgets["magnetic.filePattern"] = QLineEdit()
     layout.addRow(window.widgets["magnetic.enabled"])
     layout.addRow("Source mode", window.widgets["magnetic.sourceMode"])
     layout.addRow("Field case index", window.widgets["magnetic.case"])
     layout.addRow("Field scale", window.widgets["magnetic.scale"])
     layout.addRow("Directory", window.widgets["magnetic.directory"])
     layout.addRow("File", window.widgets["magnetic.file"])
-    layout.addRow("File pattern", window.widgets["magnetic.filePattern"])
     return layout
 
 
@@ -31,13 +29,12 @@ def populate(window, spec: dict[str, object]) -> None:
     window.widgets["magnetic.enabled"].setChecked(bool(nested_get(spec, "magneticField", "enabled", default=False)))
     set_combo_value(
         window.widgets["magnetic.sourceMode"],
-        str(nested_get(spec, "magneticField", "sourceMode", default="auto-by-accelerator")),
+        str(nested_get(spec, "magneticField", "sourceMode", default="none")),
     )
     window.widgets["magnetic.case"].setValue(int(nested_get(spec, "magneticField", "case", default=1)))
     window.widgets["magnetic.scale"].setValue(float(nested_get(spec, "magneticField", "scale", default=1.0)))
     window.widgets["magnetic.directory"].setText(str(nested_get(spec, "magneticField", "directory", default="")))
     window.widgets["magnetic.file"].setText(str(nested_get(spec, "magneticField", "file", default="")))
-    window.widgets["magnetic.filePattern"].setText(str(nested_get(spec, "magneticField", "filePattern", default="")))
 
 
 def collect(window, spec: dict[str, object]) -> None:
@@ -48,4 +45,3 @@ def collect(window, spec: dict[str, object]) -> None:
     magnetic["scale"] = float(window.widgets["magnetic.scale"].value())
     window._set_optional_text(magnetic, "directory", window.widgets["magnetic.directory"].text())
     window._set_optional_text(magnetic, "file", window.widgets["magnetic.file"].text())
-    window._set_optional_text(magnetic, "filePattern", window.widgets["magnetic.filePattern"].text())

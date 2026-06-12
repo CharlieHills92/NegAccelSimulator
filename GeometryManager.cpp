@@ -10,24 +10,248 @@
 
 #include "geometry.hpp"
 #include "func_solid.hpp"
-#include "geom/SPIDER_geom.h"
-#include "geom/MITICA_geom2.h"
-#include "geom/MTF_geom.h"
+#include "geom/geom_function.h"
 #include "ibsimu.hpp"
 #include "error.hpp"
 #include "epot_field.hpp"
 #include "particledatabase.hpp"
 #include "particles.hpp"
 
-#include <map>
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <map>
+#include <set>
 
 using namespace std;
 
+namespace {
+
+std::string uppercaseCopy(const std::string& value) {
+    std::string upper = value;
+    std::transform(upper.begin(), upper.end(), upper.begin(), [](unsigned char character) {
+        return static_cast<char>(std::toupper(character));
+    });
+    return upper;
+}
+
+Bound resolveConfiguredBoundary(const SimulationParameters& params,
+                               int boundary_id,
+                               const Bound& fallback) {
+    SimulationParameters::BoundaryConditionDefinition boundary_definition;
+    if (!params.tryGetBoundaryCondition(boundary_id, boundary_definition)) {
+        return fallback;
+    }
+
+    if (boundary_definition.conditionType == "neumann") {
+        return Bound(BOUND_NEUMANN, boundary_definition.value);
+    }
+
+    return Bound(BOUND_DIRICHLET, boundary_definition.value);
+}
+
+void applyConfiguredBoundary(Geometry* geom,
+                             const SimulationParameters& params,
+                             int boundary_id,
+                             const Bound& fallback) {
+    geom->set_boundary(boundary_id, resolveConfiguredBoundary(params, boundary_id, fallback));
+}
+
+double resolveGeneratedSolidVoltage(const SimulationParameters& params,
+                                   const SimulationParameters::GeometrySolidDefinition& solid) {
+    if (solid.hasExplicitVoltage) {
+        return solid.voltageVolts;
+    }
+
+    const std::string role = solid.role;
+    const std::string name = uppercaseCopy(solid.name);
+
+    if (role == "plasma" || role == "wall" || name == "PG") {
+        return 0.0;
+    }
+    if (role == "extraction_grid" || name == "EG") {
+        return params.getEGVoltage();
+    }
+    if (role == "ground_grid" || name == "GG" || name == "G1" || name == "AG1") {
+        return params.getG1Voltage();
+    }
+    if (role == "repeller" || name == "REP" || name == "G2" || name == "AG2") {
+        return params.getG2Voltage();
+    }
+    if (role == "accelerator_grid") {
+        switch (solid.stage) {
+            case 1:
+                return params.getG1Voltage();
+            case 2:
+                return params.getG2Voltage();
+            case 3:
+                return params.getG3Voltage();
+            case 4:
+                return params.getG4Voltage();
+            case 5:
+                return params.getG5Voltage();
+            default:
+                break;
+        }
+    }
+    if (name == "G3" || name == "AG3") {
+        return params.getG3Voltage();
+    }
+    if (name == "G4" || name == "AG4") {
+        return params.getG4Voltage();
+    }
+    if (name == "G5" || name == "AG5") {
+        return params.getG5Voltage();
+    }
+
+    return 0.0;
+}
+
+double resolveGeneratedBoundaryVoltage(
+    const SimulationParameters& params,
+    const std::vector<SimulationParameters::GeometrySolidDefinition>& grouped_solids,
+    uint32_t boundary_id) {
+    const double tolerance = 1.0e-9;
+    bool has_explicit_voltage = false;
+    double explicit_voltage = 0.0;
+    bool has_named_voltage = false;
+    double named_voltage = 0.0;
+    bool has_any_fallback = false;
+    double fallback_voltage = 0.0;
+
+    for (std::vector<SimulationParameters::GeometrySolidDefinition>::const_iterator solid_it =
+             grouped_solids.begin();
+         solid_it != grouped_solids.end();
+         ++solid_it) {
+        if (solid_it->hasExplicitVoltage) {
+            if (!has_explicit_voltage) {
+                explicit_voltage = solid_it->voltageVolts;
+                has_explicit_voltage = true;
+            } else if (std::abs(explicit_voltage - solid_it->voltageVolts) > tolerance) {
+                throw Error(ERROR_LOCATION,
+                            "Conflicting explicit voltages for generated solids sharing boundaryId " +
+                                std::to_string(boundary_id));
+            }
+            continue;
+        }
+
+        const double resolved_voltage = resolveGeneratedSolidVoltage(params, *solid_it);
+        if (!has_any_fallback) {
+            fallback_voltage = resolved_voltage;
+            has_any_fallback = true;
+        }
+        if (std::abs(resolved_voltage) <= tolerance) {
+            continue;
+        }
+        if (!has_named_voltage) {
+            named_voltage = resolved_voltage;
+            has_named_voltage = true;
+        } else if (std::abs(named_voltage - resolved_voltage) > tolerance) {
+            throw Error(ERROR_LOCATION,
+                        "Conflicting inferred voltages for generated solids sharing boundaryId " +
+                            std::to_string(boundary_id));
+        }
+    }
+
+    if (has_explicit_voltage) {
+        return explicit_voltage;
+    }
+    if (has_named_voltage) {
+        return named_voltage;
+    }
+    return has_any_fallback ? fallback_voltage : 0.0;
+}
+
+uint32_t resolveGeneratedSolidBoundaryId(const SimulationParameters::GeometrySolidDefinition& solid,
+                                         size_t index) {
+    if (solid.boundaryId >= 7) {
+        return static_cast<uint32_t>(solid.boundaryId);
+    }
+    return static_cast<uint32_t>(7 + index);
+}
+
+bool evaluateGeneratedSolidProfile(double x,
+                                   double y,
+                                   double z,
+                                   const std::vector<double>& z_profile,
+                                   const std::vector<double>& r_profile,
+                                   const std::vector<double>& rounding_radii,
+                                   const SimulationParameters::GeometryAperturePattern& aperture_pattern) {
+    if (z_profile.empty() || z < z_profile.front() || z > z_profile.back()) {
+        return false;
+    }
+
+    double local_x = x - aperture_pattern.xOffsetMeters;
+    double local_y = y - aperture_pattern.yOffsetMeters;
+    const std::string& layout = aperture_pattern.layout;
+    if (layout == "staggered-grid") {
+        const double pitch_y = aperture_pattern.pitchYMeters;
+        const int row = static_cast<int>(std::floor((local_y + pitch_y / 2.0) / pitch_y));
+        local_x += (row % 2 == 0)
+            ? aperture_pattern.rowShiftXMeters
+            : -aperture_pattern.rowShiftXMeters;
+    }
+
+    if (layout != "single") {
+        const double half_x = aperture_pattern.countX * aperture_pattern.pitchXMeters / 2.0;
+        const double half_y = aperture_pattern.countY * aperture_pattern.pitchYMeters / 2.0;
+        if (std::abs(local_x) > half_x + aperture_pattern.marginMeters ||
+            std::abs(local_y) > half_y + aperture_pattern.marginMeters) {
+            return aperture_pattern.outsidePatternIsSolid;
+        }
+
+        if (std::abs(local_x) < half_x && std::abs(local_y) < half_y) {
+            local_x -= std::round(local_x / aperture_pattern.pitchXMeters) * aperture_pattern.pitchXMeters;
+            local_y -= std::round(local_y / aperture_pattern.pitchYMeters) * aperture_pattern.pitchYMeters;
+        }
+    }
+
+    const double radius = std::sqrt(local_x * local_x + local_y * local_y);
+    return inSolidFromHoleProfile(z, radius, z_profile, r_profile, rounding_radii);
+}
+
+bool evaluateGeneratedSolid(double x,
+                            double y,
+                            double z,
+                            const SimulationParameters::GeometrySolidDefinition& solid) {
+    return evaluateGeneratedSolidProfile(
+        x,
+        y,
+        z,
+        solid.zProfileMeters,
+        solid.rProfileMeters,
+        solid.roundingRadiiMeters,
+        solid.aperturePattern);
+}
+
+std::vector<double> buildGeneratedZGrids(
+    const std::vector<SimulationParameters::GeometrySolidDefinition>& solids) {
+    std::vector<double> z_grid_pairs;
+    z_grid_pairs.reserve(solids.size() * 2);
+
+    for (std::vector<SimulationParameters::GeometrySolidDefinition>::const_iterator solid_it = solids.begin();
+         solid_it != solids.end(); ++solid_it) {
+        z_grid_pairs.push_back(solid_it->zProfileMeters.front());
+        z_grid_pairs.push_back(solid_it->zProfileMeters.back());
+    }
+
+    return z_grid_pairs;
+}
+
+void applyDefaultDomainBoundaries(Geometry* geom, const SimulationParameters& params) {
+    applyConfiguredBoundary(geom, params, 1, Bound(BOUND_NEUMANN, 0.0));
+    applyConfiguredBoundary(geom, params, 2, Bound(BOUND_NEUMANN, 0.0));
+    applyConfiguredBoundary(geom, params, 3, Bound(BOUND_NEUMANN, 0.0));
+    applyConfiguredBoundary(geom, params, 4, Bound(BOUND_NEUMANN, 0.0));
+    applyConfiguredBoundary(geom, params, 5, Bound(BOUND_DIRICHLET, 0.0));
+    applyConfiguredBoundary(geom, params, 6, Bound(BOUND_NEUMANN, 0.0));
+}
+
+} // namespace
+
 GeometryManager::GeometryManager() : 
-    geometry(nullptr), accelerator(nullptr) {
+    geometry(nullptr) {
 }
 
 GeometryManager::~GeometryManager() {
@@ -37,283 +261,104 @@ GeometryManager::~GeometryManager() {
 void GeometryManager::resetGeometry() {
     delete geometry;
     geometry = nullptr;
-    delete accelerator;
-    accelerator = nullptr;
 }
 
 void GeometryManager::createGeometry(const SimulationParameters& params, const string& geomfile) {
-    createGeometry(params, geomfile, 0.0, params.getDomainZSizeOrDefault(), 1.0);
+    createGeometry(params, geomfile, params.getDomainZStart(), params.getDomainZSizeOrDefault(), 1.0);
 }
 
 void GeometryManager::createGeometry(const SimulationParameters& params, const string& geomfile,
                                     double z_start, double z_end, double meshsize_multiplier) {
-    const string& geometry_template = params.getGeometryTemplate();
-
-    if (geometry_template == "SPIDER") {
-            createGeometrySPIDER(params, geomfile, z_start, z_end, meshsize_multiplier);
-            return;
-    }
-    if (geometry_template == "MITICA") {
-            createGeometryMITICA(params, geomfile, z_start, z_end, meshsize_multiplier);
-            return;
-    }
-    if (geometry_template == "MTF") {
-            createGeometryMTF(params, geomfile, z_start, z_end, meshsize_multiplier);
-            return;
+    if (params.hasGeneratedGeometrySolids()) {
+        createGeneratedGeometry(params, geomfile, z_start, z_end, meshsize_multiplier);
+        return;
     }
 
-    const int accel_type = static_cast<int>(params.getAcceleratorIdx());
-    switch(accel_type) {
-        case 1:
-            createGeometrySPIDER(params, geomfile, z_start, z_end, meshsize_multiplier);
-            break;
-        case 2:
-            createGeometryMITICA(params, geomfile, z_start, z_end, meshsize_multiplier);
-            break;
-        case 3:
-            createGeometryMTF(params, geomfile, z_start, z_end, meshsize_multiplier);
-            break;
-        default:
-            throw Error(ERROR_LOCATION,
-                        "No supported geometry selection found. geometry.source.template='" +
-                            geometry_template + "', accelerator index=" + std::to_string(accel_type));
-    }
+    throw Error(ERROR_LOCATION,
+                "Only explicit geometry.source.mode='generated-data' is supported by the current runtime");
 }
 
-void GeometryManager::createGeometrySPIDER(const SimulationParameters& params, const string& geomfile) {
-    constexpr double DEFAULT_Z_START = 0.0;
-    constexpr double DEFAULT_Z_END = 90.0e-3;
-    createGeometrySPIDER(params, geomfile, DEFAULT_Z_START, DEFAULT_Z_END, 1.0);
-}
+void GeometryManager::createGeneratedGeometry(const SimulationParameters& params, const string& geomfile,
+                                             double z_start, double z_end, double meshsize_multiplier) {
+    resetGeometry();
 
-void GeometryManager::createGeometrySPIDER(const SimulationParameters& params, const string& geomfile,
-                                          double z_start, double z_end, double meshsize_multiplier) {
-    // Apply mesh size multiplier
-    double modified_mesh_size = params.getMeshSize() * meshsize_multiplier;
-    
-    // Use configurable domain sizes with accelerator-specific defaults
-    double x_size = params.getDomainXSizeOrDefault();
-    double y_size = params.getDomainYSizeOrDefault();
-    double z_size = (z_end - z_start > 0) ? (z_end - z_start) : params.getDomainZSizeOrDefault();
-    
-    // Calculate mesh dimensions
-    Int3D meshsize( 
-        static_cast<int>(floor(x_size / modified_mesh_size)) + 1,
-        static_cast<int>(floor(y_size / modified_mesh_size)) + 1,
-        static_cast<int>(floor(z_size / modified_mesh_size)) + 1
-    );
-    
-    Vec3D origo(-x_size/2, -y_size/2, z_start);
-    
-    ibsimu.message(1) << "SPIDER geometry:" << endl
-                      << "  Domain size: " << x_size*1000 << "mm x " << y_size*1000 << "mm x " << z_size*1000 << "mm" << endl
-                      << "\tMesh size: " << modified_mesh_size << " m" << endl
-                      << "\tMesh points: " << meshsize[0] << "x" << meshsize[1] << "x" << meshsize[2] << endl;
-    
-    zgrids = {0.003, 0.009, 0.015, 0.032, 0.120, 0.137, 0.225, 0.242, 0.330, 0.347, 0.435, 0.452, 0.540, 0.557};
+    const std::vector<SimulationParameters::GeometrySolidDefinition>& solids =
+        params.getGeneratedGeometrySolids();
+    if (solids.empty()) {
+        throw Error(ERROR_LOCATION, "Generated geometry requested without any solid definitions");
+    }
 
-    createSPIDERGeometry(meshsize, origo, modified_mesh_size, params, geomfile);
-}
+    const double mesh_size = params.getMeshSize() * meshsize_multiplier;
+    const double x_size = params.getDomainXSizeOrDefault();
+    const double y_size = params.getDomainYSizeOrDefault();
+    const double z_size = (z_end - z_start > 0.0) ? (z_end - z_start) : params.getDomainZSizeOrDefault();
 
-void GeometryManager::createSPIDERGeometry(const Int3D& meshsize, const Vec3D& origo, 
-                                          double mesh_size, const SimulationParameters& params,
-                                          const string& geomfile) {
+    Int3D meshsize(
+        static_cast<int>(floor(x_size / mesh_size)) + 1,
+        static_cast<int>(floor(y_size / mesh_size)) + 1,
+        static_cast<int>(floor(z_size / mesh_size)) + 1);
+    Vec3D origo(-x_size / 2.0, -y_size / 2.0, z_start);
+
     Geometry* geom = new Geometry(MODE_3D, meshsize, origo, mesh_size);
-    
-    // Create solid objects
-    struct SolidInfo {
-        uint32_t id;
-        bool (*solid_func)(double, double, double);  // Function pointer type
-        const char* name;
-        double voltage;
-    };
-    
-    const vector<SolidInfo> solids = {
-        {7U, solid0_SPIDER, "PG", 0.0},
-        {8U, solid1_SPIDER, "EG", params.getEGVoltage()},
-        {9U, solid2_SPIDER, "GG", params.getGGVoltage()}
-    };
-    
-    for (const auto& solid_info : solids) {
-        Solid* solid = new FuncSolid(solid_info.solid_func);
-        geom->set_solid(solid_info.id, solid);
-        geom->set_boundary(solid_info.id, Bound(BOUND_DIRICHLET, solid_info.voltage));
-        
-        ibsimu.message(1) << "\t" << solid_info.name << " solid created (ID: " 
-                          << solid_info.id << ", V: " << solid_info.voltage << ")" << endl;
+    applyDefaultDomainBoundaries(geom, params);
+
+    std::map<uint32_t, std::vector<SimulationParameters::GeometrySolidDefinition> > grouped_solids;
+    for (size_t index = 0; index < solids.size(); ++index) {
+        const SimulationParameters::GeometrySolidDefinition solid = solids[index];
+        const uint32_t boundary_id = resolveGeneratedSolidBoundaryId(solid, index);
+        grouped_solids[boundary_id].push_back(solid);
     }
-    
-    // Set boundary conditions for walls
-    const vector<Bound> wall_boundaries = {
-        Bound(BOUND_NEUMANN, 0.0),  // 1: x-min
-        Bound(BOUND_NEUMANN, 0.0),  // 2: x-max  
-        Bound(BOUND_NEUMANN, 0.0),  // 3: y-min
-        Bound(BOUND_NEUMANN, 0.0),  // 4: y-max
-        Bound(BOUND_DIRICHLET, 0.0), // 5: z-min
-        Bound(BOUND_NEUMANN, 0.0),  // 6: z-max
-    };
-    
-    for (size_t i = 0; i < wall_boundaries.size(); ++i) {
-        geom->set_boundary(i + 1, wall_boundaries[i]);
+
+    for (std::map<uint32_t, std::vector<SimulationParameters::GeometrySolidDefinition> >::const_iterator
+             boundary_it = grouped_solids.begin();
+         boundary_it != grouped_solids.end();
+         ++boundary_it) {
+        const uint32_t boundary_id = boundary_it->first;
+        const std::vector<SimulationParameters::GeometrySolidDefinition> boundary_solids =
+            boundary_it->second;
+
+        Solid* generated_solid = new FuncSolid(
+            [boundary_solids](double x, double y, double z) {
+                for (std::vector<SimulationParameters::GeometrySolidDefinition>::const_iterator solid_it =
+                         boundary_solids.begin();
+                     solid_it != boundary_solids.end();
+                     ++solid_it) {
+                    if (evaluateGeneratedSolid(x, y, z, *solid_it)) {
+                        return true;
+                    }
+                }
+                return false;
+            });
+        geom->set_solid(boundary_id, generated_solid);
+        applyConfiguredBoundary(
+            geom,
+            params,
+            static_cast<int>(boundary_id),
+            Bound(BOUND_DIRICHLET, resolveGeneratedBoundaryVoltage(params, boundary_solids, boundary_id)));
+
+        std::string grouped_names;
+        for (std::vector<SimulationParameters::GeometrySolidDefinition>::const_iterator solid_it =
+                 boundary_solids.begin();
+             solid_it != boundary_solids.end();
+             ++solid_it) {
+            if (!grouped_names.empty()) {
+                grouped_names += ", ";
+            }
+            grouped_names += solid_it->name;
+        }
+
+        ibsimu.message(1) << "\tGenerated solid group [" << grouped_names << "] created (ID: "
+                          << boundary_id << ")" << endl;
     }
-    
-    geom->build_mesh();
-    geom->build_surface();
-    geom->save(geomfile);
-    
-    geometry = geom;
-    
-    ibsimu.message(1) << "SPIDER geometry created and saved to: " << geomfile << endl;
-}
 
-void GeometryManager::createGeometryMITICA(const SimulationParameters& params, const string& geomfile,
-                                          double z_start, double z_end, double meshsize_multiplier) {
-    double start = z_start;
-    double h = params.getMeshSize() * meshsize_multiplier;
-    
-    // Use configurable domain sizes with accelerator-specific defaults
-    double x_size = params.getDomainXSizeOrDefault();
-    double y_size = params.getDomainYSizeOrDefault();
-    double z_size = (z_end - z_start > 0.0) ? (z_end - z_start) : params.getDomainZSizeOrDefault();
-    
-    if (debug) cout << "DEBUG MITICA Geometry: Using domain sizes X=" << x_size << "m, Y=" << y_size << "m, Z=" << z_size << "m" << endl;
-    if (debug) cout << "DEBUG MITICA Geometry: z_start=" << start << "m, z_end=" << z_end << "m, z_end-start=" << (z_end - start) << "m" << endl;
-    
-    double sizereq[3] = { x_size, y_size, z_size };
-    
-    Int3D meshsize((int)floor(sizereq[0]/h) + 1,
-                   (int)floor(sizereq[1]/h) + 1,
-                   (int)floor(sizereq[2]/h) + 1);
-                   
-    Vec3D origo(-sizereq[0]/2, -sizereq[1]/2, start);
-    Geometry* geom = new Geometry(MODE_3D, meshsize, origo, h);
-    
-    ibsimu.message(1) << "MITICA geometry mesh size " << h << "\n";
-    ibsimu.message(1) << "MITICA domain size: " << x_size*1000 << "mm x " << y_size*1000 << "mm x " << z_size*1000 << "mm" << endl;
-
-    MITICA_Accelerator* acc = new MITICA_Accelerator(params.getExtGap(), params.getAccGap());
-
-    zgrids = {0.003, 0.009, 0.015, 0.032, 0.120, 0.137, 0.225, 0.242, 0.330, 0.347, 0.435, 0.452, 0.540, 0.557};
-
-    Solid *s0 = new FuncSolid(acc->create_PGsolid());
-    geom->set_solid(7U, s0); // PG
-    Solid *s1 = new FuncSolid(acc->create_EGsolid());
-    geom->set_solid(8U, s1); // EG
-    Solid *s2 = new FuncSolid(acc->create_AG1solid());
-    geom->set_solid(9U, s2); // G1
-    Solid *s3 = new FuncSolid(acc->create_AG2solid());
-    geom->set_solid(10U, s3); // G2
-    Solid *s4 = new FuncSolid(acc->create_AG3solid());
-    geom->set_solid(11U, s4); // G3
-    Solid *s5 = new FuncSolid(acc->create_AG4solid());
-    geom->set_solid(12U, s5); // G4
-    Solid *s6 = new FuncSolid(acc->create_AG5solid());
-    geom->set_solid(13U, s6); // G5
-    
-    cout << " GEOMETRY CREATED \n";
-    
-    geom->set_boundary(1, Bound(BOUND_NEUMANN, 0.0));
-    geom->set_boundary(2, Bound(BOUND_NEUMANN, 0.0));
-    geom->set_boundary(3, Bound(BOUND_NEUMANN, 0.0));
-    geom->set_boundary(4, Bound(BOUND_NEUMANN, 0.0));
-    geom->set_boundary(5, Bound(BOUND_DIRICHLET, 0.0));
-    geom->set_boundary(6, Bound(BOUND_NEUMANN, 0.0));
-    
-    geom->set_boundary(7, Bound(BOUND_DIRICHLET, 0.0));
-    geom->set_boundary(8, Bound(BOUND_DIRICHLET, params.getEGVoltage()));
-    geom->set_boundary(9, Bound(BOUND_DIRICHLET, params.getG1Voltage()));
-    geom->set_boundary(10, Bound(BOUND_DIRICHLET, params.getG2Voltage()));
-    geom->set_boundary(11, Bound(BOUND_DIRICHLET, params.getG3Voltage()));
-    geom->set_boundary(12, Bound(BOUND_DIRICHLET, params.getG4Voltage()));
-    geom->set_boundary(13, Bound(BOUND_DIRICHLET, params.getG5Voltage()));
-
-    cout << " MITICA GEOMETRY CREATED \n";
-    
     geom->build_mesh();
     geom->build_surface();
     geom->save(geomfile);
 
     geometry = geom;
-    accelerator = acc;
-    
-    ibsimu.message(1) << "MITICA geometry created and saved to: " << geomfile << endl;
-}
+    zgrids = buildGeneratedZGrids(solids);
 
-void GeometryManager::createGeometryMTF(const SimulationParameters& params, const string& geomfile,
-                                       double z_start, double z_end, double meshsize_multiplier) {
-    double start = z_start;
-    double h = params.getMeshSize() * meshsize_multiplier;
-    
-    // Use configurable domain sizes with accelerator-specific defaults
-    double x_size = params.getDomainXSizeOrDefault();
-    double y_size = params.getDomainYSizeOrDefault();
-    double z_size = (z_end - z_start > 0.0) ? (z_end - z_start) : params.getDomainZSizeOrDefault();
-    
-    if (debug) cout << "DEBUG MTF Geometry: Using domain sizes X=" << x_size << "m, Y=" << y_size << "m, Z=" << z_size << "m" << endl;
-    if (debug) cout << "DEBUG MTF Geometry: z_start=" << start << "m, z_end=" << z_end << "m, z_end-start=" << (z_end - start) << "m" << endl;
-    
-    double sizereq[3] = { x_size, y_size, z_size };
-    
-    Int3D meshsize((int)floor(sizereq[0]/h) + 1,
-                   (int)floor(sizereq[1]/h) + 1,
-                   (int)floor(sizereq[2]/h) + 1);
-                   
-    Vec3D origo(-sizereq[0]/2, -sizereq[1]/2, start);
-    Geometry* geom = new Geometry(MODE_3D, meshsize, origo, h);
-    
-    ibsimu.message(1) << "MTF geometry mesh size " << h << "\n";
-    ibsimu.message(1) << "MTF domain size: " << x_size*1000 << "mm x " << y_size*1000 << "mm x " << z_size*1000 << "mm" << endl;
-
-    // MTF specific z-grids for potential calculation
-    zgrids = {0.003, 0.009, 0.015, 0.0315, 0.1195, 0.1365, 0.2245, 0.2415, 0.3295, 0.3465, 0.4345, 0.4515, 0.5395, 0.5565};
-
-    // Create MTF solids using the MTF geometry functions
-    Solid *s0 = new FuncSolid(solid0_MTF);
-    geom->set_solid(7U, s0); // PG
-    Solid *s1 = new FuncSolid(solid1_MTF);
-    geom->set_solid(8U, s1); // EG
-    Solid *s2 = new FuncSolid(solid2_MTF);
-    geom->set_solid(9U, s2); // G1
-    Solid *s3 = new FuncSolid(solid3_MTF);
-    geom->set_solid(10U, s3); // G2
-    Solid *s4 = new FuncSolid(solid4_MTF);
-    geom->set_solid(11U, s4); // G3
-    Solid *s5 = new FuncSolid(solid5_MTF);
-    geom->set_solid(12U, s5); // G4
-    Solid *s6 = new FuncSolid(solid6_MTF);
-    geom->set_solid(13U, s6); // G5
-
-    // Set boundary conditions for walls
-    geom->set_boundary(1, Bound(BOUND_NEUMANN, 0.0));
-    geom->set_boundary(2, Bound(BOUND_NEUMANN, 0.0));
-    geom->set_boundary(3, Bound(BOUND_NEUMANN, 0.0));
-    geom->set_boundary(4, Bound(BOUND_NEUMANN, 0.0));
-    
-    // Set boundary condition for z-min (depends on start position)
-    if (z_start < 0.02) {
-        geom->set_boundary(5, Bound(BOUND_DIRICHLET, 0.0));
-    } else {
-        geom->set_boundary(5, Bound(BOUND_DIRICHLET, params.getEGVoltage()));
-    }
-    
-    // Set boundary conditions for electrodes
-    geom->set_boundary(7, Bound(BOUND_DIRICHLET, 0.0));                    // PG
-    geom->set_boundary(8, Bound(BOUND_DIRICHLET, params.getEGVoltage()));  // EG
-    geom->set_boundary(9, Bound(BOUND_DIRICHLET, params.getG1Voltage()));  // G1
-    geom->set_boundary(10, Bound(BOUND_DIRICHLET, params.getG2Voltage())); // G2
-    geom->set_boundary(11, Bound(BOUND_DIRICHLET, params.getG3Voltage())); // G3
-    geom->set_boundary(12, Bound(BOUND_DIRICHLET, params.getG4Voltage())); // G4
-    geom->set_boundary(13, Bound(BOUND_DIRICHLET, params.getG5Voltage())); // G5
-
-    cout << " MTF GEOMETRY CREATED \n";
-    
-    geom->build_mesh();
-    geom->build_surface();
-    geom->save(geomfile);
-
-    geometry = geom;
-    
-    ibsimu.message(1) << "MTF geometry created and saved to: " << geomfile << endl;
+    ibsimu.message(1) << "Generated geometry created and saved to: " << geomfile << endl;
 }
 
 void GeometryManager::exportGeometryToVTK(const string& filename) {

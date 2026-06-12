@@ -12,6 +12,18 @@ python3 tools/negaccel_workflow.py author-case negaccel-authoring.example.json
 
 This writes `MTF_authoring_example/MTF_authoring_example.json` by default. The authoring model is grouped by geometry, boundary conditions, particle source, magnetic field, gas interactions, surface interactions, run controls, and outputs.
 
+Geometry authoring is now file-backed. The authoring JSON stores `geometry.path`, which points to an external geometry JSON file. Relative paths resolve from the authoring JSON location, and example geometry JSON files live under `tools/Templates/*.json`.
+
+An authoring geometry block now looks like this:
+
+```json
+"geometry": {
+  "path": "tools/Templates/MTF.json"
+}
+```
+
+In the GUI, open an existing geometry JSON, edit the geometry name and solids, then save that geometry to the path you want referenced from the authoring file. `tools/Templates/` is only the default folder of example geometry files.
+
 You can override authoring values directly from the CLI too:
 
 ```bash
@@ -19,6 +31,13 @@ python3 tools/negaccel_workflow.py author-case negaccel-authoring.example.json \
   --case-tag MTF_fast_test \
   --set run.particleCount=25000 \
   --set boundaryConditions.gridVoltagesVolts.extractionGrid=7000
+```
+
+Authoring boundary values can also be expressions. For `boundaryConditions.boundaries[*].value`, arithmetic like `5 * 700` is accepted, and names like `EG` or `AG1` resolve from the other boundary `name` fields in the same authoring document. When using `--set` from the shell, quote values containing spaces or `*`, for example:
+
+```bash
+python3 tools/negaccel_workflow.py author-case negaccel-authoring.example.json \
+  --set 'boundaryConditions.boundaries[8].value=5 * EG'
 ```
 
 ## Edit and run one case
@@ -32,7 +51,9 @@ cp negaccel-config.example.json my_case.json
 Typical edits in `my_case.json` are:
 
 - `simulation.particleCount` to change the Monte Carlo particle count
-- `boundaryConditions.electrodes[*].voltageVolts` to change grid voltages
+- `boundaryConditions.boundaries[*].value` to change grid or domain boundary voltages
+- `geometry.domain.zStartMeters` to move the domain origin explicitly instead of relying on accelerator-specific defaults
+- `externalMagneticField.directory` or `externalMagneticField.file` to choose the magnetic-field source explicitly
 - `physics.stripping.minimumZMeters` to move the secondary-generation start plane
 - `physics.surfaceCollisions.minimumImpactZMeters` to move the surface-collision generation cutoff
 - `gasDensity.profiles[*].source.path` to point to a different tabulated density file
@@ -41,11 +62,11 @@ Then build and run:
 
 ```bash
 source ./setup_environment.sh
-make -j4 runtest_new_v2
-./runtest_new_v2 my_case.json
+make -j4 NegAccelExec
+./NegAccelExec my_case.json
 ```
 
-`runtest_new_v2` accepts either a full JSON path or a case stem. It writes outputs next to the case JSON.
+`NegAccelExec` accepts either a full JSON path or a case stem. It writes outputs next to the case JSON.
 
 ## Build one case
 
@@ -76,7 +97,7 @@ The scan template can point either to the canonical runtime JSON or to the highe
 ```bash
 python3 tools/negaccel_workflow.py run-scan \
   negaccel-scan.example.json \
-  --simulator ./runtest_new_v2
+  --simulator ./NegAccelExec
 ```
 
 The Python tool expands the scan first, then runs the simulator once per generated case JSON.

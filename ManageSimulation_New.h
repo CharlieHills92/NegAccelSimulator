@@ -304,7 +304,7 @@ public:
     void set_ext_J(double setJ) { parameters->setEGExtJ(setJ); }
     uint get_stripping() const { return parameters->getIncludeStripping(); }
     double get_domain_z_size() const { return parameters->getDomainZSizeOrDefault(); }
-    uint get_accelerator_type() const { return parameters->getAcceleratorIdx();}
+    double get_domain_z_start() const { return parameters->getDomainZStart(); }
 
     // Component access (for advanced usage)
     SimulationParameters* getParameters() const { return parameters.get(); }

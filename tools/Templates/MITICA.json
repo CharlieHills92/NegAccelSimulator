@@ -1,0 +1,69 @@
+{
+  "name": "MITICA",
+  "meshSizeMeters": 0.002,
+  "exportGeometryVtk": true,
+  "domain": {
+    "xSizeMeters": 0.03,
+    "ySizeMeters": 0.03,
+    "zSizeMeters": 0.554,
+    "zStartMeters": 0.0
+  },
+  "solids": [
+    {
+      "name": "PG",
+      "kind": "solid",
+      "boundaryId": 7,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "EG",
+      "kind": "solid",
+      "boundaryId": 8,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "AG1",
+      "kind": "solid",
+      "boundaryId": 9,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "AG2",
+      "kind": "solid",
+      "boundaryId": 10,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "AG3",
+      "kind": "solid",
+      "boundaryId": 11,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "AG4",
+      "kind": "solid",
+      "boundaryId": 12,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    },
+    {
+      "name": "AG5",
+      "kind": "solid",
+      "boundaryId": 13,
+      "zProfileMeters": [0.0, 0.001],
+      "rProfileMeters": [0.01, 0.01],
+      "roundingRadiiMeters": [0.0, 0.0]
+    }
+  ]
+}

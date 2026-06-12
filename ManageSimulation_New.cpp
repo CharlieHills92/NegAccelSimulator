@@ -20,7 +20,6 @@
 #include "funct.h"
 #include "THCallback.h"
 #include "THCallback_surf_EAMCC.h"
-#include "StrippingUtils.h"
 
 #include <iostream>
 
@@ -116,7 +115,11 @@ void ManageSimulation::create_geometry(double z_start, double z_end, double mesh
 void ManageSimulation::add_Bfield() {
     string bfield_folder = FieldManager::getBFieldFolder(*parameters);
     fileManager->setBFieldFolder(bfield_folder);
-    fileManager->setBFieldFn(bfield_folder + "/");
+    if (parameters->getMagneticFieldSourceMode() == "directory" && !bfield_folder.empty()) {
+        fileManager->setBFieldFn(bfield_folder + "/");
+    } else {
+        fileManager->setBFieldFn(bfield_folder);
+    }
     
     fieldManager->addMagneticField(*parameters, bfield_folder);
 }

@@ -9,6 +9,7 @@ MKDIR_P = mkdir -p
 
 # Directories
 BUILD_DIR = build
+EXECUTABLE = NegAccelExec
 IBSIMU_ROOT = $(CURDIR)
 IBSIMU_DIR = $(IBSIMU_ROOT)/libibsimu_patched
 IBSIMU_PATCH_DIR = $(IBSIMU_ROOT)/patches/ibsimu
@@ -47,7 +48,7 @@ SOURCES = main.cpp ManageSimulation_New.cpp \
 		  SimulationParameters.cpp FileManager.cpp GeometryManager.cpp \
           FieldManager.cpp ParticleManager.cpp DiagnosticsManager.cpp \
           TransverseData.cpp my_diagnostics.cpp globals.cpp funct.cpp \
-          cross_sections.cpp THCallback.cpp StrippingUtils.cpp
+		  cross_sections.cpp THCallback.cpp
 
 # Object files  
 OBJECTS = $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
@@ -70,7 +71,7 @@ guard-env:
 	fi
 
 # Default target
-all: guard-env $(IBSIMU_SHARED) runtest_new_v2
+all: guard-env $(IBSIMU_SHARED) $(EXECUTABLE)
 
 # Bootstrap patched IBSimu from the pinned upstream source when missing.
 $(IBSIMU_BOOTSTRAP_STAMP): $(IBSIMU_BOOTSTRAP_SCRIPT) $(wildcard $(IBSIMU_PATCH_DIR)/*.patch)
@@ -83,10 +84,11 @@ $(IBSIMU_SHARED): guard-env $(IBSIMU_BOOTSTRAP_STAMP)
 	$(MAKE) -C $(IBSIMU_DIR) -j4
 
 # Build main executable
-runtest_new_v2: guard-env $(IBSIMU_SHARED) $(OBJECTS) | $(BUILD_DIR)
-	@echo "Linking runtest_new_v2..."
+
+$(EXECUTABLE): guard-env $(IBSIMU_SHARED) $(OBJECTS) | $(BUILD_DIR)
+	@echo "Linking $(EXECUTABLE)..."
 	$(CXX) $(OBJECTS) -o $@ $(LDFLAGS) $(LIBS)
-	@echo "Successfully built runtest_new_v2"
+	@echo "Successfully built $(EXECUTABLE)"
 
 # Object file compilation
 $(BUILD_DIR)/%.o: %.cpp guard-env | $(BUILD_DIR) $(IBSIMU_BOOTSTRAP_STAMP)
@@ -106,16 +108,16 @@ clean:
 	@if [ -d $(IBSIMU_DIR) ]; then $(MAKE) -C $(IBSIMU_DIR) clean >/dev/null 2>&1 || true; fi
 
 distclean: clean
-	$(RM) runtest_new_v2
+	$(RM) $(EXECUTABLE)
 	$(RM) -r $(BUILD_DIR)
 	$(RM) -r $(IBSIMU_DIR)
 
 bootstrap-ibsimu: $(IBSIMU_BOOTSTRAP_STAMP)
 
 # Test targets
-test: runtest_new_v2
+test: $(EXECUTABLE)
 	@echo "Running basic test..."
-	./runtest_new_v2
+	./$(EXECUTABLE)
 
 # Test for grid power analysis
 TEST_OBJECTS = $(filter-out $(BUILD_DIR)/main.o, $(OBJECTS))
@@ -133,9 +135,9 @@ test_load_and_trace: $(TEST_OBJECTS) test_load_and_trace.o
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  all         - Build runtest_new_v2 executable (default)"
+	@echo "  all         - Build $(EXECUTABLE) executable (default)"
 	@echo "  bootstrap-ibsimu - Clone and patch the pinned upstream IBSimu tree"
-	@echo "  runtest_new_v2 - Build the simulation executable using main.cpp"
+	@echo "  $(EXECUTABLE) - Build the simulation executable using main.cpp"
 	@echo "  clean       - Remove object and dependency files"
 	@echo "  distclean   - Remove all generated files, including libibsimu_patched"
 	@echo "  test        - Build and run basic test"

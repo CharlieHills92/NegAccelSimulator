@@ -44,65 +44,26 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "template",
-        "meshSizeMeters"
+        "path"
       ],
       "properties": {
-        "template": {
-          "type": "string",
-          "enum": [
-            "SPIDER",
-            "MITICA",
-            "MTF"
-          ]
-        },
-        "meshSizeMeters": {
-          "$ref": "#/$defs/positiveNumber"
-        },
-        "exportGeometryVtk": {
-          "type": "boolean"
-        },
-        "domain": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "xSizeMeters",
-            "ySizeMeters",
-            "zSizeMeters"
-          ],
-          "properties": {
-            "xSizeMeters": {
-              "$ref": "#/$defs/positiveNumber"
-            },
-            "ySizeMeters": {
-              "$ref": "#/$defs/positiveNumber"
-            },
-            "zSizeMeters": {
-              "$ref": "#/$defs/positiveNumber"
-            }
-          }
-        },
-        "gaps": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "extractionGapMeters": {
-              "$ref": "#/$defs/positiveNumber"
-            },
-            "accelerationGapMeters": {
-              "$ref": "#/$defs/positiveNumber"
-            }
-          }
+        "path": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Path to the external geometry JSON file. Relative paths resolve from the authoring JSON location. Example geometry JSON files live under tools/Templates/*.json."
         }
       }
     },
     "boundaryConditions": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "gridVoltagesVolts"
-      ],
       "properties": {
+        "boundaries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/boundaryDefinition"
+          }
+        },
         "gridVoltagesVolts": {
           "type": "object",
           "additionalProperties": false,
@@ -219,7 +180,7 @@
         "sourceMode": {
           "type": "string",
           "enum": [
-            "auto-by-accelerator",
+            "none",
             "directory",
             "file"
           ]
@@ -229,11 +190,77 @@
         },
         "file": {
           "type": "string"
-        },
-        "filePattern": {
-          "type": "string"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "sourceMode"
+            ],
+            "properties": {
+              "sourceMode": {
+                "enum": [
+                  "directory",
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              },
+              "sourceMode": {
+                "const": "directory"
+              }
+            },
+            "required": [
+              "enabled",
+              "sourceMode"
+            ]
+          },
+          "then": {
+            "required": [
+              "directory"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              },
+              "sourceMode": {
+                "const": "file"
+              }
+            },
+            "required": [
+              "enabled",
+              "sourceMode"
+            ]
+          },
+          "then": {
+            "required": [
+              "file"
+            ]
+          }
+        }
+      ]
     },
     "gasInteractions": {
       "type": "object",
@@ -500,6 +527,160 @@
         },
         "directory": {
           "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "geometrySolid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "zProfileMeters",
+        "rProfileMeters"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "solid",
+            "diagnosticPlane"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "plasma",
+            "extraction_grid",
+            "accelerator_grid",
+            "ground_grid",
+            "repeller",
+            "wall",
+            "custom"
+          ]
+        },
+        "stage": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "boundaryId": {
+          "type": "integer",
+          "minimum": 7
+        },
+        "voltageVolts": {
+          "type": "number"
+        },
+        "material": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "zProfileMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/nonNegativeNumber"
+          }
+        },
+        "rProfileMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/nonNegativeNumber"
+          }
+        },
+        "roundingRadiiMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "aperturePattern": {
+          "$ref": "#/$defs/aperturePattern"
+        }
+      }
+    },
+    "boundaryDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boundaryId",
+        "conditionType",
+        "value"
+      ],
+      "properties": {
+        "boundaryId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "conditionType": {
+          "type": "string",
+          "enum": [
+            "dirichlet",
+            "neumann"
+          ]
+        },
+        "value": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          ],
+          "description": "Numeric boundary value or an arithmetic expression. Names such as EG or AG1 resolve from boundaryConditions.boundaries[*].name."
+        }
+      }
+    },
+    "aperturePattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layout": {
+          "type": "string",
+          "enum": [
+            "single",
+            "rectangular-grid",
+            "staggered-grid"
+          ]
+        },
+        "countX": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "countY": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pitchXMeters": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "pitchYMeters": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "marginMeters": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "xOffsetMeters": {
+          "type": "number"
+        },
+        "yOffsetMeters": {
+          "type": "number"
+        },
+        "rowShiftXMeters": {
+          "type": "number"
+        },
+        "outsidePatternIsSolid": {
+          "type": "boolean"
         }
       }
     }

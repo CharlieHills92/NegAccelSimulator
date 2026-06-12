@@ -2,7 +2,7 @@
 build/
 *.o
 *.d
-runtest_new_v2
+NegAccelExec
 Simulator
 Simulator_shield
 main.cpp_OLD

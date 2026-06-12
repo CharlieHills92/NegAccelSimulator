@@ -35,7 +35,7 @@
     "manifestFile": "scan-manifest.json"
   },
   "execution": {
-    "simulator": "./runtest_new_v2",
+    "simulator": "./NegAccelExec",
     "loadExisting": false,
     "stopOnError": true
   }

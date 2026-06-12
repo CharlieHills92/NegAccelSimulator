@@ -2,12 +2,11 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://negaccelsimulator.local/schema/negaccel-config.schema.json",
   "title": "NegAccelSimulator resolved case configuration",
-  "description": "Canonical single-case runtime JSON for NegAccelSimulator. Python-side tooling can author or expand these files, while the C++ simulator consumes one fully resolved case at a time.",
+  "description": "Canonical single-case runtime JSON for NegAccelSimulator. The Python authoring workflow materializes this explicit runtime contract, and the C++ simulator executes one resolved case at a time.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "metadata",
-    "accelerator",
     "geometry",
     "particleSources",
     "simulation",
@@ -28,15 +27,10 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
-          "description": "Version of the JSON configuration contract, not the simulator version.",
-          "examples": [
-            "1.0.0"
-          ]
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
         },
         "caseTag": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Stable case identifier used by Python orchestration and output naming."
+          "$ref": "#/$defs/nonEmptyString"
         },
         "title": {
           "$ref": "#/$defs/nonEmptyString"
@@ -49,75 +43,32 @@
         }
       }
     },
-    "accelerator": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "type"
-      ],
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": [
-            "BUG",
-            "SPIDER",
-            "MITICA",
-            "MTF",
-            "ELISE",
-            "NIO1",
-            "CUSTOM"
-          ],
-          "description": "Human-readable accelerator selector that should eventually replace ACCELERATOR_IDX."
-        },
-        "legacyIndex": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Optional compatibility field matching the current ACCELERATOR_IDX values."
-        },
-        "useBuiltInDefaults": {
-          "type": "boolean",
-          "default": true,
-          "description": "Whether accelerator-specific defaults are applied when optional fields are omitted."
-        }
-      }
-    },
     "geometry": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "source",
         "mesh",
-        "domain"
+        "domain",
+        "solids"
       ],
       "properties": {
         "source": {
-          "description": "Geometry definition source. The current code mostly builds geometry from accelerator-specific generators, but the schema also allows a custom file path for future GUI-driven geometries.",
-          "oneOf": [
-            {
-              "$ref": "#/$defs/builtinGeometrySource"
-            },
-            {
-              "$ref": "#/$defs/customGeometrySource"
-            }
-          ]
+          "$ref": "#/$defs/generatedGeometrySource"
         },
         "mesh": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "sizeMeters"
+            "sizeMeters",
+            "exportGeometryVtk"
           ],
           "properties": {
             "sizeMeters": {
-              "$ref": "#/$defs/positiveNumber",
-              "description": "Primary mesh size. This replaces MESH_SIZE."
-            },
-            "refinementScale": {
               "$ref": "#/$defs/positiveNumber"
             },
             "exportGeometryVtk": {
-              "type": "boolean",
-              "default": true
+              "type": "boolean"
             }
           }
         },
@@ -138,6 +89,9 @@
             },
             "zSizeMeters": {
               "$ref": "#/$defs/positiveNumber"
+            },
+            "zStartMeters": {
+              "type": "number"
             }
           }
         },
@@ -146,47 +100,15 @@
           "additionalProperties": false,
           "properties": {
             "extractionGapMeters": {
-              "$ref": "#/$defs/positiveNumber",
-              "description": "Optional replacement for EXT_GAP."
-            },
-            "accelerationGapMeters": {
-              "$ref": "#/$defs/positiveNumber",
-              "description": "Optional replacement for ACC_GAP."
+              "$ref": "#/$defs/positiveNumber"
             }
           }
         },
         "solids": {
           "type": "array",
-          "description": "Optional explicit solid inventory for GUI-oriented editing and labeling.",
+          "minItems": 1,
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "name",
-              "kind"
-            ],
-            "properties": {
-              "name": {
-                "$ref": "#/$defs/nonEmptyString"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "grid",
-                  "aperture",
-                  "wall",
-                  "plasma",
-                  "diagnosticPlane",
-                  "custom"
-                ]
-              },
-              "material": {
-                "type": "string"
-              },
-              "notes": {
-                "type": "string"
-              }
-            }
+            "$ref": "#/$defs/geometrySolid"
           }
         }
       }
@@ -213,40 +135,31 @@
                 "H-",
                 "D-",
                 "custom"
-              ],
-              "default": "H-"
+              ]
             },
             "chargeState": {
-              "type": "number",
-              "default": -1
+              "type": "number"
             },
             "massU": {
-              "$ref": "#/$defs/positiveNumber",
-              "description": "Particle mass in atomic mass units. This replaces M_IONS."
+              "$ref": "#/$defs/positiveNumber"
             },
             "currentDensityAm2": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Injected beam current density. This replaces J or J_ION."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "perpendicularTemperatureEV": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Replaces T_PERP or TPERP."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "parallelTemperatureEV": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Replaces TPAR when present."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "axialEnergyEV": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Replaces E0_Z."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "plasmaPotentialVolts": {
-              "type": "number",
-              "description": "Plasma potential or meniscus voltage, replacing U_PLASMA when the source model uses it."
+              "type": "number"
             },
             "electronsModelWeight": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Optional replacement for the current ELECTRONS parameter."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "sourceModel": {
               "type": "string",
@@ -255,51 +168,7 @@
                 "gaussian",
                 "measured",
                 "custom"
-              ],
-              "default": "uniform"
-            }
-          }
-        },
-        "additionalEmitters": {
-          "type": "array",
-          "description": "Optional explicit emitter list for future GUI workflows or test drivers.",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "name",
-              "species",
-              "emissionModel"
-            ],
-            "properties": {
-              "name": {
-                "$ref": "#/$defs/nonEmptyString"
-              },
-              "species": {
-                "type": "string",
-                "enum": [
-                  "H-",
-                  "H0",
-                  "H+",
-                  "e-",
-                  "custom"
-                ]
-              },
-              "emissionModel": {
-                "type": "string",
-                "enum": [
-                  "surface",
-                  "volume",
-                  "loaded-pdb",
-                  "custom"
-                ]
-              },
-              "currentDensityAm2": {
-                "$ref": "#/$defs/nonNegativeNumber"
-              },
-              "file": {
-                "type": "string"
-              }
+              ]
             }
           }
         }
@@ -311,6 +180,7 @@
       "required": [
         "particleCount",
         "iterations",
+        "domainDecomposition",
         "solver",
         "spaceCharge",
         "convergence"
@@ -318,21 +188,21 @@
       "properties": {
         "particleCount": {
           "type": "integer",
-          "minimum": 1,
-          "description": "Number of simulation particles. This replaces N_PARTICLES."
+          "minimum": 1
         },
         "iterations": {
           "type": "integer",
-          "minimum": 1,
-          "description": "Number of electrostatic or tracing iterations. This replaces ITERATIONS."
+          "minimum": 1
         },
         "domainDecomposition": {
           "type": "object",
           "additionalProperties": false,
+          "required": [
+            "splitDomain"
+          ],
           "properties": {
             "splitDomain": {
-              "type": "boolean",
-              "description": "Replacement for SPLIT_DOMAIN."
+              "type": "boolean"
             },
             "domainIndex": {
               "type": "integer",
@@ -344,7 +214,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "type"
+            "type",
+            "shieldModel"
           ],
           "properties": {
             "type": {
@@ -352,23 +223,14 @@
               "enum": [
                 "bicgstab",
                 "multigrid"
-              ],
-              "description": "Replacement for MGSOLVER."
+              ]
             },
             "shieldModel": {
               "type": "string",
               "enum": [
                 "nsimp",
                 "shield"
-              ],
-              "description": "Replacement for SHIELD_MODEL."
-            },
-            "positiveIonTemperatureEV": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Replacement for T_POSITIVE."
-            },
-            "plasmaPotentialVolts": {
-              "type": "number"
+              ]
             }
           }
         },
@@ -376,22 +238,19 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "alphaCoeff"
+            "alphaCoeff",
+            "pgFilterScale",
+            "cesmadcmScale"
           ],
           "properties": {
             "alphaCoeff": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1,
-              "description": "Replacement for ALPHA_COEFF."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "pgFilterScale": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Replacement for PGFILTER_SCALE."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "cesmadcmScale": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Replacement for CESMADCM_SCALE."
+              "$ref": "#/$defs/nonNegativeNumber"
             }
           }
         },
@@ -403,8 +262,7 @@
           ],
           "properties": {
             "currentDensityTolerance": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Replacement for JTOLERANCE."
+              "$ref": "#/$defs/nonNegativeNumber"
             }
           }
         }
@@ -414,14 +272,14 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "electrodes"
+        "boundaries"
       ],
       "properties": {
-        "electrodes": {
+        "boundaries": {
           "type": "array",
           "minItems": 1,
           "items": {
-            "$ref": "#/$defs/electrodeBoundary"
+            "$ref": "#/$defs/boundaryDefinition"
           }
         },
         "periodicBoundaries": {
@@ -444,31 +302,6 @@
               "type": "number"
             }
           }
-        },
-        "forcedPotentialRegions": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "name",
-              "zMaxMeters"
-            ],
-            "properties": {
-              "name": {
-                "$ref": "#/$defs/nonEmptyString"
-              },
-              "zMaxMeters": {
-                "type": "number"
-              },
-              "xAbsLimitMeters": {
-                "$ref": "#/$defs/nonNegativeNumber"
-              },
-              "yAbsLimitMeters": {
-                "$ref": "#/$defs/nonNegativeNumber"
-              }
-            }
-          }
         }
       }
     },
@@ -477,42 +310,87 @@
       "additionalProperties": false,
       "required": [
         "enabled",
-        "sourceMode"
+        "sourceMode",
+        "scale"
       ],
       "properties": {
         "enabled": {
-          "type": "boolean",
-          "description": "Replacement for B_ISON."
-        },
-        "case": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Replacement for EXTFIELD_CASE when a predefined field family is used."
-        },
-        "scale": {
-          "$ref": "#/$defs/nonNegativeNumber",
-          "default": 1.0,
-          "description": "Replacement for EXTFIELD_SCALE."
+          "type": "boolean"
         },
         "sourceMode": {
           "type": "string",
           "enum": [
             "none",
-            "auto-by-accelerator",
             "directory",
             "file"
           ]
         },
+        "case": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scale": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
         "directory": {
-          "type": "string"
+          "$ref": "#/$defs/nonEmptyString"
         },
         "file": {
-          "type": "string"
-        },
-        "filePattern": {
-          "type": "string"
+          "$ref": "#/$defs/nonEmptyString"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "properties": {
+              "sourceMode": {
+                "enum": [
+                  "directory",
+                  "file"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "sourceMode": {
+                "const": "directory"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "directory"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "sourceMode": {
+                "const": "file"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "file"
+            ]
+          }
+        }
+      ]
     },
     "gasDensity": {
       "type": "object",
@@ -523,63 +401,13 @@
       ],
       "properties": {
         "defaultProfile": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Profile name selected by default for stripping, secondaries, and diagnostics. When stripping is enabled, the current C++ runtime expects the selected profile to resolve to a file-backed source."
+          "$ref": "#/$defs/nonEmptyString"
         },
         "profiles": {
           "type": "array",
           "minItems": 1,
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "name",
-              "species",
-              "source",
-              "useFor"
-            ],
-            "properties": {
-              "name": {
-                "$ref": "#/$defs/nonEmptyString"
-              },
-              "species": {
-                "type": "string",
-                "enum": [
-                  "H2",
-                  "H0",
-                  "H+",
-                  "e-",
-                  "custom"
-                ]
-              },
-              "source": {
-                "oneOf": [
-                  {
-                    "$ref": "#/$defs/fileDensitySource"
-                  },
-                  {
-                    "$ref": "#/$defs/inlineDensitySource"
-                  }
-                ]
-              },
-              "pressureScale": {
-                "$ref": "#/$defs/nonNegativeNumber",
-                "description": "Optional multiplier used when translating tabulated density profiles into an effective operating pressure."
-              },
-              "useFor": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "enum": [
-                    "stripping",
-                    "secondaryEmission",
-                    "diagnostics"
-                  ]
-                }
-              }
-            }
+            "$ref": "#/$defs/gasDensityProfile"
           }
         }
       }
@@ -605,26 +433,34 @@
                 "disabled",
                 "primaryOnly",
                 "withSecondaries"
-              ],
-              "description": "Replacement for STRIPPING or INCLUDE_STRIPPING."
+              ]
             },
             "minimumZMeters": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Lower z threshold for secondary generation. This matches the current THCallback_secondaries guard."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "densityProfile": {
-              "type": "string",
-              "description": "Name of the gas-density profile used by stripping callbacks. This must match a gasDensity.profiles[*].name entry with source.mode='file'."
-            },
-            "debugWindowStart": {
-              "type": "integer",
-              "minimum": 0
-            },
-            "debugWindowEnd": {
-              "type": "integer",
-              "minimum": 0
+              "$ref": "#/$defs/nonEmptyString"
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "primaryOnly",
+                      "withSecondaries"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "densityProfile"
+                ]
+              }
+            }
+          ]
         },
         "surfaceCollisions": {
           "type": "object",
@@ -634,8 +470,7 @@
           ],
           "properties": {
             "enabled": {
-              "type": "boolean",
-              "description": "Replacement for INCLUDE_SURFACE_COLLISIONS."
+              "type": "boolean"
             },
             "model": {
               "type": "string",
@@ -643,22 +478,18 @@
                 "EAMCC"
               ]
             },
+            "minimumImpactZMeters": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            },
             "maximumSecondaryElectrons": {
               "type": "integer",
-              "minimum": 0,
-              "description": "Future replacement for MAX_SECONDARY_ELECTRONS."
+              "minimum": 0
             },
             "secondaryElectronEnergyEV": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Future replacement for SECONDARY_ELECTRON_ENERGY."
+              "$ref": "#/$defs/nonNegativeNumber"
             },
             "debug": {
-              "type": "boolean",
-              "description": "Enable verbose EAMCC surface-collision callback logging even when global debug mode is off."
-            },
-            "minimumImpactZMeters": {
-              "$ref": "#/$defs/nonNegativeNumber",
-              "description": "Lower z threshold for surface-collision secondary generation. This replaces the previous hardcoded 7 mm cutoff."
+              "type": "boolean"
             }
           }
         }
@@ -677,8 +508,7 @@
       ],
       "properties": {
         "rootDirectory": {
-          "$ref": "#/$defs/nonEmptyString",
-          "description": "Intended output root for the resolved case. Python tooling should keep this aligned with the folder containing the generated case JSON."
+          "type": "string"
         },
         "summary": {
           "$ref": "#/$defs/outputChannel"
@@ -694,7 +524,10 @@
           "additionalProperties": false,
           "required": [
             "enabled",
-            "directory"
+            "directory",
+            "exportGeometry",
+            "exportSimulationState",
+            "exportTracedParticles"
           ],
           "properties": {
             "enabled": {
@@ -719,7 +552,10 @@
           "additionalProperties": false,
           "required": [
             "consoleLevel",
-            "fileLevel"
+            "fileLevel",
+            "captureStdout",
+            "writeDebugArtifacts",
+            "structuredLogFile"
           ],
           "properties": {
             "consoleLevel": {
@@ -758,109 +594,15 @@
     "logLevel": {
       "type": "string",
       "enum": [
-        "trace",
-        "debug",
-        "info",
-        "warning",
+        "critical",
         "error",
-        "critical"
+        "warning",
+        "info",
+        "debug",
+        "trace"
       ]
     },
-    "builtinGeometrySource": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "mode",
-        "template"
-      ],
-      "properties": {
-        "mode": {
-          "const": "builtin-generator"
-        },
-        "template": {
-          "type": "string",
-          "enum": [
-            "BUG",
-            "SPIDER",
-            "MITICA",
-            "MTF",
-            "ELISE",
-            "NIO1",
-            "CUSTOM"
-          ]
-        }
-      }
-    },
-    "customGeometrySource": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "mode",
-        "path"
-      ],
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": [
-            "custom-file",
-            "generated-data"
-          ]
-        },
-        "path": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "format": {
-          "type": "string",
-          "enum": [
-            "header",
-            "json",
-            "vtk",
-            "dat"
-          ]
-        }
-      }
-    },
-    "electrodeBoundary": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "role",
-        "voltageVolts"
-      ],
-      "properties": {
-        "name": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "role": {
-          "type": "string",
-          "enum": [
-            "extraction_grid",
-            "accelerator_grid",
-            "ground_grid",
-            "repeller",
-            "wall",
-            "plasma",
-            "custom"
-          ]
-        },
-        "stage": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "voltageVolts": {
-          "type": "number"
-        },
-        "enabled": {
-          "type": "boolean",
-          "default": true
-        },
-        "material": {
-          "type": "string"
-        }
-      }
-    },
-    "fileDensitySource": {
+    "generatedGeometrySource": {
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -870,7 +612,7 @@
       ],
       "properties": {
         "mode": {
-          "const": "file"
+          "const": "generated-data"
         },
         "path": {
           "$ref": "#/$defs/nonEmptyString"
@@ -878,48 +620,201 @@
         "format": {
           "type": "string",
           "enum": [
-            "z-density-columns"
+            "json"
           ]
         }
       }
     },
-    "inlineDensitySource": {
+    "geometrySolid": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "mode",
-        "points"
+        "name",
+        "kind",
+        "zProfileMeters",
+        "rProfileMeters"
       ],
       "properties": {
-        "mode": {
-          "const": "inline-table"
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
         },
-        "interpolation": {
+        "kind": {
           "type": "string",
           "enum": [
-            "linear",
-            "step"
-          ],
-          "default": "linear"
+            "solid",
+            "diagnosticPlane"
+          ]
         },
-        "points": {
+        "role": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "integer"
+        },
+        "boundaryId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "voltageVolts": {
+          "type": "number"
+        },
+        "zProfileMeters": {
           "type": "array",
           "minItems": 2,
           "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "zMeters",
-              "densityPerM3"
-            ],
-            "properties": {
-              "zMeters": {
-                "type": "number"
-              },
-              "densityPerM3": {
-                "$ref": "#/$defs/nonNegativeNumber"
-              }
+            "type": "number"
+          }
+        },
+        "rProfileMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "number",
+            "minimum": 0
+          }
+        },
+        "roundingRadiiMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "aperturePattern": {
+          "$ref": "#/$defs/aperturePattern"
+        }
+      }
+    },
+    "aperturePattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layout"
+      ],
+      "properties": {
+        "layout": {
+          "type": "string",
+          "enum": [
+            "single",
+            "rectangular-grid",
+            "staggered-grid"
+          ]
+        },
+        "countX": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "countY": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pitchXMeters": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "pitchYMeters": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "marginMeters": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "xOffsetMeters": {
+          "type": "number"
+        },
+        "yOffsetMeters": {
+          "type": "number"
+        },
+        "rowShiftXMeters": {
+          "type": "number"
+        },
+        "outsidePatternIsSolid": {
+          "type": "boolean"
+        }
+      }
+    },
+    "boundaryDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boundaryId",
+        "conditionType",
+        "value"
+      ],
+      "properties": {
+        "boundaryId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "conditionType": {
+          "type": "string",
+          "enum": [
+            "dirichlet",
+            "neumann"
+          ]
+        },
+        "value": {
+          "type": "number"
+        }
+      }
+    },
+    "gasDensityProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "species",
+        "source",
+        "useFor"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "species": {
+          "type": "string",
+          "enum": [
+            "H2",
+            "H0",
+            "H+",
+            "e-",
+            "custom"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "path"
+          ],
+          "properties": {
+            "mode": {
+              "const": "file"
+            },
+            "path": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "format": {
+              "type": "string"
             }
+          }
+        },
+        "pressureScale": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "useFor": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "stripping",
+              "secondaryEmission",
+              "diagnostics"
+            ]
           }
         }
       }
@@ -937,9 +832,6 @@
         },
         "directory": {
           "$ref": "#/$defs/nonEmptyString"
-        },
-        "filePrefix": {
-          "type": "string"
         }
       }
     }

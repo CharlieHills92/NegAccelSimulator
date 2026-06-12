@@ -62,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("scan_spec", help="Path to the scan specification JSON file.")
     run_parser.add_argument("--output-dir", help="Override outputs.directory from the scan specification.")
-    run_parser.add_argument("--simulator", help="Path to the simulator executable, such as ./runtest_new_v2.")
+    run_parser.add_argument("--simulator", help="Path to the simulator executable, such as ./NegAccelExec.")
     run_parser.add_argument(
         "--load-existing",
         action="store_true",

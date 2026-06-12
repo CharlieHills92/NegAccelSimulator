@@ -1,10 +1,11 @@
 #include "SimulationParameters.h"
 
-#include "StrippingUtils.h"
 #include "error.hpp"
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -13,130 +14,6 @@ using json = nlohmann::json;
 using namespace std;
 
 namespace {
-
-const char* geometryTemplateFromAcceleratorIndex(uint accelerator_index) {
-    switch (accelerator_index) {
-        case 1U:
-            return "SPIDER";
-        case 2U:
-            return "MITICA";
-        case 3U:
-            return "MTF";
-        default:
-            return "";
-    }
-}
-
-bool isKnownGeometryTemplate(const string& geometry_template) {
-    return geometry_template == "SPIDER" || geometry_template == "MITICA" || geometry_template == "MTF";
-}
-
-string defaultGeometryTemplate(uint accelerator_index) {
-    return geometryTemplateFromAcceleratorIndex(accelerator_index);
-}
-
-double defaultDomainXSizeMeters(const string& geometry_template) {
-    if (geometry_template == "SPIDER") {
-        return 26.0e-3;
-    }
-    if (geometry_template == "MITICA") {
-        return 30.0e-3;
-    }
-    if (geometry_template == "MTF") {
-        return 80.0e-3;
-    }
-
-    return 30.0e-3;
-}
-
-double defaultDomainYSizeMeters(const string& geometry_template) {
-    if (geometry_template == "SPIDER") {
-        return 28.0e-3;
-    }
-    if (geometry_template == "MITICA") {
-        return 30.0e-3;
-    }
-    if (geometry_template == "MTF") {
-        return 80.0e-3;
-    }
-
-    return 30.0e-3;
-}
-
-double defaultDomainZSizeMeters(const string& geometry_template) {
-    if (geometry_template == "SPIDER") {
-        return 80.0e-3;
-    }
-    if (geometry_template == "MITICA") {
-        return 554.0e-3;
-    }
-    if (geometry_template == "MTF") {
-        return 567.0e-3;
-    }
-
-    return 567.0e-3;
-}
-
-void applyDefaultPeriodicity(const string& geometry_template,
-                             double& x_min,
-                             double& x_max,
-                             double& y_min,
-                             double& y_max,
-                             uint& enabled) {
-    if (geometry_template == "SPIDER") {
-        x_min = -10.0e-3;
-        x_max = 10.0e-3;
-        y_min = -11.0e-3;
-        y_max = 11.0e-3;
-        enabled = 1U;
-        return;
-    }
-    if (geometry_template == "MITICA") {
-        x_min = -15.0e-3;
-        x_max = 15.0e-3;
-        y_min = -15.0e-3;
-        y_max = 15.0e-3;
-        enabled = 1U;
-        return;
-    }
-    if (geometry_template == "MTF") {
-        x_min = -40.0e-3;
-        x_max = 40.0e-3;
-        y_min = -40.0e-3;
-        y_max = 40.0e-3;
-        enabled = 1U;
-        return;
-    }
-
-    x_min = 0.0;
-    x_max = 0.0;
-    y_min = 0.0;
-    y_max = 0.0;
-    enabled = 0U;
-}
-
-uint acceleratorIndexFromType(const string& acceleratorType) {
-    if (acceleratorType == "SPIDER") {
-        return 1U;
-    }
-    if (acceleratorType == "MITICA") {
-        return 2U;
-    }
-    if (acceleratorType == "MTF") {
-        return 3U;
-    }
-    if (acceleratorType == "ELISE") {
-        return 4U;
-    }
-    if (acceleratorType == "NIO1") {
-        return 5U;
-    }
-    if (acceleratorType == "BUG" || acceleratorType == "CUSTOM") {
-        return 0U;
-    }
-
-    throw runtime_error("Unsupported accelerator type: " + acceleratorType);
-}
 
 uint shieldModelFromType(const string& shieldType) {
     return shieldType == "shield" ? 1U : 0U;
@@ -164,6 +41,175 @@ bool hasObject(const json& root, const char* key) {
     return root.contains(key) && root.at(key).is_object();
 }
 
+std::vector<double> requireNumberArray(const json& document,
+                                       const char* key,
+                                       const std::string& context) {
+    if (!document.contains(key) || !document.at(key).is_array()) {
+        throw runtime_error(context + "." + key + " must be an array");
+    }
+
+    std::vector<double> values;
+    for (json::const_iterator it = document.at(key).begin(); it != document.at(key).end(); ++it) {
+        if (!it->is_number()) {
+            throw runtime_error(context + "." + key + " must contain only numeric values");
+        }
+        values.push_back(it->get<double>());
+    }
+
+    if (values.size() < 2) {
+        throw runtime_error(context + "." + key + " must contain at least two values");
+    }
+
+    return values;
+}
+
+SimulationParameters::GeometryAperturePattern parseGeometryAperturePattern(
+    const json& aperture_pattern,
+    const std::string& context) {
+    SimulationParameters::GeometryAperturePattern parsed;
+    parsed.layout = aperture_pattern.value("layout", std::string("single"));
+    parsed.countX = aperture_pattern.value("countX", 1U);
+    parsed.countY = aperture_pattern.value("countY", 1U);
+    parsed.pitchXMeters = aperture_pattern.value("pitchXMeters", 0.0);
+    parsed.pitchYMeters = aperture_pattern.value("pitchYMeters", 0.0);
+    parsed.marginMeters = aperture_pattern.value("marginMeters", 0.0);
+    parsed.xOffsetMeters = aperture_pattern.value("xOffsetMeters", 0.0);
+    parsed.yOffsetMeters = aperture_pattern.value("yOffsetMeters", 0.0);
+    parsed.rowShiftXMeters = aperture_pattern.value("rowShiftXMeters", 0.0);
+    parsed.outsidePatternIsSolid = aperture_pattern.value("outsidePatternIsSolid", true);
+
+    if (parsed.layout != "single" &&
+        parsed.layout != "rectangular-grid" &&
+        parsed.layout != "staggered-grid") {
+        throw runtime_error(context + ".layout must be single, rectangular-grid, or staggered-grid");
+    }
+
+    if (parsed.layout != "single") {
+        if (parsed.countX == 0U || parsed.countY == 0U) {
+            throw runtime_error(context + ".countX and countY must be positive for patterned solids");
+        }
+        if (parsed.pitchXMeters <= 0.0 || parsed.pitchYMeters <= 0.0) {
+            throw runtime_error(context + ".pitchXMeters and pitchYMeters must be positive for patterned solids");
+        }
+    }
+
+    return parsed;
+}
+
+std::string normalizeGeneratedSolidKind(const std::string& kind,
+                                        const std::string& context) {
+    if (kind == "solid" || kind == "diagnosticPlane") {
+        return kind;
+    }
+    if (kind == "grid" ||
+        kind == "aperture" ||
+        kind == "wall" ||
+        kind == "plasma" ||
+        kind == "custom") {
+        return "solid";
+    }
+    throw runtime_error(context + ".kind must be either solid or diagnosticPlane");
+}
+
+SimulationParameters::GeometrySolidDefinition parseGeneratedGeometrySolid(
+    const json& solid,
+    size_t index) {
+    const std::string context = "geometry.solids[" + std::to_string(index) + "]";
+    if (!solid.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+
+    if (!solid.contains("name") || !solid.at("name").is_string()) {
+        throw runtime_error(context + ".name must be a string");
+    }
+    if (!solid.contains("kind") || !solid.at("kind").is_string()) {
+        throw runtime_error(context + ".kind must be a string");
+    }
+    SimulationParameters::GeometrySolidDefinition parsed;
+    parsed.name = solid.at("name").get<std::string>();
+    parsed.kind = normalizeGeneratedSolidKind(solid.at("kind").get<std::string>(), context);
+    parsed.role = solid.value("role", std::string());
+    parsed.stage = solid.value("stage", -1);
+    parsed.boundaryId = solid.value("boundaryId", -1);
+    if (solid.contains("voltageVolts")) {
+        parsed.hasExplicitVoltage = true;
+        parsed.voltageVolts = solid.at("voltageVolts").get<double>();
+    }
+
+    if (!solid.contains("zProfileMeters") || !solid.contains("rProfileMeters")) {
+        throw runtime_error(context + ".zProfileMeters and .rProfileMeters are required");
+    }
+
+    parsed.zProfileMeters = requireNumberArray(solid, "zProfileMeters", context);
+    parsed.rProfileMeters = requireNumberArray(solid, "rProfileMeters", context);
+
+    if (parsed.zProfileMeters.size() != parsed.rProfileMeters.size()) {
+        throw runtime_error(context + ".zProfileMeters and rProfileMeters must have the same length");
+    }
+    bool has_positive_span = false;
+    for (size_t point_index = 1; point_index < parsed.zProfileMeters.size(); ++point_index) {
+        if (parsed.zProfileMeters[point_index] < parsed.zProfileMeters[point_index - 1]) {
+            throw runtime_error(context + ".zProfileMeters must be sorted in non-decreasing order");
+        }
+        if (parsed.zProfileMeters[point_index] > parsed.zProfileMeters[point_index - 1]) {
+            has_positive_span = true;
+        }
+    }
+    if (!has_positive_span) {
+        throw runtime_error(context + ".zProfileMeters must span a non-zero z range");
+    }
+
+    parsed.roundingRadiiMeters.assign(parsed.zProfileMeters.size(), 0.0);
+    if (solid.contains("roundingRadiiMeters")) {
+        parsed.roundingRadiiMeters = requireNumberArray(solid, "roundingRadiiMeters", context);
+        if (parsed.roundingRadiiMeters.size() != parsed.zProfileMeters.size()) {
+            throw runtime_error(context + ".roundingRadiiMeters must have the same length as zProfileMeters");
+        }
+    }
+    if (hasObject(solid, "aperturePattern")) {
+        parsed.aperturePattern = parseGeometryAperturePattern(
+            solid.at("aperturePattern"), context + ".aperturePattern");
+    }
+
+    return parsed;
+}
+
+SimulationParameters::BoundaryConditionDefinition parseBoundaryConditionDefinition(
+    const json& boundary,
+    size_t index,
+    int& boundary_id) {
+    const std::string context = "boundaryConditions.boundaries[" + std::to_string(index) + "]";
+    if (!boundary.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+    if (!boundary.contains("boundaryId") || !boundary.at("boundaryId").is_number_integer()) {
+        throw runtime_error(context + ".boundaryId must be an integer");
+    }
+    if (!boundary.contains("value") || !boundary.at("value").is_number()) {
+        throw runtime_error(context + ".value must be numeric");
+    }
+
+    boundary_id = boundary.at("boundaryId").get<int>();
+    if (boundary_id < 1) {
+        throw runtime_error(context + ".boundaryId must be >= 1");
+    }
+
+    SimulationParameters::BoundaryConditionDefinition parsed;
+    parsed.name = boundary.value("name", std::string());
+    parsed.conditionType = boundary.value("conditionType", std::string("dirichlet"));
+    std::transform(parsed.conditionType.begin(),
+                   parsed.conditionType.end(),
+                   parsed.conditionType.begin(),
+                   [](unsigned char character) {
+                       return static_cast<char>(std::tolower(character));
+                   });
+    if (parsed.conditionType != "dirichlet" && parsed.conditionType != "neumann") {
+        throw runtime_error(context + ".conditionType must be dirichlet or neumann");
+    }
+    parsed.value = boundary.at("value").get<double>();
+    return parsed;
+}
+
 const json* findDensityProfile(const json& profiles, const string& profile_name) {
     if (!profiles.is_array()) {
         return nullptr;
@@ -184,8 +230,7 @@ const json* findDensityProfile(const json& profiles, const string& profile_name)
 } // namespace
 
 SimulationParameters::SimulationParameters()
-    : ACCELERATOR_IDX(0),
-      B_ISON(0),
+    : B_ISON(0),
       INCLUDE_STRIPPING(0),
       INCLUDE_SURFACE_COLLISIONS(0),
       ELECTRONS(0.0),
@@ -219,38 +264,43 @@ SimulationParameters::SimulationParameters()
       MGSOLVER(0U),
       SHIELD_MODEL(0U),
       EXT_GAP(0.0),
-      ACC_GAP(0.0),
       DOMAIN_X_SIZE(-1.0),
       DOMAIN_Y_SIZE(-1.0),
       DOMAIN_Z_SIZE(-1.0),
+      DOMAIN_Z_START(0.0),
       EGEXTJ(0.0),
-            domain_ii(0U),
-            GEOMETRY_TEMPLATE(),
-            STRIPPING_DENSITY_PROFILE(),
-            STRIPPING_MIN_Z(-1.0),
-            SURFACE_COLLISIONS_MIN_Z(7.0e-3),
-            SURFACE_COLLISIONS_DEBUG(0U),
-            PERIODIC_BOUNDARIES_ENABLED(0U),
-            PERIODIC_X_MIN(0.0),
-            PERIODIC_X_MAX(0.0),
-            PERIODIC_Y_MIN(0.0),
-            PERIODIC_Y_MAX(0.0),
-            OUTPUT_SUMMARY_DIRECTORY("Summary"),
-            OUTPUT_PLOTS_DIRECTORY("Plots"),
-            OUTPUT_DATA_DIRECTORY("Data"),
-            OUTPUT_VTK_DIRECTORY("VTK"),
-            OUTPUT_SUMMARY_ENABLED(1U),
-            OUTPUT_PLOTS_ENABLED(1U),
-            OUTPUT_DATA_ENABLED(1U),
-            OUTPUT_VTK_ENABLED(1U),
-            OUTPUT_VTK_EXPORT_GEOMETRY(1U),
-            OUTPUT_VTK_EXPORT_SIMULATION_STATE(1U),
-            OUTPUT_VTK_EXPORT_TRACED_PARTICLES(1U),
-            OUTPUT_LOGGING_CONSOLE_LEVEL("info"),
-            OUTPUT_LOGGING_FILE_LEVEL("debug"),
-            OUTPUT_LOGGING_CAPTURE_STDOUT(1U),
-            OUTPUT_LOGGING_WRITE_DEBUG_ARTIFACTS(0U),
-            OUTPUT_LOGGING_STRUCTURED_LOG_FILE("run.log") {
+      domain_ii(0U),
+      GEOMETRY_SOURCE_MODE(),
+      GENERATED_GEOMETRY_SOLIDS(),
+      EXPLICIT_BOUNDARY_CONDITIONS(),
+      MAGNETIC_FIELD_SOURCE_MODE("none"),
+      MAGNETIC_FIELD_DIRECTORY(),
+      MAGNETIC_FIELD_FILE(),
+      STRIPPING_DENSITY_PROFILE(),
+      STRIPPING_MIN_Z(-1.0),
+      SURFACE_COLLISIONS_MIN_Z(7.0e-3),
+      SURFACE_COLLISIONS_DEBUG(0U),
+      PERIODIC_BOUNDARIES_ENABLED(0U),
+      PERIODIC_X_MIN(0.0),
+      PERIODIC_X_MAX(0.0),
+      PERIODIC_Y_MIN(0.0),
+      PERIODIC_Y_MAX(0.0),
+      OUTPUT_SUMMARY_DIRECTORY("Summary"),
+      OUTPUT_PLOTS_DIRECTORY("Plots"),
+      OUTPUT_DATA_DIRECTORY("Data"),
+      OUTPUT_VTK_DIRECTORY("VTK"),
+      OUTPUT_SUMMARY_ENABLED(1U),
+      OUTPUT_PLOTS_ENABLED(1U),
+      OUTPUT_DATA_ENABLED(1U),
+      OUTPUT_VTK_ENABLED(1U),
+      OUTPUT_VTK_EXPORT_GEOMETRY(1U),
+      OUTPUT_VTK_EXPORT_SIMULATION_STATE(1U),
+      OUTPUT_VTK_EXPORT_TRACED_PARTICLES(1U),
+      OUTPUT_LOGGING_CONSOLE_LEVEL("info"),
+      OUTPUT_LOGGING_FILE_LEVEL("debug"),
+      OUTPUT_LOGGING_CAPTURE_STDOUT(1U),
+      OUTPUT_LOGGING_WRITE_DEBUG_ARTIFACTS(0U),
+      OUTPUT_LOGGING_STRUCTURED_LOG_FILE("run.log") {
 }
 
 void SimulationParameters::readParametersFromFile(const string& input) {
@@ -283,18 +333,7 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
     }
 
     string selected_density_profile_name;
-    uint accelerator_index = 0U;
-    if (hasObject(root, "accelerator")) {
-        const json& accelerator = root.at("accelerator");
-        if (accelerator.contains("legacyIndex")) {
-            accelerator_index = accelerator.at("legacyIndex").get<uint>();
-        } else if (accelerator.contains("type")) {
-            accelerator_index = acceleratorIndexFromType(accelerator.at("type").get<string>());
-        }
-    }
-
     *this = SimulationParameters();
-    ACCELERATOR_IDX = accelerator_index;
     setDefaultValues();
 
     if (hasObject(root, "gasDensity")) {
@@ -304,78 +343,68 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         }
     }
 
-    if (hasObject(root, "accelerator")) {
-        const json& accelerator = root.at("accelerator");
-        if (accelerator.contains("legacyIndex")) {
-            ACCELERATOR_IDX = accelerator.at("legacyIndex").get<uint>();
-        } else if (accelerator.contains("type")) {
-            ACCELERATOR_IDX = acceleratorIndexFromType(accelerator.at("type").get<string>());
-        }
+    if (!hasObject(root, "geometry")) {
+        throw Error(ERROR_LOCATION, "geometry object is required in the runtime JSON configuration");
     }
 
-    if (hasObject(root, "geometry")) {
-        const json& geometry = root.at("geometry");
+    const json& geometry = root.at("geometry");
+    if (!hasObject(geometry, "source")) {
+        throw Error(ERROR_LOCATION, "geometry.source object is required in the runtime JSON configuration");
+    }
 
-        if (hasObject(geometry, "source")) {
-            const json& source = geometry.at("source");
-            const string mode = source.value("mode", string());
-            if (mode == "builtin-generator" && source.contains("template")) {
-                GEOMETRY_TEMPLATE = source.at("template").get<string>();
-                if (!isKnownGeometryTemplate(GEOMETRY_TEMPLATE)) {
-                    throw Error(ERROR_LOCATION, "Unsupported built-in geometry template: " + GEOMETRY_TEMPLATE);
-                }
+    const json& source = geometry.at("source");
+    GEOMETRY_SOURCE_MODE = source.value("mode", std::string());
+    if (GEOMETRY_SOURCE_MODE != "generated-data") {
+        throw Error(ERROR_LOCATION,
+                    "Only geometry.source.mode='generated-data' is supported by the current C++ runtime");
+    }
+    if (!geometry.contains("solids") || !geometry.at("solids").is_array()) {
+        throw Error(ERROR_LOCATION,
+                    "geometry.solids must be an array when geometry.source.mode='generated-data'");
+    }
 
-                if (DOMAIN_X_SIZE <= 0.0 || DOMAIN_X_SIZE == defaultDomainXSizeMeters(defaultGeometryTemplate(ACCELERATOR_IDX))) {
-                    DOMAIN_X_SIZE = defaultDomainXSizeMeters(GEOMETRY_TEMPLATE);
-                }
-                if (DOMAIN_Y_SIZE <= 0.0 || DOMAIN_Y_SIZE == defaultDomainYSizeMeters(defaultGeometryTemplate(ACCELERATOR_IDX))) {
-                    DOMAIN_Y_SIZE = defaultDomainYSizeMeters(GEOMETRY_TEMPLATE);
-                }
-                if (DOMAIN_Z_SIZE <= 0.0 || DOMAIN_Z_SIZE == defaultDomainZSizeMeters(defaultGeometryTemplate(ACCELERATOR_IDX))) {
-                    DOMAIN_Z_SIZE = defaultDomainZSizeMeters(GEOMETRY_TEMPLATE);
-                }
-
-                applyDefaultPeriodicity(GEOMETRY_TEMPLATE,
-                                        PERIODIC_X_MIN,
-                                        PERIODIC_X_MAX,
-                                        PERIODIC_Y_MIN,
-                                        PERIODIC_Y_MAX,
-                                        PERIODIC_BOUNDARIES_ENABLED);
-            }
+    GENERATED_GEOMETRY_SOLIDS.clear();
+    for (json::const_iterator it = geometry.at("solids").begin();
+         it != geometry.at("solids").end(); ++it) {
+        try {
+            GENERATED_GEOMETRY_SOLIDS.push_back(
+                parseGeneratedGeometrySolid(*it, GENERATED_GEOMETRY_SOLIDS.size()));
+        } catch (const std::runtime_error& e) {
+            throw Error(ERROR_LOCATION, e.what());
         }
+    }
+    N_SOLIDS = static_cast<uint>(GENERATED_GEOMETRY_SOLIDS.size());
 
-        if (hasObject(geometry, "mesh")) {
-            const json& mesh = geometry.at("mesh");
-            if (mesh.contains("sizeMeters")) {
-                MESH_SIZE = mesh.at("sizeMeters").get<double>();
-            }
+    if (!hasObject(geometry, "mesh") || !geometry.at("mesh").contains("sizeMeters")) {
+        throw Error(ERROR_LOCATION, "geometry.mesh.sizeMeters is required in the runtime JSON configuration");
+    }
+    MESH_SIZE = geometry.at("mesh").at("sizeMeters").get<double>();
+
+    if (!hasObject(geometry, "domain")) {
+        throw Error(ERROR_LOCATION, "geometry.domain object is required in the runtime JSON configuration");
+    }
+    const json& domain = geometry.at("domain");
+    if (!domain.contains("xSizeMeters") || !domain.contains("ySizeMeters") ||
+        !domain.contains("zSizeMeters")) {
+        throw Error(ERROR_LOCATION,
+                    "geometry.domain.xSizeMeters, ySizeMeters, and zSizeMeters are required");
+    }
+    DOMAIN_X_SIZE = domain.at("xSizeMeters").get<double>();
+    DOMAIN_Y_SIZE = domain.at("ySizeMeters").get<double>();
+    DOMAIN_Z_SIZE = domain.at("zSizeMeters").get<double>();
+    if (domain.contains("zStartMeters")) {
+        DOMAIN_Z_START = domain.at("zStartMeters").get<double>();
+    }
+
+    if (hasObject(geometry, "gaps")) {
+        const json& gaps = geometry.at("gaps");
+        if (gaps.contains("extractionGapMeters")) {
+            EXT_GAP = gaps.at("extractionGapMeters").get<double>();
         }
-
-        if (hasObject(geometry, "domain")) {
-            const json& domain = geometry.at("domain");
-            if (domain.contains("xSizeMeters")) {
-                DOMAIN_X_SIZE = domain.at("xSizeMeters").get<double>();
-            }
-            if (domain.contains("ySizeMeters")) {
-                DOMAIN_Y_SIZE = domain.at("ySizeMeters").get<double>();
-            }
-            if (domain.contains("zSizeMeters")) {
-                DOMAIN_Z_SIZE = domain.at("zSizeMeters").get<double>();
-            }
-        }
-
-        if (hasObject(geometry, "gaps")) {
-            const json& gaps = geometry.at("gaps");
-            if (gaps.contains("extractionGapMeters")) {
-                EXT_GAP = gaps.at("extractionGapMeters").get<double>();
-            }
-            if (gaps.contains("accelerationGapMeters")) {
-                ACC_GAP = gaps.at("accelerationGapMeters").get<double>();
-            }
-        }
-
-        if (geometry.contains("solids") && geometry.at("solids").is_array()) {
-            N_SOLIDS = static_cast<uint>(geometry.at("solids").size());
+        if (gaps.contains("accelerationGapMeters")) {
+            throw Error(
+                ERROR_LOCATION,
+                "geometry.gaps.accelerationGapMeters is no longer supported by the runtime JSON contract");
         }
     }
 
@@ -502,6 +531,20 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
             }
         }
 
+        if (boundary_conditions.contains("boundaries") && boundary_conditions.at("boundaries").is_array()) {
+            const json& boundaries = boundary_conditions.at("boundaries");
+            EXPLICIT_BOUNDARY_CONDITIONS.clear();
+            for (json::const_iterator it = boundaries.begin(); it != boundaries.end(); ++it) {
+                int boundary_id = -1;
+                BoundaryConditionDefinition parsed = parseBoundaryConditionDefinition(
+                    *it, EXPLICIT_BOUNDARY_CONDITIONS.size(), boundary_id);
+                if (!EXPLICIT_BOUNDARY_CONDITIONS.insert(std::make_pair(boundary_id, parsed)).second) {
+                    throw runtime_error("Duplicate boundaryConditions.boundaries boundaryId: " +
+                                        std::to_string(boundary_id));
+                }
+            }
+        }
+
         if (hasObject(boundary_conditions, "periodicBoundaries")) {
             const json& periodic_boundaries = boundary_conditions.at("periodicBoundaries");
             if (periodic_boundaries.contains("enabled")) {
@@ -527,11 +570,37 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         if (magnetic_field.contains("enabled")) {
             B_ISON = magnetic_field.at("enabled").get<bool>() ? 1U : 0U;
         }
-        if (magnetic_field.contains("case")) {
-            EXTFIELD_CASE = magnetic_field.at("case").get<uint>();
-        }
         if (magnetic_field.contains("scale")) {
             EXTFIELD_SCALE = magnetic_field.at("scale").get<double>();
+        }
+        if (B_ISON != 0U) {
+            if (!magnetic_field.contains("sourceMode")) {
+                throw Error(ERROR_LOCATION,
+                            "externalMagneticField.sourceMode is required when the magnetic field is enabled");
+            }
+
+            MAGNETIC_FIELD_SOURCE_MODE = magnetic_field.at("sourceMode").get<string>();
+            if (MAGNETIC_FIELD_SOURCE_MODE == "directory") {
+                if (!magnetic_field.contains("directory")) {
+                    throw Error(ERROR_LOCATION,
+                                "externalMagneticField.directory is required when sourceMode='directory'");
+                }
+                MAGNETIC_FIELD_DIRECTORY = magnetic_field.at("directory").get<string>();
+                if (magnetic_field.contains("case")) {
+                    EXTFIELD_CASE = magnetic_field.at("case").get<uint>();
+                }
+            } else if (MAGNETIC_FIELD_SOURCE_MODE == "file") {
+                if (!magnetic_field.contains("file")) {
+                    throw Error(ERROR_LOCATION,
+                                "externalMagneticField.file is required when sourceMode='file'");
+                }
+                MAGNETIC_FIELD_FILE = magnetic_field.at("file").get<string>();
+            } else {
+                throw Error(ERROR_LOCATION,
+                            "externalMagneticField.sourceMode must be either 'directory' or 'file'");
+            }
+        } else {
+            MAGNETIC_FIELD_SOURCE_MODE = "none";
         }
     }
 
@@ -632,7 +701,16 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         }
     }
 
-    if (INCLUDE_STRIPPING > 0 && !selected_density_profile_name.empty() && hasObject(root, "gasDensity")) {
+    if (INCLUDE_STRIPPING > 0) {
+        if (selected_density_profile_name.empty()) {
+            throw Error(ERROR_LOCATION,
+                        "physics.stripping.densityProfile is required when stripping is enabled");
+        }
+        if (!hasObject(root, "gasDensity")) {
+            throw Error(ERROR_LOCATION,
+                        "gasDensity object is required when stripping is enabled");
+        }
+
         const json& gas_density = root.at("gasDensity");
         if (!gas_density.contains("profiles")) {
             throw Error(ERROR_LOCATION, "gasDensity.profiles is required when selecting a density profile");
@@ -681,27 +759,26 @@ std::vector<double> SimulationParameters::getPeriodicityBounds() const {
 }
 
 double SimulationParameters::getDomainXSizeOrDefault() const {
-    return DOMAIN_X_SIZE > 0.0 ? DOMAIN_X_SIZE : defaultDomainXSizeMeters(GEOMETRY_TEMPLATE);
+    return DOMAIN_X_SIZE;
 }
 
 double SimulationParameters::getDomainYSizeOrDefault() const {
-    return DOMAIN_Y_SIZE > 0.0 ? DOMAIN_Y_SIZE : defaultDomainYSizeMeters(GEOMETRY_TEMPLATE);
+    return DOMAIN_Y_SIZE;
 }
 
 double SimulationParameters::getDomainZSizeOrDefault() const {
-    if (DOMAIN_Z_SIZE > 0.0) {
-        return DOMAIN_Z_SIZE;
-    }
-
-    return defaultDomainZSizeMeters(GEOMETRY_TEMPLATE);
+    return DOMAIN_Z_SIZE;
 }
 
 void SimulationParameters::setDefaultValues() {
-    const uint accel_type = ACCELERATOR_IDX;
+    GEOMETRY_SOURCE_MODE.clear();
+    GENERATED_GEOMETRY_SOLIDS.clear();
+    EXPLICIT_BOUNDARY_CONDITIONS.clear();
+    MAGNETIC_FIELD_SOURCE_MODE = "none";
+    MAGNETIC_FIELD_DIRECTORY.clear();
+    MAGNETIC_FIELD_FILE.clear();
 
-    GEOMETRY_TEMPLATE = defaultGeometryTemplate(accel_type);
-
-    B_ISON = 1U;
+    B_ISON = 0U;
     INCLUDE_STRIPPING = 0U;
     INCLUDE_SURFACE_COLLISIONS = 0U;
     ELECTRONS = 0.0;
@@ -735,30 +812,22 @@ void SimulationParameters::setDefaultValues() {
     SHIELD_MODEL = 0U;
 
     EXT_GAP = 0.006;
-    ACC_GAP = 0.088;
-
-    if (DOMAIN_X_SIZE < 0.0) {
-        DOMAIN_X_SIZE = defaultDomainXSizeMeters(GEOMETRY_TEMPLATE);
-    }
-    if (DOMAIN_Y_SIZE < 0.0) {
-        DOMAIN_Y_SIZE = defaultDomainYSizeMeters(GEOMETRY_TEMPLATE);
-    }
-    if (DOMAIN_Z_SIZE < 0.0) {
-        DOMAIN_Z_SIZE = defaultDomainZSizeMeters(GEOMETRY_TEMPLATE);
-    }
+    DOMAIN_X_SIZE = -1.0;
+    DOMAIN_Y_SIZE = -1.0;
+    DOMAIN_Z_SIZE = -1.0;
+    DOMAIN_Z_START = 0.0;
 
     EGEXTJ = 0.0;
     domain_ii = 0U;
-    STRIPPING_DENSITY_PROFILE = getDensityProfileFilename(ACCELERATOR_IDX);
+    STRIPPING_DENSITY_PROFILE.clear();
     STRIPPING_MIN_Z = -1.0;
     SURFACE_COLLISIONS_MIN_Z = 7.0e-3;
     SURFACE_COLLISIONS_DEBUG = 0U;
-    applyDefaultPeriodicity(GEOMETRY_TEMPLATE,
-                            PERIODIC_X_MIN,
-                            PERIODIC_X_MAX,
-                            PERIODIC_Y_MIN,
-                            PERIODIC_Y_MAX,
-                            PERIODIC_BOUNDARIES_ENABLED);
+    PERIODIC_BOUNDARIES_ENABLED = 0U;
+    PERIODIC_X_MIN = 0.0;
+    PERIODIC_X_MAX = 0.0;
+    PERIODIC_Y_MIN = 0.0;
+    PERIODIC_Y_MAX = 0.0;
     OUTPUT_SUMMARY_DIRECTORY = "Summary";
     OUTPUT_PLOTS_DIRECTORY = "Plots";
     OUTPUT_DATA_DIRECTORY = "Data";

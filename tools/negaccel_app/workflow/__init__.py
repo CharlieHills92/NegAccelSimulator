@@ -2,8 +2,6 @@
 
 from .cli import build_parser, main
 from .common import (
-    BUILTIN_TEMPLATE_TO_ACCELERATOR,
-    DEFAULT_DOMAIN_BY_TEMPLATE,
     DEFAULT_OUTPUTS,
     REPO_ROOT,
     WorkflowError,
@@ -12,7 +10,6 @@ from .common import (
     ensure_case_metadata,
     load_json,
     merge_objects,
-    normalize_template_name,
     parse_path,
     parse_value,
     require_number,
@@ -23,12 +20,18 @@ from .common import (
     set_path,
     write_json,
 )
+from .geometry_files import (
+    TEMPLATES_DIR,
+    load_geometry_file,
+    load_geometry_reference,
+    resolve_geometry_file_path,
+    serialize_geometry_file_path,
+    write_geometry_file,
+)
 from .runtime import authored_to_runtime_case, materialize_authored_case, materialize_case
 from .scan import build_case_tag, expand_scan, run_scan
 
 __all__ = [
-    "BUILTIN_TEMPLATE_TO_ACCELERATOR",
-    "DEFAULT_DOMAIN_BY_TEMPLATE",
     "DEFAULT_OUTPUTS",
     "REPO_ROOT",
     "WorkflowError",
@@ -37,22 +40,27 @@ __all__ = [
     "authored_to_runtime_case",
     "build_case_tag",
     "build_parser",
+    "TEMPLATES_DIR",
     "ensure_case_metadata",
     "expand_scan",
     "load_json",
+    "load_geometry_file",
+    "load_geometry_reference",
     "main",
     "materialize_authored_case",
     "materialize_case",
     "merge_objects",
-    "normalize_template_name",
     "parse_path",
     "parse_value",
     "require_number",
     "require_object",
     "require_string",
     "resolve_default_case_output",
+    "resolve_geometry_file_path",
     "run_scan",
     "sanitize_case_tag",
+    "serialize_geometry_file_path",
     "set_path",
+    "write_geometry_file",
     "write_json",
 ]

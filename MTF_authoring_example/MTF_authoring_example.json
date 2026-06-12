@@ -5,15 +5,11 @@
     "title": "MTF authoring example",
     "description": "User-facing Python-side input file organized by geometry, boundary conditions, source, gas, physics, run controls, and outputs."
   },
-  "accelerator": {
-    "type": "MTF",
-    "legacyIndex": 3,
-    "useBuiltInDefaults": true
-  },
   "geometry": {
     "source": {
-      "mode": "builtin-generator",
-      "template": "MTF"
+      "mode": "generated-data",
+      "path": "embedded://geometry.solids",
+      "format": "json"
     },
     "mesh": {
       "sizeMeters": 0.002,
@@ -22,11 +18,231 @@
     "domain": {
       "xSizeMeters": 0.08,
       "ySizeMeters": 0.08,
-      "zSizeMeters": 0.567
+      "zSizeMeters": 0.567,
+      "zStartMeters": 0.0
     },
-    "gaps": {
-      "accelerationGapMeters": 0.088
-    }
+    "solids": [
+      {
+        "name": "PG",
+        "kind": "solid",
+        "boundaryId": 7,
+        "zProfileMeters": [
+          0.003,
+          0.007,
+          0.009
+        ],
+        "rProfileMeters": [
+          0.01,
+          0.007,
+          0.0085
+        ],
+        "aperturePattern": {
+          "layout": "rectangular-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "outsidePatternIsSolid": true
+        }
+      },
+      {
+        "name": "EG",
+        "kind": "solid",
+        "boundaryId": 8,
+        "zProfileMeters": [
+          0.015,
+          0.0155,
+          0.022,
+          0.028,
+          0.0285
+        ],
+        "rProfileMeters": [
+          0.007,
+          0.0065,
+          0.0065,
+          0.0075,
+          0.0075
+        ],
+        "aperturePattern": {
+          "layout": "rectangular-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "outsidePatternIsSolid": true
+        }
+      },
+      {
+        "name": "SG",
+        "kind": "solid",
+        "boundaryId": 8,
+        "zProfileMeters": [
+          0.0285,
+          0.03,
+          0.0315
+        ],
+        "rProfileMeters": [
+          0.008,
+          0.008,
+          0.009
+        ],
+        "aperturePattern": {
+          "layout": "staggered-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "yOffsetMeters": -0.0007,
+          "rowShiftXMeters": -0.001,
+          "outsidePatternIsSolid": true
+        }
+      },
+      {
+        "name": "AG1",
+        "kind": "solid",
+        "boundaryId": 9,
+        "zProfileMeters": [
+          0.1195,
+          0.1205,
+          0.1265,
+          0.135,
+          0.135,
+          0.1365
+        ],
+        "rProfileMeters": [
+          0.008,
+          0.007,
+          0.007,
+          0.0085,
+          0.007,
+          0.0085
+        ],
+        "aperturePattern": {
+          "layout": "rectangular-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "outsidePatternIsSolid": true
+        }
+      },
+      {
+        "name": "AG2",
+        "kind": "solid",
+        "boundaryId": 10,
+        "zProfileMeters": [
+          0.2245,
+          0.2255,
+          0.2315,
+          0.24,
+          0.24,
+          0.2415
+        ],
+        "rProfileMeters": [
+          0.008,
+          0.007,
+          0.007,
+          0.0085,
+          0.007,
+          0.0085
+        ],
+        "aperturePattern": {
+          "layout": "rectangular-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "outsidePatternIsSolid": true
+        }
+      },
+      {
+        "name": "AG3",
+        "kind": "solid",
+        "boundaryId": 11,
+        "zProfileMeters": [
+          0.3295,
+          0.3305,
+          0.3365,
+          0.345,
+          0.345,
+          0.3465
+        ],
+        "rProfileMeters": [
+          0.009,
+          0.008,
+          0.008,
+          0.009,
+          0.008,
+          0.0095
+        ],
+        "aperturePattern": {
+          "layout": "rectangular-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "outsidePatternIsSolid": true
+        }
+      },
+      {
+        "name": "AG4",
+        "kind": "solid",
+        "boundaryId": 12,
+        "zProfileMeters": [
+          0.4345,
+          0.4355,
+          0.4415,
+          0.45,
+          0.45,
+          0.4515
+        ],
+        "rProfileMeters": [
+          0.009,
+          0.008,
+          0.008,
+          0.009,
+          0.008,
+          0.0095
+        ],
+        "aperturePattern": {
+          "layout": "rectangular-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "outsidePatternIsSolid": true
+        }
+      },
+      {
+        "name": "AG5",
+        "kind": "solid",
+        "boundaryId": 13,
+        "zProfileMeters": [
+          0.5395,
+          0.5405,
+          0.5465,
+          0.555,
+          0.555,
+          0.5565
+        ],
+        "rProfileMeters": [
+          0.009,
+          0.008,
+          0.008,
+          0.009,
+          0.008,
+          0.0095
+        ],
+        "aperturePattern": {
+          "layout": "rectangular-grid",
+          "countX": 5,
+          "countY": 5,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "outsidePatternIsSolid": true
+        }
+      }
+    ]
   },
   "particleSources": {
     "negativeIonBeam": {
@@ -36,10 +252,7 @@
       "currentDensityAm2": 270.0,
       "perpendicularTemperatureEV": 0.0,
       "axialEnergyEV": 3.0,
-      "sourceModel": "uniform",
-      "parallelTemperatureEV": 0.0,
-      "plasmaPotentialVolts": 0.0,
-      "electronsModelWeight": 0.0
+      "sourceModel": "uniform"
     }
   },
   "simulation": {
@@ -62,50 +275,93 @@
     }
   },
   "boundaryConditions": {
-    "electrodes": [
+    "boundaries": [
       {
-        "name": "EG",
-        "role": "extraction_grid",
-        "stage": 0,
-        "voltageVolts": 7200.0
+        "boundaryId": 1,
+        "conditionType": "neumann",
+        "value": 0.0,
+        "name": "x-min"
       },
       {
-        "name": "AG1",
-        "role": "accelerator_grid",
-        "stage": 1,
-        "voltageVolts": 165600.0
+        "boundaryId": 2,
+        "conditionType": "neumann",
+        "value": 0.0,
+        "name": "x-max"
       },
       {
-        "name": "AG2",
-        "role": "accelerator_grid",
-        "stage": 2,
-        "voltageVolts": 324000.0
+        "boundaryId": 3,
+        "conditionType": "neumann",
+        "value": 0.0,
+        "name": "y-min"
       },
       {
-        "name": "AG3",
-        "role": "accelerator_grid",
-        "stage": 3,
-        "voltageVolts": 482400.0
+        "boundaryId": 4,
+        "conditionType": "neumann",
+        "value": 0.0,
+        "name": "y-max"
       },
       {
-        "name": "AG4",
-        "role": "accelerator_grid",
-        "stage": 4,
-        "voltageVolts": 640800.0
+        "boundaryId": 5,
+        "conditionType": "dirichlet",
+        "value": 0.0,
+        "name": "z-min"
       },
       {
-        "name": "AG5",
-        "role": "accelerator_grid",
-        "stage": 5,
-        "voltageVolts": 799200.0
+        "boundaryId": 6,
+        "conditionType": "neumann",
+        "value": 0.0,
+        "name": "z-max"
+      },
+      {
+        "boundaryId": 7,
+        "conditionType": "dirichlet",
+        "value": 0.0,
+        "name": "PG"
+      },
+      {
+        "boundaryId": 8,
+        "conditionType": "dirichlet",
+        "value": 7200.0,
+        "name": "EG"
+      },
+      {
+        "boundaryId": 9,
+        "conditionType": "dirichlet",
+        "value": 165600.0,
+        "name": "AG1"
+      },
+      {
+        "boundaryId": 10,
+        "conditionType": "dirichlet",
+        "value": 324000.0,
+        "name": "AG2"
+      },
+      {
+        "boundaryId": 11,
+        "conditionType": "dirichlet",
+        "value": 482400.0,
+        "name": "AG3"
+      },
+      {
+        "boundaryId": 12,
+        "conditionType": "dirichlet",
+        "value": 640800.0,
+        "name": "AG4"
+      },
+      {
+        "boundaryId": 13,
+        "conditionType": "dirichlet",
+        "value": 799200.0,
+        "name": "AG5"
       }
     ]
   },
   "externalMagneticField": {
     "enabled": true,
-    "sourceMode": "auto-by-accelerator",
+    "sourceMode": "directory",
     "scale": 1.0,
-    "case": 1
+    "case": 1,
+    "directory": "Bfield_MTF"
   },
   "gasDensity": {
     "defaultProfile": "mtf-background",
@@ -142,7 +398,7 @@
     }
   },
   "outputs": {
-    "rootDirectory": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/MTF_authoring_example",
+    "rootDirectory": "MTF_authoring_example",
     "summary": {
       "enabled": true,
       "directory": "Summary"

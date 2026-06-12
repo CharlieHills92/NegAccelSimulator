@@ -3,12 +3,68 @@
 
 #include <sys/types.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
 class SimulationParameters {
+public:
+    struct GeometryAperturePattern {
+        std::string layout;
+        uint countX;
+        uint countY;
+        double pitchXMeters;
+        double pitchYMeters;
+        double marginMeters;
+        double xOffsetMeters;
+        double yOffsetMeters;
+        double rowShiftXMeters;
+        bool outsidePatternIsSolid;
+
+        GeometryAperturePattern()
+            : layout("single"),
+              countX(1U),
+              countY(1U),
+              pitchXMeters(0.0),
+              pitchYMeters(0.0),
+              marginMeters(0.0),
+              xOffsetMeters(0.0),
+              yOffsetMeters(0.0),
+              rowShiftXMeters(0.0),
+              outsidePatternIsSolid(true) {}
+    };
+
+    struct GeometrySolidDefinition {
+        std::string name;
+        std::string kind;
+        std::string role;
+        int stage;
+        int boundaryId;
+        bool hasExplicitVoltage;
+        double voltageVolts;
+        std::vector<double> zProfileMeters;
+        std::vector<double> rProfileMeters;
+        std::vector<double> roundingRadiiMeters;
+        GeometryAperturePattern aperturePattern;
+
+        GeometrySolidDefinition()
+            : stage(-1),
+              boundaryId(-1),
+              hasExplicitVoltage(false),
+              voltageVolts(0.0) {}
+    };
+
+    struct BoundaryConditionDefinition {
+        std::string name;
+        std::string conditionType;
+        double value;
+
+        BoundaryConditionDefinition()
+            : conditionType("dirichlet"),
+              value(0.0) {}
+    };
+
 private:
-    uint ACCELERATOR_IDX;
     uint B_ISON;
     uint INCLUDE_STRIPPING;
     uint INCLUDE_SURFACE_COLLISIONS;
@@ -47,15 +103,20 @@ private:
     uint SHIELD_MODEL;
 
     double EXT_GAP;
-    double ACC_GAP;
 
     double DOMAIN_X_SIZE;
     double DOMAIN_Y_SIZE;
     double DOMAIN_Z_SIZE;
+    double DOMAIN_Z_START;
 
     double EGEXTJ;
     uint domain_ii;
-    std::string GEOMETRY_TEMPLATE;
+    std::string GEOMETRY_SOURCE_MODE;
+    std::vector<GeometrySolidDefinition> GENERATED_GEOMETRY_SOLIDS;
+    std::map<int, BoundaryConditionDefinition> EXPLICIT_BOUNDARY_CONDITIONS;
+    std::string MAGNETIC_FIELD_SOURCE_MODE;
+    std::string MAGNETIC_FIELD_DIRECTORY;
+    std::string MAGNETIC_FIELD_FILE;
     std::string STRIPPING_DENSITY_PROFILE;
     double STRIPPING_MIN_Z;
     double SURFACE_COLLISIONS_MIN_Z;
@@ -89,7 +150,6 @@ public:
     void readParametersFromFile(const std::string& input);
     void setDefaultValues();
 
-    uint getAcceleratorIdx() const { return ACCELERATOR_IDX; }
     uint getBIsOn() const { return B_ISON; }
     uint getIncludeStripping() const { return INCLUDE_STRIPPING; }
     uint getIncludeSurfaceCollisions() const { return INCLUDE_SURFACE_COLLISIONS; }
@@ -128,10 +188,27 @@ public:
     uint getShieldModel() const { return SHIELD_MODEL; }
 
     double getExtGap() const { return EXT_GAP; }
-    double getAccGap() const { return ACC_GAP; }
     double getEGExtJ() const { return EGEXTJ; }
     uint getDomainII() const { return domain_ii; }
-    const std::string& getGeometryTemplate() const { return GEOMETRY_TEMPLATE; }
+    const std::string& getGeometrySourceMode() const { return GEOMETRY_SOURCE_MODE; }
+    bool hasGeneratedGeometrySolids() const {
+        return GEOMETRY_SOURCE_MODE == "generated-data" && !GENERATED_GEOMETRY_SOLIDS.empty();
+    }
+    const std::vector<GeometrySolidDefinition>& getGeneratedGeometrySolids() const {
+        return GENERATED_GEOMETRY_SOLIDS;
+    }
+    bool tryGetBoundaryCondition(int boundaryId, BoundaryConditionDefinition& definition) const {
+        std::map<int, BoundaryConditionDefinition>::const_iterator it =
+            EXPLICIT_BOUNDARY_CONDITIONS.find(boundaryId);
+        if (it == EXPLICIT_BOUNDARY_CONDITIONS.end()) {
+            return false;
+        }
+        definition = it->second;
+        return true;
+    }
+    const std::string& getMagneticFieldSourceMode() const { return MAGNETIC_FIELD_SOURCE_MODE; }
+    const std::string& getMagneticFieldDirectory() const { return MAGNETIC_FIELD_DIRECTORY; }
+    const std::string& getMagneticFieldFile() const { return MAGNETIC_FIELD_FILE; }
     const std::string& getStrippingDensityProfile() const { return STRIPPING_DENSITY_PROFILE; }
     double getStrippingMinimumZ() const;
     double getSurfaceCollisionsMinimumZ() const { return SURFACE_COLLISIONS_MIN_Z; }
@@ -158,6 +235,7 @@ public:
     double getDomainXSize() const { return DOMAIN_X_SIZE; }
     double getDomainYSize() const { return DOMAIN_Y_SIZE; }
     double getDomainZSize() const { return DOMAIN_Z_SIZE; }
+    double getDomainZStart() const { return DOMAIN_Z_START; }
 
     double getDomainXSizeOrDefault() const;
     double getDomainYSizeOrDefault() const;

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .common import (
     DEFAULT_SETUP_SCRIPT,
-    QFileDialog,
+    DEFAULT_SIMULATOR_PATH,
     QMessageBox,
     QProcess,
     QTextCursor,
@@ -19,11 +19,6 @@ from .common import (
 
 
 class ExecutionMixin:
-    def choose_simulator_path(self) -> None:
-        selected, _ = QFileDialog.getOpenFileName(self, "Select simulator executable", str(REPO_ROOT))
-        if selected:
-            self.simulator_path_edit.setText(selected)
-
     def materialize_runtime_case(self) -> Path | None:
         try:
             authoring_spec = self.build_authoring_spec()
@@ -59,9 +54,7 @@ class ExecutionMixin:
                 QMessageBox.critical(self, "Invalid run mode", "load_existing requires outputs.data.enabled to be true.")
                 return
 
-        simulator_path = Path(self.simulator_path_edit.text().strip()).expanduser()
-        if not simulator_path.is_absolute():
-            simulator_path = (REPO_ROOT / simulator_path).resolve()
+        simulator_path = DEFAULT_SIMULATOR_PATH.resolve()
         if not simulator_path.exists():
             QMessageBox.critical(self, "Missing simulator", f"Simulator executable not found: {simulator_path}")
             return

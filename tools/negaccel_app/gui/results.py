@@ -7,37 +7,37 @@ from pathlib import Path
 from .common import (
     QComboBox,
     QDoubleSpinBox,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSplitter,
     QSpinBox,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
+    Qt,
 )
 from .visualization import NavigationToolbar2QT, TrajectoryCanvas
 
 
 class ResultsMixin:
-    def _build_detail_tabs(self) -> QTabWidget:
-        self.output_tabs = QTabWidget()
+    def _ensure_result_widgets(self) -> None:
+        if hasattr(self, "authoring_preview"):
+            return
 
         self.authoring_preview = QPlainTextEdit()
         self.authoring_preview.setReadOnly(True)
-        self.output_tabs.addTab(self.authoring_preview, "Authoring JSON")
 
         self.runtime_preview = QPlainTextEdit()
         self.runtime_preview.setReadOnly(True)
-        self.output_tabs.addTab(self.runtime_preview, "Runtime JSON")
 
         self.process_output = QPlainTextEdit()
         self.process_output.setReadOnly(True)
-        self.output_tabs.addTab(self.process_output, "Run Log")
 
-        visualization_tab = QWidget()
-        visualization_layout = QVBoxLayout(visualization_tab)
+        self.visualization_tab = QWidget()
+        visualization_layout = QVBoxLayout(self.visualization_tab)
         controls_row = QHBoxLayout()
         self.vtk_file_combo = QComboBox()
         self.vtk_file_combo.setMinimumWidth(320)
@@ -69,14 +69,39 @@ class ResultsMixin:
         visualization_layout.addLayout(controls_row)
 
         self.visualization_canvas = TrajectoryCanvas()
-        self.visualization_toolbar = NavigationToolbar2QT(self.visualization_canvas, visualization_tab)
+        self.visualization_toolbar = NavigationToolbar2QT(self.visualization_canvas, self.visualization_tab)
         self.visualization_status = QLabel("No VTK file selected yet.")
         visualization_layout.addWidget(self.visualization_toolbar)
         visualization_layout.addWidget(self.visualization_canvas, 1)
         visualization_layout.addWidget(self.visualization_status)
-        self.output_tabs.addTab(visualization_tab, "Visualization")
 
-        return self.output_tabs
+    def _build_json_preview_panel(self) -> QWidget:
+        self._ensure_result_widgets()
+        if hasattr(self, "metadata_preview_panel"):
+            return self.metadata_preview_panel
+
+        def _wrap_preview(title: str, editor: QPlainTextEdit) -> QGroupBox:
+            box = QGroupBox(title)
+            layout = QVBoxLayout(box)
+            layout.setContentsMargins(8, 8, 8, 8)
+            layout.addWidget(editor)
+            return box
+
+        self.metadata_preview_panel = QSplitter(Qt.Orientation.Horizontal)
+        self.metadata_preview_panel.addWidget(_wrap_preview("Authoring JSON", self.authoring_preview))
+        self.metadata_preview_panel.addWidget(_wrap_preview("Runtime JSON", self.runtime_preview))
+        self.metadata_preview_panel.setStretchFactor(0, 1)
+        self.metadata_preview_panel.setStretchFactor(1, 1)
+        self.metadata_preview_panel.setSizes([520, 520])
+        return self.metadata_preview_panel
+
+    def _build_run_log_tab(self) -> QWidget:
+        self._ensure_result_widgets()
+        return self.process_output
+
+    def _build_visualization_tab(self) -> QWidget:
+        self._ensure_result_widgets()
+        return self.visualization_tab
 
     def refresh_vtk_files(self) -> None:
         current_selection = self.vtk_file_combo.currentData()

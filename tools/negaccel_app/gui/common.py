@@ -42,17 +42,17 @@ from negaccel_app.workflow import (
     authored_to_runtime_case,
     ensure_case_metadata,
     load_json,
+    serialize_geometry_file_path,
     sanitize_case_tag,
     write_json,
 )
 
 
 EXAMPLE_AUTHORING_PATH = REPO_ROOT / "negaccel-authoring.example.json"
-DEFAULT_SIMULATOR_PATH = REPO_ROOT / "runtest_new_v2"
+DEFAULT_SIMULATOR_PATH = REPO_ROOT / "NegAccelExec"
 DEFAULT_SETUP_SCRIPT = REPO_ROOT / "setup_environment.sh"
 LOG_LEVELS = ["critical", "error", "warning", "info", "debug", "trace"]
-GEOMETRY_TEMPLATES = ["SPIDER", "MITICA", "MTF"]
-MAGNETIC_SOURCE_MODES = ["auto-by-accelerator", "directory", "file", "none"]
+MAGNETIC_SOURCE_MODES = ["directory", "file", "none"]
 
 
 def nested_get(document: dict[str, Any], *path: str, default: Any = None) -> Any:

@@ -305,8 +305,7 @@ int main( int argc, char **argv )
 
 			do {
 				JEXTiterations++;
-				double z_start = 0.;
-				if (Simulation.get_accelerator_type() == 1U) z_start = -0.003;
+				double z_start = Simulation.get_domain_z_start();
 				Simulation.create_geometry(z_start, Simulation.get_domain_z_size(), 1);
 				logfile << "----- Simulation of the full domain -----\n" << flush;
 				logfile << "*** Geometry defined ***\n" << flush;
@@ -471,7 +470,7 @@ int main( int argc, char **argv )
 		}
 		else {
 
-			Simulation.create_geometry(0., Simulation.get_domain_z_size(), 1);
+			Simulation.create_geometry(Simulation.get_domain_z_start(), Simulation.get_domain_z_size(), 1);
 			logfile << "----- Loading simulation of the full domain -----\n" << flush;
 			logfile << "*** Geometry defined ***\n" << flush;
 			if (!Simulation.load_simulation()) {

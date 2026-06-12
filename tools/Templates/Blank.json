@@ -1,0 +1,12 @@
+{
+  "name": "Blank",
+  "meshSizeMeters": 0.002,
+  "exportGeometryVtk": true,
+  "domain": {
+    "xSizeMeters": 0.08,
+    "ySizeMeters": 0.08,
+    "zSizeMeters": 0.567,
+    "zStartMeters": 0.0
+  },
+  "solids": []
+}

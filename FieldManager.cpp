@@ -19,6 +19,17 @@
 
 using namespace std;
 
+namespace {
+
+string ensureTrailingSlash(const string& path) {
+    if (path.empty() || path[path.size() - 1] == '/') {
+        return path;
+    }
+    return path + "/";
+}
+
+} // namespace
+
 FieldManager::FieldManager() : 
     potential(nullptr), spacecharge(nullptr), magnetic(nullptr),
     gas_dens(nullptr), electric(nullptr) {
@@ -46,37 +57,20 @@ string FieldManager::getBFieldFolder(const SimulationParameters& params) {
         return string();
     }
 
-    const string& geometry_template = params.getGeometryTemplate();
-    if (geometry_template == "SPIDER") {
-        ibsimu.message(1) << "Using SPIDER default magnetic-field folder" << endl;
-        return "Bfield_SPIDER";
+    if (params.getMagneticFieldSourceMode() == "directory") {
+        return params.getMagneticFieldDirectory();
     }
-    if (geometry_template == "MITICA") {
-        ibsimu.message(1) << "Using MITICA default magnetic-field folder" << endl;
-        return "Bfield_MITICA";
-    }
-    if (geometry_template == "MTF") {
-        ibsimu.message(1) << "Using MTF default magnetic-field folder" << endl;
-        return "Bfield_MTF";
+    if (params.getMagneticFieldSourceMode() == "file") {
+        return params.getMagneticFieldFile();
     }
 
-    const int accel_type = static_cast<int>(params.getAcceleratorIdx());
-    switch (accel_type) {
-        case 1:
-            return "Bfield_SPIDER";
-        case 2:
-            return "Bfield_MITICA";
-        case 3:
-            return "Bfield_MTF";
-        default:
-            throw Error(ERROR_LOCATION,
-                        "No default magnetic-field folder for geometry template '" + geometry_template +
-                            "' and accelerator index " + std::to_string(accel_type));
-    }
+    throw Error(ERROR_LOCATION,
+                "Magnetic field is enabled but no explicit source path was configured");
 }
 
 void FieldManager::addMagneticField(const SimulationParameters& params, const string& bfield_fold) {
-    string bfield_folder = bfield_fold.empty() ? string() : (bfield_fold + "/");
+    const string& source_mode = params.getMagneticFieldSourceMode();
+    const string bfield_folder = ensureTrailingSlash(bfield_fold);
 
     constexpr bool fout[3] = {true, true, true};
     constexpr double FIELD_SCALE = 1.0e-3;
@@ -93,35 +87,47 @@ void FieldManager::addMagneticField(const SimulationParameters& params, const st
         logfile << "\t*** NO MAGNETIC FIELD SET ***" << endl << flush;
     }
     else {
-        ibsimu.message(1) << "\tLoading fields from folder " << bfield_folder << "..." << endl;
-        logfile << "\tLoading fields from folder " << bfield_folder << "..." << endl << flush;
-        
         vector<MeshVectorField*> tempBfield;
         
         try {
-            // Load PG filter field
-            if (params.getPGFilterScale() != 0.0) {
-                const string pg_filename = bfield_folder + "PGfilter.fld";
-                tempBfield.push_back(new MeshVectorField(MODE_3D, fout, FIELD_SCALE, 
-                                                        params.getPGFilterScale(), pg_filename));
-                ibsimu.message(1) << "\tPG filter field loaded: " << pg_filename 
-                                  << " (scale: " << params.getPGFilterScale() << ")" << endl;
-                logfile << "\tPG filter field loaded with scaling " << params.getPGFilterScale() << endl << flush;
-            }
-            
-            // Load CESM+ADCM field
-            if (params.getCESMADCMScale() != 0.0) {
-                const string cesm_filename = bfield_folder + "CESMADCMfield.fld";
-                tempBfield.push_back(new MeshVectorField(MODE_3D, fout, FIELD_SCALE, 
-                                                        params.getCESMADCMScale(), cesm_filename));
-                ibsimu.message(1) << "\tCESM+ADCM field loaded: " << cesm_filename 
-                                  << " (scale: " << params.getCESMADCMScale() << ")" << endl;
-                logfile << "\tCESM+ADCM field loaded with scaling " << params.getCESMADCMScale() << endl << flush;
-            }
-            
-            // Load external field based on case
-            if (params.getExtFieldCase() > 0) {
-                loadExternalField(tempBfield, fout, FIELD_SCALE, params, bfield_folder);
+            if (source_mode == "file") {
+                if (params.getPGFilterScale() != 0.0 || params.getCESMADCMScale() != 0.0) {
+                    throw Error(ERROR_LOCATION,
+                                "PG filter and CESM+ADCM companion fields require magneticField.sourceMode='directory'");
+                }
+
+                ibsimu.message(1) << "\tLoading magnetic field from file " << bfield_fold << "..." << endl;
+                logfile << "\tLoading magnetic field from file " << bfield_fold << "..." << endl << flush;
+                tempBfield.push_back(new MeshVectorField(MODE_3D, fout, FIELD_SCALE,
+                                                        params.getExtFieldScale(), bfield_fold));
+                ibsimu.message(1) << "\tMagnetic field loaded: " << bfield_fold
+                                  << " (scale: " << params.getExtFieldScale() << ")" << endl;
+                logfile << "\tMagnetic field loaded with scaling " << params.getExtFieldScale() << endl << flush;
+            } else {
+                ibsimu.message(1) << "\tLoading fields from folder " << bfield_folder << "..." << endl;
+                logfile << "\tLoading fields from folder " << bfield_folder << "..." << endl << flush;
+
+                if (params.getPGFilterScale() != 0.0) {
+                    const string pg_filename = bfield_folder + "PGfilter.fld";
+                    tempBfield.push_back(new MeshVectorField(MODE_3D, fout, FIELD_SCALE,
+                                                            params.getPGFilterScale(), pg_filename));
+                    ibsimu.message(1) << "\tPG filter field loaded: " << pg_filename
+                                      << " (scale: " << params.getPGFilterScale() << ")" << endl;
+                    logfile << "\tPG filter field loaded with scaling " << params.getPGFilterScale() << endl << flush;
+                }
+
+                if (params.getCESMADCMScale() != 0.0) {
+                    const string cesm_filename = bfield_folder + "CESMADCMfield.fld";
+                    tempBfield.push_back(new MeshVectorField(MODE_3D, fout, FIELD_SCALE,
+                                                            params.getCESMADCMScale(), cesm_filename));
+                    ibsimu.message(1) << "\tCESM+ADCM field loaded: " << cesm_filename
+                                      << " (scale: " << params.getCESMADCMScale() << ")" << endl;
+                    logfile << "\tCESM+ADCM field loaded with scaling " << params.getCESMADCMScale() << endl << flush;
+                }
+
+                if (params.getExtFieldCase() > 0) {
+                    loadExternalField(tempBfield, fout, FIELD_SCALE, params, bfield_folder);
+                }
             }
             
             // Combine all loaded fields

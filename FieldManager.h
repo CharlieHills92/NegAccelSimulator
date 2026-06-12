@@ -37,7 +37,7 @@ private:
     EpotEfield* electric;
 
     // Helper methods
-    void loadExternalField(std::vector<MeshVectorField*>& tempBfield, 
+    void loadExternalField(std::vector<MeshVectorField*>& tempBfield,
                           const bool fout[3], double fieldScale,
                           const SimulationParameters& params, const std::string& bfield_fold);
 
@@ -55,14 +55,14 @@ public:
     /**
      * @brief Add magnetic field to simulation
      * @param params Simulation parameters
-     * @param bfield_fold Magnetic field folder path
+    * @param bfield_fold Magnetic field source path
      */
     void addMagneticField(const SimulationParameters& params, const std::string& bfield_fold);
 
     /**
-     * @brief Get accelerator-specific bfield folder name
+    * @brief Get the configured magnetic field source path
      * @param params Simulation parameters
-     * @return Bfield folder name
+    * @return Source directory or file path
      */
     static std::string getBFieldFolder(const SimulationParameters& params);
 

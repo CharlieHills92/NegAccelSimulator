@@ -6,18 +6,17 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .common import (
-    BUILTIN_TEMPLATE_TO_ACCELERATOR,
     WorkflowError,
     apply_cli_overrides,
     ensure_case_metadata,
     load_json,
-    normalize_template_name,
     require_object,
     require_string,
     resolve_default_case_output,
     sanitize_case_tag,
     write_json,
 )
+from .geometry_files import load_geometry_reference
 from .domains.boundary import build_boundary_conditions
 from .domains.fields import build_magnetic_field
 from .domains.geometry import build_runtime_geometry
@@ -29,14 +28,23 @@ from .domains.source import build_particle_sources
 
 def authored_to_runtime_case(authoring_spec: dict[str, Any], case_tag_override: str | None = None) -> dict[str, Any]:
     metadata = require_object(authoring_spec, "metadata", "authoring specification")
-    geometry = require_object(authoring_spec, "geometry", "authoring specification")
+    geometry_spec = require_object(authoring_spec, "geometry", "authoring specification")
     boundary_conditions = require_object(authoring_spec, "boundaryConditions", "authoring specification")
     particle_source = require_object(authoring_spec, "particleSource", "authoring specification")
     gas_interactions = require_object(authoring_spec, "gasInteractions", "authoring specification")
     run = require_object(authoring_spec, "run", "authoring specification")
 
     resolved_case_tag = sanitize_case_tag(case_tag_override or require_string(metadata, "caseTag", "metadata"))
-    template = normalize_template_name(require_string(geometry, "template", "geometry"))
+
+    geometry_reference = geometry_spec.get("path")
+    if isinstance(geometry_reference, str) and geometry_reference.strip():
+        geometry_path, geometry = load_geometry_reference(
+            geometry_reference,
+            authoring_spec.get("__source_path") if isinstance(authoring_spec.get("__source_path"), Path) else None,
+        )
+        geometry["path"] = geometry_path.as_posix()
+    else:
+        geometry = geometry_spec
 
     gas_density, stripping = build_gas_density(gas_interactions)
     outputs = build_outputs(authoring_spec.get("outputs"))
@@ -46,15 +54,10 @@ def authored_to_runtime_case(authoring_spec: dict[str, Any], case_tag_override: 
             "schemaVersion": require_string(metadata, "schemaVersion", "metadata"),
             "caseTag": resolved_case_tag,
         },
-        "accelerator": {
-            "type": template,
-            "legacyIndex": BUILTIN_TEMPLATE_TO_ACCELERATOR[template],
-            "useBuiltInDefaults": True,
-        },
-        "geometry": build_runtime_geometry(geometry, template, outputs),
+        "geometry": build_runtime_geometry(geometry, outputs),
         "particleSources": build_particle_sources(particle_source),
         "simulation": build_simulation(run),
-        "boundaryConditions": build_boundary_conditions(boundary_conditions),
+        "boundaryConditions": build_boundary_conditions(boundary_conditions, geometry),
         "externalMagneticField": build_magnetic_field(authoring_spec.get("magneticField", {})),
         "gasDensity": gas_density,
         "physics": {
@@ -80,6 +83,8 @@ def materialize_authored_case(
     authoring_spec = load_json(authoring_path)
     if not isinstance(authoring_spec, dict):
         raise WorkflowError("Authoring specification must be a JSON object")
+
+    authoring_spec["__source_path"] = authoring_path
 
     apply_cli_overrides(authoring_spec, cli_overrides)
     runtime_case = authored_to_runtime_case(authoring_spec, case_tag)

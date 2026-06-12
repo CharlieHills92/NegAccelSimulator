@@ -49,7 +49,6 @@ class AuthoringMixin:
         self.preview_updates_blocked = True
         self.loaded_authoring_template = copy.deepcopy(spec)
         self.authoring_path = source_path
-        self.authoring_path_label.setText(str(source_path) if source_path else "Unsaved authoring specification")
 
         for section in FORM_SECTIONS:
             section.populate(self, spec)
@@ -86,7 +85,9 @@ class AuthoringMixin:
         self.statusBar().showMessage(f"Runtime preview ready: {runtime_path}")
 
     def build_runtime_case_preview(self, authoring_spec: dict[str, Any] | None = None) -> tuple[dict[str, Any], Path]:
-        working_spec = authoring_spec or self.build_authoring_spec()
+        working_spec = copy.deepcopy(authoring_spec) if authoring_spec is not None else self.build_authoring_spec()
+        if self.authoring_path is not None:
+            working_spec["__source_path"] = self.authoring_path
         runtime_case = authored_to_runtime_case(working_spec)
         runtime_path = Path(
             self.runtime_path_edit.text().strip() or default_runtime_path(working_spec["metadata"]["caseTag"])
@@ -124,7 +125,6 @@ class AuthoringMixin:
             return
 
         self.authoring_path = Path(selected)
-        self.authoring_path_label.setText(selected)
         self.loaded_authoring_template = copy.deepcopy(payload)
         self.authoring_preview.setPlainText(json.dumps(payload, indent=2))
         self.append_log(f"Saved authoring specification: {selected}")
