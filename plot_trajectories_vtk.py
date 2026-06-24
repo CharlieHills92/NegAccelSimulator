@@ -19,6 +19,204 @@ import sys
 import os
 
 
+def _read_nonempty_ascii_line(handle):
+    while True:
+        raw_line = handle.readline()
+        if raw_line == b'':
+            return None
+        if raw_line.strip():
+            return raw_line.decode('ascii').strip()
+
+
+def _read_scalar_block_binary(handle, value_count, scalar_type):
+    if scalar_type == 'int':
+        dtype = '>i4'
+    else:
+        dtype = '>f4'
+    raw = handle.read(np.dtype(dtype).itemsize * value_count)
+    if len(raw) != np.dtype(dtype).itemsize * value_count:
+        raise ValueError('Unexpected end of file while reading binary VTK scalar block')
+    values = np.frombuffer(raw, dtype=dtype)
+    if scalar_type == 'int':
+        return values.astype(np.int32)
+    return values.astype(np.float64)
+
+
+def _read_ascii_vtk_polydata(filename):
+    with open(filename, 'r', encoding='utf-8') as f:
+        lines_text = f.readlines()
+
+    i = 0
+    points = []
+    lines = []
+    point_data = {}
+    cell_data = {}
+
+    while i < len(lines_text) and not lines_text[i].startswith('POINTS'):
+        i += 1
+
+    if i < len(lines_text):
+        parts = lines_text[i].split()
+        n_points = int(parts[1])
+        print(f"Reading {n_points} points...")
+        i += 1
+
+        for _ in range(n_points):
+            x, y, z = map(float, lines_text[i].split())
+            points.append([x, y, z])
+            i += 1
+
+    points = np.array(points)
+
+    while i < len(lines_text) and not lines_text[i].startswith('LINES'):
+        i += 1
+
+    if i < len(lines_text):
+        parts = lines_text[i].split()
+        n_lines = int(parts[1])
+        print(f"Reading {n_lines} trajectory lines...")
+        i += 1
+
+        for _ in range(n_lines):
+            line_data = list(map(int, lines_text[i].split()))
+            point_indices = line_data[1:]
+            lines.append(np.array(point_indices))
+            i += 1
+
+    while i < len(lines_text) and not lines_text[i].startswith('POINT_DATA'):
+        i += 1
+
+    if i < len(lines_text):
+        n_point_data = int(lines_text[i].split()[1])
+        i += 1
+
+        while i < len(lines_text) and lines_text[i].startswith('SCALARS'):
+            scalar_name = lines_text[i].split()[1]
+            i += 2
+
+            scalar_data = []
+            for _ in range(n_point_data):
+                if i >= len(lines_text) or lines_text[i].startswith('SCALARS') or lines_text[i].startswith('CELL_DATA'):
+                    break
+                scalar_data.append(float(lines_text[i].strip()))
+                i += 1
+
+            point_data[scalar_name] = np.array(scalar_data)
+            print(f"  Read point data: {scalar_name} ({len(scalar_data)} values)")
+
+    while i < len(lines_text) and not lines_text[i].startswith('CELL_DATA'):
+        i += 1
+
+    if i < len(lines_text):
+        n_cell_data = int(lines_text[i].split()[1])
+        i += 1
+
+        while i < len(lines_text) and lines_text[i].startswith('SCALARS'):
+            scalar_name = lines_text[i].split()[1]
+            scalar_type = lines_text[i].split()[2]
+            i += 2
+
+            scalar_data = []
+            for _ in range(n_cell_data):
+                if i >= len(lines_text):
+                    break
+                if scalar_type == 'int':
+                    scalar_data.append(int(lines_text[i].strip()))
+                else:
+                    scalar_data.append(float(lines_text[i].strip()))
+                i += 1
+
+            cell_data[scalar_name] = np.array(scalar_data)
+            print(f"  Read cell data: {scalar_name} ({len(scalar_data)} values)")
+
+    print(f"Successfully read {len(points)} points and {len(lines)} trajectories")
+    return points, lines, point_data, cell_data
+
+
+def _read_binary_vtk_polydata(filename):
+    with open(filename, 'rb') as handle:
+        header = [handle.readline().decode('ascii').strip() for _ in range(4)]
+        dataset_line = header[3]
+        if dataset_line != 'DATASET POLYDATA':
+            raise ValueError(f'Unsupported VTK dataset for trajectory viewer: {dataset_line}')
+
+        points_header = _read_nonempty_ascii_line(handle)
+        if points_header is None or not points_header.startswith('POINTS '):
+            raise ValueError('Binary VTK file is missing a POINTS section')
+        point_parts = points_header.split()
+        n_points = int(point_parts[1])
+        point_dtype = point_parts[2].lower()
+        if point_dtype != 'float':
+            raise ValueError(f'Unsupported VTK point type: {point_dtype}')
+        print(f"Reading {n_points} points...")
+        raw_points = handle.read(n_points * 3 * 4)
+        if len(raw_points) != n_points * 3 * 4:
+            raise ValueError('Unexpected end of file while reading binary VTK points')
+        points = np.frombuffer(raw_points, dtype='>f4').astype(np.float64).reshape((n_points, 3))
+
+        lines_header = _read_nonempty_ascii_line(handle)
+        if lines_header is None or not lines_header.startswith('LINES '):
+            raise ValueError('Binary VTK file is missing a LINES section')
+        line_parts = lines_header.split()
+        n_lines = int(line_parts[1])
+        total_line_data = int(line_parts[2])
+        print(f"Reading {n_lines} trajectory lines...")
+        raw_line_data = handle.read(total_line_data * 4)
+        if len(raw_line_data) != total_line_data * 4:
+            raise ValueError('Unexpected end of file while reading binary VTK line connectivity')
+        line_data = np.frombuffer(raw_line_data, dtype='>i4').astype(np.int64)
+        lines = []
+        offset = 0
+        for _ in range(n_lines):
+            points_in_line = int(line_data[offset])
+            offset += 1
+            lines.append(np.array(line_data[offset: offset + points_in_line], dtype=np.int64))
+            offset += points_in_line
+
+        point_data = {}
+        cell_data = {}
+
+        section = _read_nonempty_ascii_line(handle)
+        if section is not None and section.startswith('POINT_DATA '):
+            n_point_data = int(section.split()[1])
+            while True:
+                line = _read_nonempty_ascii_line(handle)
+                if line is None:
+                    section = None
+                    break
+                if line.startswith('CELL_DATA '):
+                    section = line
+                    break
+                if not line.startswith('SCALARS '):
+                    raise ValueError(f'Unsupported POINT_DATA block: {line}')
+                scalar_name = line.split()[1]
+                scalar_type = line.split()[2].lower()
+                _ = _read_nonempty_ascii_line(handle)
+                scalar_values = _read_scalar_block_binary(handle, n_point_data, scalar_type)
+                point_data[scalar_name] = scalar_values
+                print(f"  Read point data: {scalar_name} ({len(scalar_values)} values)")
+        else:
+            section = section
+
+        if section is not None and section.startswith('CELL_DATA '):
+            n_cell_data = int(section.split()[1])
+            while True:
+                line = _read_nonempty_ascii_line(handle)
+                if line is None:
+                    break
+                if not line.startswith('SCALARS '):
+                    raise ValueError(f'Unsupported CELL_DATA block: {line}')
+                scalar_name = line.split()[1]
+                scalar_type = line.split()[2].lower()
+                _ = _read_nonempty_ascii_line(handle)
+                scalar_values = _read_scalar_block_binary(handle, n_cell_data, scalar_type)
+                cell_data[scalar_name] = scalar_values
+                print(f"  Read cell data: {scalar_name} ({len(scalar_values)} values)")
+
+    print(f"Successfully read {len(points)} points and {len(lines)} trajectories")
+    return points, lines, point_data, cell_data
+
+
 def read_vtk_polydata(filename):
     """
     Read VTK POLYDATA file containing particle trajectories.
@@ -30,106 +228,173 @@ def read_vtk_polydata(filename):
         cell_data: dictionary of cell data arrays (particle properties)
     """
     print(f"Reading VTK file: {filename}")
-    
-    with open(filename, 'r') as f:
-        lines_text = f.readlines()
-    
-    # Parse VTK file
-    i = 0
-    points = []
-    lines = []
-    point_data = {}
-    cell_data = {}
-    
-    # Skip header (first 4 lines)
-    while i < len(lines_text) and not lines_text[i].startswith('POINTS'):
-        i += 1
-    
-    # Read POINTS
-    if i < len(lines_text):
-        parts = lines_text[i].split()
-        n_points = int(parts[1])
-        print(f"Reading {n_points} points...")
-        i += 1
-        
-        for j in range(n_points):
-            x, y, z = map(float, lines_text[i].split())
-            points.append([x, y, z])
-            i += 1
-    
-    points = np.array(points)
-    
-    # Read LINES
-    while i < len(lines_text) and not lines_text[i].startswith('LINES'):
-        i += 1
-    
-    if i < len(lines_text):
-        parts = lines_text[i].split()
-        n_lines = int(parts[1])
-        print(f"Reading {n_lines} trajectory lines...")
-        i += 1
-        
-        for j in range(n_lines):
-            line_data = list(map(int, lines_text[i].split()))
-            n_points_in_line = line_data[0]
-            point_indices = line_data[1:]
-            lines.append(np.array(point_indices))
-            i += 1
-    
-    # Read POINT_DATA
-    while i < len(lines_text) and not lines_text[i].startswith('POINT_DATA'):
-        i += 1
-    
-    if i < len(lines_text):
-        n_point_data = int(lines_text[i].split()[1])
-        i += 1
-        
-        # Read scalar fields
-        while i < len(lines_text) and lines_text[i].startswith('SCALARS'):
-            scalar_name = lines_text[i].split()[1]
-            i += 1  # Skip LOOKUP_TABLE line
-            i += 1
-            
-            scalar_data = []
-            for j in range(n_point_data):
-                if i >= len(lines_text) or lines_text[i].startswith('SCALARS') or lines_text[i].startswith('CELL_DATA'):
-                    break
-                scalar_data.append(float(lines_text[i].strip()))
-                i += 1
-            
-            point_data[scalar_name] = np.array(scalar_data)
-            print(f"  Read point data: {scalar_name} ({len(scalar_data)} values)")
-    
-    # Read CELL_DATA
-    while i < len(lines_text) and not lines_text[i].startswith('CELL_DATA'):
-        i += 1
-    
-    if i < len(lines_text):
-        n_cell_data = int(lines_text[i].split()[1])
-        i += 1
-        
-        # Read scalar fields
-        while i < len(lines_text) and lines_text[i].startswith('SCALARS'):
-            scalar_name = lines_text[i].split()[1]
-            scalar_type = lines_text[i].split()[2]
-            i += 1  # Skip LOOKUP_TABLE line
-            i += 1
-            
-            scalar_data = []
-            for j in range(n_cell_data):
-                if i >= len(lines_text):
-                    break
-                if scalar_type == 'int':
-                    scalar_data.append(int(lines_text[i].strip()))
-                else:
-                    scalar_data.append(float(lines_text[i].strip()))
-                i += 1
-            
-            cell_data[scalar_name] = np.array(scalar_data)
-            print(f"  Read cell data: {scalar_name} ({len(scalar_data)} values)")
-    
-    print(f"Successfully read {len(points)} points and {len(lines)} trajectories")
-    return points, lines, point_data, cell_data
+    with open(filename, 'rb') as handle:
+        header_lines = [handle.readline() for _ in range(4)]
+
+    if len(header_lines) < 3:
+        raise ValueError(f"Invalid VTK file header: {filename}")
+
+    encoding = header_lines[2].decode('ascii', errors='ignore').strip().upper()
+    if encoding == 'BINARY':
+        return _read_binary_vtk_polydata(filename)
+    return _read_ascii_vtk_polydata(filename)
+
+
+def _read_ascii_vtk_structured_points(filename):
+    with open(filename, 'r', encoding='utf-8') as handle:
+        lines = [line.strip() for line in handle if line.strip()]
+
+    dimensions = None
+    origin = None
+    spacing = None
+    point_count = None
+    scalar_name = None
+    scalar_type = None
+    data_start = None
+
+    for index, line in enumerate(lines):
+        if line.startswith('DIMENSIONS '):
+            parts = line.split()
+            dimensions = (int(parts[1]), int(parts[2]), int(parts[3]))
+        elif line.startswith('ORIGIN '):
+            parts = line.split()
+            origin = (float(parts[1]), float(parts[2]), float(parts[3]))
+        elif line.startswith('SPACING '):
+            parts = line.split()
+            spacing = (float(parts[1]), float(parts[2]), float(parts[3]))
+        elif line.startswith('POINT_DATA '):
+            point_count = int(line.split()[1])
+        elif line.startswith('SCALARS '):
+            parts = line.split()
+            scalar_name = parts[1]
+            scalar_type = parts[2].lower()
+        elif line.startswith('LOOKUP_TABLE '):
+            data_start = index + 1
+            break
+
+    if dimensions is None or origin is None or spacing is None:
+        raise ValueError('Structured VTK missing DIMENSIONS/ORIGIN/SPACING metadata')
+    if point_count is None or scalar_name is None or scalar_type is None or data_start is None:
+        raise ValueError('Structured VTK missing scalar block metadata')
+
+    values: list[float | int] = []
+    for line in lines[data_start:]:
+        for token in line.split():
+            if scalar_type == 'int':
+                values.append(int(token))
+            else:
+                values.append(float(token))
+
+    if len(values) < point_count:
+        raise ValueError('Structured VTK scalar block is shorter than POINT_DATA count')
+
+    values_array = np.asarray(values[:point_count], dtype=np.int32 if scalar_type == 'int' else np.float64)
+    nx, ny, nz = dimensions
+    volume = values_array.reshape((nz, ny, nx))
+
+    return {
+        'dimensions': dimensions,
+        'origin': origin,
+        'spacing': spacing,
+        'scalar_name': scalar_name,
+        'scalar_type': scalar_type,
+        'values': volume,
+    }
+
+
+def _read_binary_vtk_structured_points(filename):
+    with open(filename, 'rb') as handle:
+        header = [handle.readline().decode('ascii').strip() for _ in range(4)]
+        dataset_line = header[3]
+        if dataset_line != 'DATASET STRUCTURED_POINTS':
+            raise ValueError(f'Unsupported VTK dataset for structured viewer: {dataset_line}')
+
+        dimensions_line = _read_nonempty_ascii_line(handle)
+        origin_line = _read_nonempty_ascii_line(handle)
+        spacing_line = _read_nonempty_ascii_line(handle)
+        point_data_line = _read_nonempty_ascii_line(handle)
+        scalars_line = _read_nonempty_ascii_line(handle)
+        lookup_line = _read_nonempty_ascii_line(handle)
+
+        if dimensions_line is None or not dimensions_line.startswith('DIMENSIONS '):
+            raise ValueError('Structured VTK file is missing DIMENSIONS metadata')
+        if origin_line is None or not origin_line.startswith('ORIGIN '):
+            raise ValueError('Structured VTK file is missing ORIGIN metadata')
+        if spacing_line is None or not spacing_line.startswith('SPACING '):
+            raise ValueError('Structured VTK file is missing SPACING metadata')
+        if point_data_line is None or not point_data_line.startswith('POINT_DATA '):
+            raise ValueError('Structured VTK file is missing POINT_DATA metadata')
+        if scalars_line is None or not scalars_line.startswith('SCALARS '):
+            raise ValueError('Structured VTK file is missing SCALARS metadata')
+        if lookup_line is None or not lookup_line.startswith('LOOKUP_TABLE '):
+            raise ValueError('Structured VTK file is missing LOOKUP_TABLE metadata')
+
+        dim_parts = dimensions_line.split()
+        dimensions = (int(dim_parts[1]), int(dim_parts[2]), int(dim_parts[3]))
+
+        origin_parts = origin_line.split()
+        origin = (float(origin_parts[1]), float(origin_parts[2]), float(origin_parts[3]))
+
+        spacing_parts = spacing_line.split()
+        spacing = (float(spacing_parts[1]), float(spacing_parts[2]), float(spacing_parts[3]))
+
+        point_count = int(point_data_line.split()[1])
+
+        scalar_parts = scalars_line.split()
+        scalar_name = scalar_parts[1]
+        scalar_type = scalar_parts[2].lower()
+
+        if scalar_type == 'int':
+            dtype = '>i4'
+        else:
+            dtype = '>f4'
+
+        raw = handle.read(np.dtype(dtype).itemsize * point_count)
+        if len(raw) != np.dtype(dtype).itemsize * point_count:
+            raise ValueError('Unexpected end of file while reading structured scalar block')
+
+        values = np.frombuffer(raw, dtype=dtype)
+        if scalar_type == 'int':
+            values = values.astype(np.int32)
+        else:
+            values = values.astype(np.float64)
+
+    nx, ny, nz = dimensions
+    volume = values.reshape((nz, ny, nx))
+    return {
+        'dimensions': dimensions,
+        'origin': origin,
+        'spacing': spacing,
+        'scalar_name': scalar_name,
+        'scalar_type': scalar_type,
+        'values': volume,
+    }
+
+
+def read_vtk_dataset_type(filename):
+    with open(filename, 'rb') as handle:
+        header_lines = [handle.readline() for _ in range(4)]
+    if len(header_lines) < 4:
+        raise ValueError(f'Invalid VTK file header: {filename}')
+    return header_lines[3].decode('ascii', errors='ignore').strip()
+
+
+def read_vtk_structured_points(filename):
+    """Read VTK STRUCTURED_POINTS with a single scalar volume."""
+    with open(filename, 'rb') as handle:
+        header_lines = [handle.readline() for _ in range(4)]
+
+    if len(header_lines) < 4:
+        raise ValueError(f'Invalid VTK file header: {filename}')
+
+    dataset = header_lines[3].decode('ascii', errors='ignore').strip()
+    if dataset != 'DATASET STRUCTURED_POINTS':
+        raise ValueError(f'Unsupported VTK dataset for structured viewer: {dataset}')
+
+    encoding = header_lines[2].decode('ascii', errors='ignore').strip().upper()
+    if encoding == 'BINARY':
+        return _read_binary_vtk_structured_points(filename)
+    return _read_ascii_vtk_structured_points(filename)
 
 
 def interpolate_trajectory_at_z(points, line_indices, z_plane, tolerance=1e-6):
@@ -169,6 +434,48 @@ def interpolate_trajectory_at_z(points, line_indices, z_plane, tolerance=1e-6):
             
             return (x, y)
     
+    return None
+
+
+def interpolate_trajectory_phase_space_at_z(points, line_indices, z_plane, tolerance=1e-6, dz_tolerance=1e-12):
+    """
+    Find trajectory crossing and local angular direction at a z-plane.
+
+    Returns:
+        dict with keys x, y, xp_rad, yp_rad, discarded_parallel; or None if no crossing exists.
+    """
+    traj_points = points[line_indices]
+
+    for i in range(len(traj_points) - 1):
+        p1 = traj_points[i]
+        p2 = traj_points[i + 1]
+
+        z1, z2 = p1[2], p2[2]
+        if not ((z1 <= z_plane <= z2) or (z2 <= z_plane <= z1)):
+            continue
+
+        dz = p2[2] - p1[2]
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+
+        if abs(dz) < dz_tolerance:
+            return {
+                'discarded_parallel': True,
+            }
+
+        t = (z_plane - z1) / dz
+        x = p1[0] + t * dx
+        y = p1[1] + t * dy
+        xp_rad = float(np.arctan2(dx, dz))
+        yp_rad = float(np.arctan2(dy, dz))
+        return {
+            'x': float(x),
+            'y': float(y),
+            'xp_rad': xp_rad,
+            'yp_rad': yp_rad,
+            'discarded_parallel': False,
+        }
+
     return None
 
 

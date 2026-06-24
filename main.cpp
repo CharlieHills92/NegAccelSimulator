@@ -306,7 +306,7 @@ int main( int argc, char **argv )
 			do {
 				JEXTiterations++;
 				double z_start = Simulation.get_domain_z_start();
-				Simulation.create_geometry(z_start, Simulation.get_domain_z_size(), 1);
+				Simulation.create_geometry(z_start, Simulation.get_domain_z_end(), 1);
 				logfile << "----- Simulation of the full domain -----\n" << flush;
 				logfile << "*** Geometry defined ***\n" << flush;
 				Simulation.add_Bfield();
@@ -346,9 +346,13 @@ int main( int argc, char **argv )
 				Simulation.fill_particle_dbs();
 			}
 			
-			// Use the actual domain exit plane instead of a hardcoded value.
-			// 0.565m is only valid for MITICA/MTF (567mm domain); SPIDER domain is ~85mm.
-			double zlocsummary = Simulation.get_domain_z_size() - Simulation.get_MESH_SIZE();
+			const double domain_exit_plane = Simulation.get_domain_z_end() - Simulation.get_MESH_SIZE();
+			double zlocsummary = startup_parameters.hasDiagnosticSummaryZPosition()
+								 ? startup_parameters.getDiagnosticSummaryZPosition()
+								 : domain_exit_plane;
+			double emitter_export_z = startup_parameters.hasDiagnosticEmitterExportZPosition()
+									  ? startup_parameters.getDiagnosticEmitterExportZPosition()
+									  : zlocsummary;
 
 			if (startup_parameters.getOutputSummaryEnabled()) {
 				logfile << "*** Start the analysis... " << flush;
@@ -357,108 +361,18 @@ int main( int argc, char **argv )
 
 			if (startup_parameters.getOutputPlotsEnabled()) {
 				Simulation.plot_simulation(argc, argv);
-				if (Simulation.get_stripping()>1) {
-					Simulation.plot_simulation(argc, argv, PARTICLE_HM);
-					Simulation.plot_simulation(argc, argv, PARTICLE_H0);
-					Simulation.plot_simulation(argc, argv, PARTICLE_HP);
-					Simulation.plot_simulation(argc, argv, PARTICLE_H2P);
-					Simulation.plot_simulation(argc, argv, PARTICLE_H20);
-					Simulation.plot_simulation(argc, argv, PARTICLE_E);
+				if (Simulation.get_stripping()>1 && startup_parameters.getDiagnosticWritePerSpeciesPlots()) {
+					for (size_t species_index = 0; species_index < particle_kind_count(); ++species_index) {
+						Simulation.plot_simulation(argc, argv, int2kind(static_cast<int>(species_index)));
+					}
 				}
 			}
 			if (startup_parameters.getOutputSummaryEnabled() || startup_parameters.getOutputPlotsEnabled()) {
 				logfile << "Done! ***\n" << flush;
 			}
-			
-			if (startup_parameters.getOutputSummaryEnabled()) {
-				try {
-					Simulation.create_individual_simulation_summary(scan_index, case_tag, 
-						zlocsummary, PARTICLE_ALL);
-					logfile << " Individual summary for ALL particles done! ***\n" << flush;
-				} catch (const std::exception& e) {
-					logfile << " ERROR in individual summary for ALL particles: " << e.what() << "\n" << flush;
-				}
-			}
-			
-			// // Add to scan-level beam properties summary for ALL particles with error handling
-			// try {
-			// 	Simulation.add_to_scan_beam_properties_summary(scan_index, scan_file_tag,
-			// 		foldname, scan_file_tag, zlocsummary, PARTICLE_ALL);
-			// 	logfile << " Scan beam properties summary for ALL particles done! ***\n" << flush;
-			// } catch (const std::exception& e) {
-			// 	logfile << " ERROR in scan beam properties summary for ALL particles: " << e.what() << "\n" << flush;
-			// }
-			
-			// // Add to scan-level grid power summary for ALL particles with error handling
-			// try {
-			// 	Simulation.add_to_scan_grid_power_summary(scan_index, scan_file_tag,
-			// 		foldname, scan_file_tag, PARTICLE_ALL);
-			// 	logfile << " Scan grid power summary for ALL particles done! ***\n" << flush;
-			// } catch (const std::exception& e) {
-			// 	logfile << " ERROR in scan grid power summary for ALL particles: " << e.what() << "\n" << flush;
-			// }
-			
-			// if (Simulation.get_stripping()>1) {
-			// 	// Create individual summaries for each particle species with error handling
-			// 	try {
-			// 		Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-			// 			zlocsummary, PARTICLE_HM);
-			// 		Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-			// 			zlocsummary, PARTICLE_H0);
-			// 		Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-			// 			zlocsummary, PARTICLE_HP);
-			// 		Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-			// 			zlocsummary, PARTICLE_H2P);
-			// 		Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-			// 			zlocsummary, PARTICLE_H20);
-			// 		Simulation.create_individual_simulation_summary(scan_index, scan_file_tag, 
-			// 			zlocsummary, PARTICLE_E);
-			// 		logfile << " Individual summaries for all species done! ***\n" << flush;
-			// 	} catch (const std::exception& e) {
-			// 		logfile << " ERROR in individual summaries for species: " << e.what() << "\n" << flush;
-			// 	}
-				
-			// 	// Add to scan-level beam properties summaries for each species with error handling
-			// 	try {
-			// 		Simulation.add_to_scan_beam_properties_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, zlocsummary, PARTICLE_HM);
-			// 		Simulation.add_to_scan_beam_properties_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, zlocsummary, PARTICLE_H0);
-			// 		Simulation.add_to_scan_beam_properties_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, zlocsummary, PARTICLE_HP);
-			// 		Simulation.add_to_scan_beam_properties_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, zlocsummary, PARTICLE_H2P);
-			// 		Simulation.add_to_scan_beam_properties_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, zlocsummary, PARTICLE_H20);
-			// 		Simulation.add_to_scan_beam_properties_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, zlocsummary, PARTICLE_E);
-			// 		logfile << " Scan beam properties summaries for all species done! ***\n" << flush;
-			// 	} catch (const std::exception& e) {
-			// 		logfile << " ERROR in scan beam properties summaries for species: " << e.what() << "\n" << flush;
-			// 	}
-				
-			// 	// Add to scan-level grid power summaries for each species with error handling
-			// 	try {
-			// 		Simulation.add_to_scan_grid_power_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, PARTICLE_HM);
-			// 		Simulation.add_to_scan_grid_power_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, PARTICLE_H0);
-			// 		Simulation.add_to_scan_grid_power_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, PARTICLE_HP);
-			// 		Simulation.add_to_scan_grid_power_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, PARTICLE_H2P);
-			// 		Simulation.add_to_scan_grid_power_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, PARTICLE_H20);
-			// 		Simulation.add_to_scan_grid_power_summary(scan_index, scan_file_tag,
-			// 			foldname, scan_file_tag, PARTICLE_E);
-			// 		logfile << " All particle species summaries done! ***\n" << flush;
-			// 	} catch (const std::exception& e) {
-			// 		logfile << " ERROR in scan grid power summaries for species: " << e.what() << "\n" << flush;
-			// 	}
-			// }
 
 			if (startup_parameters.getOutputSummaryEnabled()) {
-				const string finaloutput = Simulation.save_emitter("final_map_outside.txt", zlocsummary);
+				const string finaloutput = Simulation.save_emitter("final_map_outside.txt", emitter_export_z);
 				if (!finaloutput.empty()) {
 					logfile << "*** Output location of particles saved to file " << finaloutput << " ***\n" << flush;
 				}
@@ -470,7 +384,7 @@ int main( int argc, char **argv )
 		}
 		else {
 
-			Simulation.create_geometry(Simulation.get_domain_z_start(), Simulation.get_domain_z_size(), 1);
+			Simulation.create_geometry(Simulation.get_domain_z_start(), Simulation.get_domain_z_end(), 1);
 			logfile << "----- Loading simulation of the full domain -----\n" << flush;
 			logfile << "*** Geometry defined ***\n" << flush;
 			if (!Simulation.load_simulation()) {
@@ -488,21 +402,20 @@ int main( int argc, char **argv )
 				Simulation.fill_particle_dbs();
 			}
 			
-			// Use the actual domain exit plane instead of a hardcoded value.
-			double zlocsummary = Simulation.get_domain_z_size() - Simulation.get_MESH_SIZE();
+			const double domain_exit_plane = Simulation.get_domain_z_end() - Simulation.get_MESH_SIZE();
+			double zlocsummary = startup_parameters.hasDiagnosticSummaryZPosition()
+			                     ? startup_parameters.getDiagnosticSummaryZPosition()
+			                     : domain_exit_plane;
 
 			if (startup_parameters.getOutputSummaryEnabled()) {
 				Simulation.analysis(zlocsummary);
 			}
 			if (startup_parameters.getOutputPlotsEnabled()) {
 				Simulation.plot_simulation(argc, argv);
-				if (Simulation.get_stripping()>1) {
-					Simulation.plot_simulation(argc, argv, PARTICLE_HM);
-					Simulation.plot_simulation(argc, argv, PARTICLE_H0);
-					Simulation.plot_simulation(argc, argv, PARTICLE_HP);
-					Simulation.plot_simulation(argc, argv, PARTICLE_H2P);
-					Simulation.plot_simulation(argc, argv, PARTICLE_H20);
-					Simulation.plot_simulation(argc, argv, PARTICLE_E);
+				if (Simulation.get_stripping()>1 && startup_parameters.getDiagnosticWritePerSpeciesPlots()) {
+					for (size_t species_index = 0; species_index < particle_kind_count(); ++species_index) {
+						Simulation.plot_simulation(argc, argv, int2kind(static_cast<int>(species_index)));
+					}
 				}
 			}
 			if (startup_parameters.getOutputSummaryEnabled() || startup_parameters.getOutputPlotsEnabled()) {
@@ -510,16 +423,6 @@ int main( int argc, char **argv )
 			}
 			logfile << "*** Getting details of particles at end location... " << endl << flush;
 			logfile << "Done! ***\n" << flush;
-			
-			if (startup_parameters.getOutputSummaryEnabled()) {
-				try {
-					Simulation.create_individual_simulation_summary(scan_index, case_tag, 
-						zlocsummary, PARTICLE_ALL);
-					logfile << " Individual summary for ALL particles done! ***\n" << flush;
-				} catch (const std::exception& e) {
-					logfile << " ERROR in individual summary for ALL particles: " << e.what() << "\n" << flush;
-				}
-			}
 			logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans <<" COMPLETED ***\n" << flush;
 		}
 

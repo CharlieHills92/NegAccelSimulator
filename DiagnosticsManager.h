@@ -111,7 +111,8 @@ public:
      * @param plot_folder Output folder for plots
      * @param file_tag File tag for naming
      */
-    void createPlots(int argc, char **argv, const Geometry* geometry,
+    void createPlots(int argc, char **argv, const SimulationParameters& params,
+                    const Geometry* geometry,
                     const EpotField* potential, const MeshVectorField* magnetic,
                     const EpotEfield* electric, const MeshScalarField* spacecharge,
                     const ParticleDataBase3D* particles, const std::string& plot_folder,
@@ -132,7 +133,8 @@ public:
      * @param plot_folder Output folder for plots
      * @param file_tag File tag for naming
      */
-    void createPlots(int argc, char **argv, const Geometry* geometry,
+    void createPlots(int argc, char **argv, const SimulationParameters& params,
+                    const Geometry* geometry,
                     const EpotField* potential, const MeshVectorField* magnetic,
                     const EpotEfield* electric, const MeshScalarField* spacecharge,
                     const ParticleDataBase3D* particles,
@@ -177,70 +179,8 @@ public:
     void printTrajectoryData(const std::string& filename, const ParticleDataBase3D* particles);
 
     /**
-     * @brief Create simulation summary
-     * @param zlocsummary Z location for summary
-     * @param summary_file_tag File tag for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles Particle database
-     * @param outsummary_fold Output summary folder
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, const ParticleDataBase3D* particles,
-                                const std::string& outsummary_fold);
-    
-    /**
-     * @brief Create simulation summary for specific particle species
-     * @param zlocsummary Z location for summary
-     * @param summary_file_tag File tag for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles_species Species-specific particle databases
-     * @param pk Particle kind
-     * @param outsummary_fold Output summary folder
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, 
-                                const std::vector<ParticleDataBase3D*>& particles_species,
-                                particle_kind pk, const std::string& outsummary_fold);
-
-    /**
-     * @brief Create simulation summary with field calculations
-     * @param zlocsummary Z location for summary
-     * @param summary_file_tag File tag for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles Particle database
-     * @param outsummary_fold Output summary folder
-     * @param geometry Simulation geometry
-     * @param potential Electric potential field
-     * @param magnetic Magnetic field
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, const ParticleDataBase3D* particles,
-                                const std::string& outsummary_fold,
-                                const Geometry* geometry, const EpotField* potential, 
-                                const MeshVectorField* magnetic);
-
-    /**
-     * @brief Create simulation summary with field calculations and extracted current density
-     * @param zlocsummary Z location for summary analysis
-     * @param summary_file_tag File tag for summary outputs
-     * @param append_at_end Whether to append to existing files
-     * @param particles Particle database
-     * @param outsummary_fold Output folder for summary
-     * @param geometry Geometry object
-     * @param potential Electric potential field
-     * @param magnetic Magnetic field
-     * @param extracted_current_density Extracted current density at EG exit (A/m²)
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, const ParticleDataBase3D* particles,
-                                const std::string& outsummary_fold,
-                                const Geometry* geometry, const EpotField* potential, 
-                                const MeshVectorField* magnetic, double extracted_current_density);
-
-    /**
      * @brief Analyze particle end locations and calculate grid power loads
      * @param particles Particle database to analyze
-     * @param zgrids Vector of grid z-positions
      * @param mesh_size Mesh size for grid collision detection
      * @param geometry Geometry object for domain boundaries
      * @param ionmass Ion mass for power calculations
@@ -250,7 +190,7 @@ public:
      * @return Vector of power values per grid/solid
      */
     std::vector<double> analyzeGridPowerLoads(const ParticleDataBase3D* particles,
-                                             const std::vector<double>& zgrids,
+                                             const SimulationParameters& params,
                                              double mesh_size,
                                              const Geometry* geometry,
                                              double ionmass,
@@ -258,74 +198,6 @@ public:
                                              const std::string& file_tag,
                                              particle_kind pk = PARTICLE_ALL,
                                              std::vector<double>* current_per_solid_out = nullptr);
-
-    /**
-     * @brief Create enhanced simulation summary with current density analysis
-     * @param accelerated_current_density Current density at accelerator exit (A/m²)
-     * @param extracted_current_density Current density at EG exit (A/m²)
-     * @param filename Output filename for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles Particle database for analysis
-     * @param extra_info Additional information to include in summary
-     */
-    void createSimulationSummary(double accelerated_current_density,
-                                double extracted_current_density,
-                                const std::string& filename, bool append_at_end,
-                                const ParticleDataBase3D* particles,
-                                const std::string& extra_info);
-
-    /**
-     * @brief Create individual simulation summary (for single simulation in scan)
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation (e.g. "MTF_STRIP_TEST_0")
-     * @param zlocsummary Z location for summary analysis
-     * @param particles Particle database
-     * @param geometry Geometry object
-     * @param potential Electric potential field
-     * @param magnetic Magnetic field
-     * @param extracted_current_density Extracted current density at EG exit (A/m²)
-     * @param outsummary_fold Output folder for individual simulation summary
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void createIndividualSimulationSummary(int scan_index, double zlocsummary,
-                                          const ParticleDataBase3D* particles,
-                                          double extracted_current_density,
-                                          const FileManager* fileManager,
-                                          particle_kind pk = PARTICLE_ALL);
-
-    /**
-     * @brief Add entry to scan-level beam properties summary
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation
-     * @param scan_folder Main scan folder path
-     * @param scan_file_tag Base scan file tag (e.g. "MTF_STRIP_TEST")
-     * @param zlocsummary Z location for analysis
-     * @param particles Particle database
-     * @param extracted_current_density Extracted current density at EG exit (A/m²)
-     * @param magnetic Magnetic field for field analysis
-     * @param potential Electric potential field
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void addToScanBeamPropertiesSummary(int scan_index, const std::string& simulation_tag,
-                                       const std::string& scan_folder, const std::string& scan_file_tag,
-                                       double zlocsummary, const ParticleDataBase3D* particles,
-                                       double extracted_current_density, const MeshVectorField* magnetic,
-                                       const EpotField* potential, particle_kind pk = PARTICLE_ALL);
-
-    /**
-     * @brief Add entry to scan-level grid power summary
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation
-     * @param scan_folder Main scan folder path
-     * @param scan_file_tag Base scan file tag (e.g. "MTF_STRIP_TEST")
-     * @param particles Particle database
-     * @param geometry Geometry object
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void addToScanGridPowerSummary(int scan_index, const std::string& simulation_tag,
-                                  const std::string& scan_folder, const std::string& scan_file_tag,
-                                  const ParticleDataBase3D* particles, const Geometry* geometry,
-                                  particle_kind pk = PARTICLE_ALL);
 
 private:
     /**
@@ -341,12 +213,6 @@ private:
                              const MeshVectorField* magnetic, const EpotEfield* electric,
                              const MeshScalarField* spacecharge, const ParticleDataBase3D* particles);
 
-    /**
-     * @brief Get particle species name string
-     * @param pk Particle kind
-     * @return String representation of particle species
-     */
-    std::string getParticleSpeciesName(particle_kind pk) const;
 };
 
 #endif /* DIAGNOSTICSMANAGER_H_ */

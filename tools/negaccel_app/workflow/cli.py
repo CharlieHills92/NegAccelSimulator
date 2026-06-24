@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .common import WorkflowError
+from .post_processing import write_case_diagnostics_aggregation, write_scan_synthesis
 from .runtime import materialize_authored_case, materialize_case
 from .scan import expand_scan, run_scan
 
@@ -70,6 +71,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pass the legacy load-existing flag to the simulator instead of running a fresh solve.",
     )
 
+    aggregate_parser = subparsers.add_parser(
+        "aggregate-diagnostics",
+        help="Parse retained raw diagnostics for one case and write a structured JSON aggregation.",
+    )
+    aggregate_parser.add_argument(
+        "case_source",
+        help="Case JSON path or case output directory containing the resolved runtime JSON.",
+    )
+    aggregate_parser.add_argument("--output", help="Output path for the aggregated diagnostics JSON.")
+
+    synthesize_parser = subparsers.add_parser(
+        "synthesize-scan",
+        help="Aggregate retained diagnostics across all cases listed in a scan manifest.",
+    )
+    synthesize_parser.add_argument("manifest", help="Path to the scan-manifest.json file.")
+    synthesize_parser.add_argument("--output", help="Output path for the synthesized scan JSON.")
+
     return parser
 
 
@@ -104,6 +122,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.output_dir,
                 args.load_existing,
             )
+
+        if args.command == "aggregate-diagnostics":
+            output_path = Path(args.output).resolve() if args.output else None
+            aggregation_path = write_case_diagnostics_aggregation(Path(args.case_source).resolve(), output_path)
+            print(aggregation_path.as_posix())
+            return 0
+
+        if args.command == "synthesize-scan":
+            output_path = Path(args.output).resolve() if args.output else None
+            synthesis_path = write_scan_synthesis(Path(args.manifest).resolve(), output_path)
+            print(synthesis_path.as_posix())
+            return 0
 
         raise WorkflowError(f"Unsupported command: {args.command}")
     except WorkflowError as exc:

@@ -41,6 +41,14 @@ DEFAULT_OUTPUTS = {
         "writeDebugArtifacts": False,
         "structuredLogFile": "run.log",
     },
+    "iteration": {
+        "enabled": True,
+        "everyNIterations": 1,
+        "exportPlaneDiagnostics": True,
+        "exportSimulationState": False,
+        "exportTracedParticles": False,
+        "planeZPositionsMeters": [],
+    },
 }
 
 

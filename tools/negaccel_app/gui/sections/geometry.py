@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..common import WorkflowError, nested_get, serialize_geometry_file_path
-from ..visualization import GeometryCanvas, NavigationToolbar2QT
+from ..visualization import GeometryCanvas, NavigationToolbar2QT, configure_matplotlib_toolbar
 from ...workflow import TEMPLATES_DIR, load_geometry_file, load_geometry_reference, write_geometry_file
 
 
@@ -527,6 +527,7 @@ class _GeometryPreviewWidget(QWidget):
 
         self._canvas = GeometryCanvas()
         self._toolbar = NavigationToolbar2QT(self._canvas, self)
+        configure_matplotlib_toolbar(self._toolbar)
         self._status = QLabel("Geometry preview is ready.")
         self._status.setWordWrap(True)
         root.addWidget(self._toolbar)
@@ -799,6 +800,12 @@ class _GeometryWorkspaceWidget(QWidget):
         sync_boundary_editor = getattr(self._window, "sync_boundary_editor_from_geometry", None)
         if callable(sync_boundary_editor):
             sync_boundary_editor()
+        sync_diagnostics_grid_power = getattr(self._window, "sync_diagnostics_grid_power_from_geometry", None)
+        if callable(sync_diagnostics_grid_power):
+            sync_diagnostics_grid_power()
+        sync_diagnostics_planes = getattr(self._window, "sync_diagnostics_planes_from_geometry", None)
+        if callable(sync_diagnostics_planes):
+            sync_diagnostics_planes()
 
     def _on_geometry_controls_changed(self, *_args) -> None:
         self._fire()
@@ -853,6 +860,9 @@ class _GeometryWorkspaceWidget(QWidget):
             "solids": solids,
         }
         return geometry_document
+
+    def current_geometry_document(self) -> dict:
+        return copy.deepcopy(self._current_geometry_document())
 
     def load_geometry_path(self, path: Path) -> None:
         geometry_document = _load_geometry_document(path)

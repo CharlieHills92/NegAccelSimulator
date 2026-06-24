@@ -1,5 +1,6 @@
 #include "SimulationParameters.h"
 
+#include "cross_sections.h"
 #include "error.hpp"
 
 #include <nlohmann/json.hpp>
@@ -8,6 +9,7 @@
 #include <cctype>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 using json = nlohmann::json;
@@ -41,6 +43,53 @@ bool hasObject(const json& root, const char* key) {
     return root.contains(key) && root.at(key).is_object();
 }
 
+SimulationParameters::DiagnosticGridRangeDefinition parseDiagnosticGridRangeDefinition(
+    const json& range,
+    size_t range_index) {
+    const std::string context = "diagnostics.gridPower.ranges[" + std::to_string(range_index) + "]";
+    if (!range.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+    if (!range.contains("id") || !range.at("id").is_number_integer()) {
+        throw runtime_error(context + ".id must be an integer");
+    }
+    if (!range.contains("includeInTotal") || !range.at("includeInTotal").is_boolean()) {
+        throw runtime_error(context + ".includeInTotal must be boolean");
+    }
+
+    SimulationParameters::DiagnosticGridRangeDefinition definition;
+    definition.id = range.at("id").get<int>();
+    definition.includeInTotal = range.at("includeInTotal").get<bool>();
+    if (definition.id < 0) {
+        throw runtime_error(context + ".id must be >= 0");
+    }
+    return definition;
+}
+
+std::vector<double> requireFixedNumberArray(const json& document,
+                                            const char* key,
+                                            size_t expected_size,
+                                            const std::string& context) {
+    if (!document.contains(key) || !document.at(key).is_array()) {
+        throw runtime_error(context + "." + key + " must be an array");
+    }
+
+    std::vector<double> values;
+    for (json::const_iterator it = document.at(key).begin(); it != document.at(key).end(); ++it) {
+        if (!it->is_number()) {
+            throw runtime_error(context + "." + key + " must contain only numeric values");
+        }
+        values.push_back(it->get<double>());
+    }
+
+    if (values.size() != expected_size) {
+        throw runtime_error(
+            context + "." + key + " must contain exactly " + std::to_string(expected_size) + " values");
+    }
+
+    return values;
+}
+
 std::vector<double> requireNumberArray(const json& document,
                                        const char* key,
                                        const std::string& context) {
@@ -61,6 +110,179 @@ std::vector<double> requireNumberArray(const json& document,
     }
 
     return values;
+}
+
+bool isSupportedParticleKind(const std::string& kind) {
+    static const char* SUPPORTED_PARTICLE_KINDS[] = {
+        "H-", "H0", "H+", "H2+", "H20", "H3+",
+        "D-", "D0", "D+", "D2+", "D20", "D3+",
+        "e-"
+    };
+    for (size_t ii = 0; ii < sizeof(SUPPORTED_PARTICLE_KINDS) / sizeof(SUPPORTED_PARTICLE_KINDS[0]); ++ii) {
+        if (kind == SUPPORTED_PARTICLE_KINDS[ii]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string particleFamilyPrefixFromIonMass(double ion_mass_u) {
+    return ion_mass_u >= 1.5 ? "D" : "H";
+}
+
+std::string normalizedProcessIdSuffix(const std::string& projectile_kind) {
+    std::string suffix;
+    for (size_t ii = 0; ii < projectile_kind.size(); ++ii) {
+        const char character = projectile_kind[ii];
+        if (std::isalnum(static_cast<unsigned char>(character))) {
+            suffix.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(character))));
+            continue;
+        }
+        if (character == '+') {
+            suffix += "plus";
+            continue;
+        }
+        if (character == '-') {
+            suffix += "minus";
+        }
+    }
+    return suffix;
+}
+
+SimulationParameters::CrossSectionProcessProductDefinition makeLegacyProductDefinition(
+    const std::string& particle_kind,
+    uint count,
+    const std::string& speed_class) {
+    SimulationParameters::CrossSectionProcessProductDefinition product;
+    product.particleKind = particle_kind;
+    product.speedClass = speed_class;
+    product.count = count;
+    return product;
+}
+
+bool isSupportedProductSpeedClass(const std::string& speed_class) {
+    return speed_class == "fast" || speed_class == "slow";
+}
+
+std::string inferLegacyProjectileKind(const std::string& reaction_id,
+                                      double ion_mass_u,
+                                      const std::string& context) {
+    const std::string family = particleFamilyPrefixFromIonMass(ion_mass_u);
+    if (reaction_id == "negative_ion_single_stripping" ||
+        reaction_id == "negative_ion_double_stripping") {
+        return family + "-";
+    }
+    if (reaction_id == "neutral_projectile_ionization") {
+        return family + "0";
+    }
+    if (reaction_id == "positive_ion_charge_exchange") {
+        return family + "+";
+    }
+    if (reaction_id == "background_gas_ionization") {
+        throw runtime_error(
+            context +
+            ".projectileKind is required when migrating background_gas_ionization because the legacy process applies to multiple projectile species");
+    }
+    throw runtime_error(context + ".processId is not supported: " + reaction_id);
+}
+
+std::string inferLegacyProjectileFate(const std::string& reaction_id,
+                                      const std::string& context) {
+    if (reaction_id == "background_gas_ionization") {
+        return "survive";
+    }
+    if (reaction_id == "negative_ion_single_stripping" ||
+        reaction_id == "negative_ion_double_stripping" ||
+        reaction_id == "neutral_projectile_ionization" ||
+        reaction_id == "positive_ion_charge_exchange") {
+        return "consume";
+    }
+    throw runtime_error(context + ".processId is not supported: " + reaction_id);
+}
+
+std::vector<SimulationParameters::CrossSectionProcessProductDefinition> inferLegacyProducts(
+    const std::string& reaction_id,
+    double ion_mass_u,
+    const std::string& context) {
+    const std::string family = particleFamilyPrefixFromIonMass(ion_mass_u);
+    if (reaction_id == "negative_ion_single_stripping") {
+        return {
+            makeLegacyProductDefinition(family + "0", 1U, "fast"),
+            makeLegacyProductDefinition("e-", 1U, "fast"),
+        };
+    }
+    if (reaction_id == "negative_ion_double_stripping") {
+        return {
+            makeLegacyProductDefinition(family + "+", 1U, "fast"),
+            makeLegacyProductDefinition("e-", 2U, "fast"),
+        };
+    }
+    if (reaction_id == "background_gas_ionization") {
+        return {
+            makeLegacyProductDefinition(family + "2+", 1U, "slow"),
+            makeLegacyProductDefinition("e-", 1U, "slow"),
+        };
+    }
+    if (reaction_id == "neutral_projectile_ionization") {
+        return {
+            makeLegacyProductDefinition(family + "+", 1U, "fast"),
+            makeLegacyProductDefinition("e-", 1U, "fast"),
+        };
+    }
+    if (reaction_id == "positive_ion_charge_exchange") {
+        return {
+            makeLegacyProductDefinition(family + "2+", 1U, "slow"),
+            makeLegacyProductDefinition(family + "0", 1U, "fast"),
+        };
+    }
+    throw runtime_error(context + ".processId is not supported: " + reaction_id);
+}
+
+SimulationParameters::CrossSectionProcessProductDefinition parseCrossSectionProcessProductDefinition(
+    const json& product,
+    size_t process_index,
+    size_t product_index) {
+    const std::string context = "physics.reactions[" + std::to_string(process_index) + "].products[" +
+                                std::to_string(product_index) + "]";
+    if (!product.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+    if (!product.contains("particleKind") || !product.at("particleKind").is_string()) {
+        throw runtime_error(context + ".particleKind must be a string");
+    }
+
+    SimulationParameters::CrossSectionProcessProductDefinition parsed;
+    parsed.particleKind = product.at("particleKind").get<std::string>();
+    if (!isSupportedParticleKind(parsed.particleKind)) {
+        throw runtime_error(context + ".particleKind is not supported: " + parsed.particleKind);
+    }
+
+    if (!product.contains("speedClass") || !product.at("speedClass").is_string()) {
+        throw runtime_error(context + ".speedClass must be a string");
+    }
+    parsed.speedClass = product.at("speedClass").get<std::string>();
+    if (!isSupportedProductSpeedClass(parsed.speedClass)) {
+        throw runtime_error(context + ".speedClass must be either fast or slow");
+    }
+
+    if (product.contains("count")) {
+        if (!product.at("count").is_number_unsigned()) {
+            throw runtime_error(context + ".count must be an unsigned integer");
+        }
+        parsed.count = product.at("count").get<uint>();
+        if (parsed.count == 0U) {
+            throw runtime_error(context + ".count must be >= 1");
+        }
+    }
+
+    if (product.contains("chargeState") && !product.at("chargeState").is_number()) {
+        throw runtime_error(context + ".chargeState must be numeric when provided");
+    }
+    if (product.contains("massU") && !product.at("massU").is_number()) {
+        throw runtime_error(context + ".massU must be numeric when provided");
+    }
+
+    return parsed;
 }
 
 SimulationParameters::GeometryAperturePattern parseGeometryAperturePattern(
@@ -210,6 +432,252 @@ SimulationParameters::BoundaryConditionDefinition parseBoundaryConditionDefiniti
     return parsed;
 }
 
+SimulationParameters::ParticleTypeDefinition parseParticleTypeDefinition(
+    const json& particle_type,
+    size_t index) {
+    const std::string context = "particleTypes[" + std::to_string(index) + "]";
+    if (!particle_type.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+    if (!particle_type.contains("id") || !particle_type.at("id").is_string()) {
+        throw runtime_error(context + ".id must be a string");
+    }
+    if (!particle_type.contains("kind") || !particle_type.at("kind").is_string()) {
+        throw runtime_error(context + ".kind must be a string");
+    }
+    if (!particle_type.contains("chargeState") || !particle_type.at("chargeState").is_number()) {
+        throw runtime_error(context + ".chargeState must be numeric");
+    }
+    if (!particle_type.contains("massU") || !particle_type.at("massU").is_number()) {
+        throw runtime_error(context + ".massU must be numeric");
+    }
+
+    SimulationParameters::ParticleTypeDefinition parsed;
+    parsed.id = particle_type.at("id").get<std::string>();
+    parsed.name = particle_type.value("name", parsed.id);
+    parsed.kind = particle_type.at("kind").get<std::string>();
+    parsed.chargeState = particle_type.at("chargeState").get<double>();
+    parsed.massU = particle_type.at("massU").get<double>();
+    parsed.sourceable = particle_type.value("sourceable", false);
+    return parsed;
+}
+
+SimulationParameters::ParticleSourceDefinition parseParticleSourceDefinition(
+    const json& particle_source,
+    size_t index) {
+    const std::string context = "particleSources[" + std::to_string(index) + "]";
+    if (!particle_source.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+    if (!particle_source.contains("id") || !particle_source.at("id").is_string()) {
+        throw runtime_error(context + ".id must be a string");
+    }
+    if (!particle_source.contains("particleTypeId") || !particle_source.at("particleTypeId").is_string()) {
+        throw runtime_error(context + ".particleTypeId must be a string");
+    }
+    if (!particle_source.contains("kind") || !particle_source.at("kind").is_string()) {
+        throw runtime_error(context + ".kind must be a string");
+    }
+    if (!particle_source.contains("sourceModel") || !particle_source.at("sourceModel").is_string()) {
+        throw runtime_error(context + ".sourceModel must be a string");
+    }
+    if (particle_source.at("sourceModel").get<std::string>() != "uniform") {
+        throw runtime_error(context + ".sourceModel must be uniform in the current C++ runtime");
+    }
+    if (!particle_source.contains("chargeState") || !particle_source.at("chargeState").is_number()) {
+        throw runtime_error(context + ".chargeState must be numeric");
+    }
+    if (!particle_source.contains("massU") || !particle_source.at("massU").is_number()) {
+        throw runtime_error(context + ".massU must be numeric");
+    }
+    if (!particle_source.contains("particleCount") || !particle_source.at("particleCount").is_number_unsigned()) {
+        throw runtime_error(context + ".particleCount must be an unsigned integer");
+    }
+    if (!particle_source.contains("currentDensityAm2") || !particle_source.at("currentDensityAm2").is_number()) {
+        throw runtime_error(context + ".currentDensityAm2 must be numeric");
+    }
+    if (!particle_source.contains("axialEnergyEV") || !particle_source.at("axialEnergyEV").is_number()) {
+        throw runtime_error(context + ".axialEnergyEV must be numeric");
+    }
+    if (!hasObject(particle_source, "uniform")) {
+        throw runtime_error(context + ".uniform object is required");
+    }
+
+    const json& uniform = particle_source.at("uniform");
+    SimulationParameters::ParticleSourceDefinition parsed;
+    parsed.id = particle_source.at("id").get<std::string>();
+    parsed.name = particle_source.value("name", parsed.id);
+    parsed.particleTypeId = particle_source.at("particleTypeId").get<std::string>();
+    parsed.kind = particle_source.at("kind").get<std::string>();
+    parsed.sourceModel = particle_source.at("sourceModel").get<std::string>();
+    parsed.chargeState = particle_source.at("chargeState").get<double>();
+    parsed.massU = particle_source.at("massU").get<double>();
+    parsed.particleCount = particle_source.at("particleCount").get<uint>();
+    parsed.currentDensityAm2 = particle_source.at("currentDensityAm2").get<double>();
+    parsed.perpendicularTemperatureEV = particle_source.value("perpendicularTemperatureEV", 0.0);
+    parsed.parallelTemperatureEV = particle_source.value("parallelTemperatureEV", 0.0);
+    parsed.axialEnergyEV = particle_source.at("axialEnergyEV").get<double>();
+    parsed.centerMeters = requireFixedNumberArray(uniform, "centerMeters", 3, context + ".uniform");
+    parsed.mainDirection = requireFixedNumberArray(uniform, "mainDirection", 3, context + ".uniform");
+    parsed.inPlaneReferenceDirection = requireFixedNumberArray(
+        uniform,
+        "inPlaneReferenceDirection",
+        3,
+        context + ".uniform");
+    if (!uniform.contains("widthMeters") || !uniform.at("widthMeters").is_number()) {
+        throw runtime_error(context + ".uniform.widthMeters must be numeric");
+    }
+    if (!uniform.contains("heightMeters") || !uniform.at("heightMeters").is_number()) {
+        throw runtime_error(context + ".uniform.heightMeters must be numeric");
+    }
+    parsed.widthMeters = uniform.at("widthMeters").get<double>();
+    parsed.heightMeters = uniform.at("heightMeters").get<double>();
+    if (parsed.widthMeters <= 0.0 || parsed.heightMeters <= 0.0) {
+        throw runtime_error(context + ".uniform.widthMeters and heightMeters must be > 0");
+    }
+    return parsed;
+}
+
+SimulationParameters::MagneticFieldDefinition parseMagneticFieldDefinition(
+    const json& field,
+    size_t index) {
+    const std::string context = "externalMagneticField.fields[" + std::to_string(index) + "]";
+    if (!field.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+    if (!field.contains("name") || !field.at("name").is_string()) {
+        throw runtime_error(context + ".name must be a string");
+    }
+    if (!field.contains("sourceType") || !field.at("sourceType").is_string()) {
+        throw runtime_error(context + ".sourceType must be a string");
+    }
+
+    SimulationParameters::MagneticFieldDefinition parsed;
+    parsed.name = field.at("name").get<std::string>();
+    parsed.sourceType = field.at("sourceType").get<std::string>();
+    parsed.scale = field.value("scale", 1.0);
+    if (parsed.scale < 0.0) {
+        throw runtime_error(context + ".scale must be >= 0");
+    }
+
+    if (parsed.sourceType == "constant") {
+        if (!hasObject(field, "constantValue")) {
+            throw runtime_error(context + ".constantValue object is required for sourceType='constant'");
+        }
+        const json& constant = field.at("constantValue");
+        if (!constant.contains("bx") || !constant.at("bx").is_number() ||
+            !constant.contains("by") || !constant.at("by").is_number() ||
+            !constant.contains("bz") || !constant.at("bz").is_number()) {
+            throw runtime_error(context + ".constantValue must contain numeric bx, by, bz");
+        }
+        parsed.constantValue[0] = constant.at("bx").get<double>();
+        parsed.constantValue[1] = constant.at("by").get<double>();
+        parsed.constantValue[2] = constant.at("bz").get<double>();
+    } else if (parsed.sourceType == "file") {
+        if (!field.contains("filePath") || !field.at("filePath").is_string()) {
+            throw runtime_error(context + ".filePath must be a string for sourceType='file'");
+        }
+        parsed.filePath = field.at("filePath").get<std::string>();
+    } else {
+        throw runtime_error(context + ".sourceType must be one of constant or file");
+    }
+
+    return parsed;
+}
+
+SimulationParameters::CrossSectionProcessDefinition parseCrossSectionProcessDefinition(
+    const json& process,
+    size_t index,
+    double ion_mass_u) {
+    const std::string context = "physics.reactions[" + std::to_string(index) + "]";
+    if (!process.is_object()) {
+        throw runtime_error(context + " must be an object");
+    }
+    if (!process.contains("processId") && !process.contains("reactionId")) {
+        throw runtime_error(context + ".processId must be a string");
+    }
+    if (!process.contains("sourcePath") || !process.at("sourcePath").is_string()) {
+        throw runtime_error(context + ".sourcePath must be a string");
+    }
+    if (!process.contains("fitDegree") || !process.at("fitDegree").is_number_unsigned()) {
+        throw runtime_error(context + ".fitDegree must be an unsigned integer");
+    }
+    if (!process.contains("coefficients") || !process.at("coefficients").is_array()) {
+        throw runtime_error(context + ".coefficients must be an array");
+    }
+
+    SimulationParameters::CrossSectionProcessDefinition parsed;
+    parsed.processId = process.contains("processId")
+                           ? process.at("processId").get<std::string>()
+                           : process.at("reactionId").get<std::string>();
+    if (process.contains("reactionId") && process.at("reactionId").is_string() &&
+        process.contains("processId") && process.at("processId").is_string() &&
+        process.at("reactionId").get<std::string>() != parsed.processId) {
+        throw runtime_error(context + ".reactionId must match processId when both are provided");
+    }
+    parsed.name = process.value("name", parsed.processId);
+    parsed.sourcePath = process.at("sourcePath").get<std::string>();
+    parsed.fitDegree = process.at("fitDegree").get<uint>();
+    if (parsed.fitDegree > 6U) {
+        throw runtime_error(context + ".fitDegree must be <= 6");
+    }
+    parsed.scaleEnergyByIonMass = process.value("scaleEnergyByIonMass", true);
+    parsed.minimumEnergyEV = process.value("minimumEnergyEV", 0.0);
+    parsed.maximumEnergyEV = process.value("maximumEnergyEV", -1.0);
+    parsed.coefficients = requireFixedNumberArray(
+        process,
+        "coefficients",
+        static_cast<size_t>(parsed.fitDegree + 1U),
+        context);
+
+    if (process.contains("projectileKind")) {
+        if (!process.at("projectileKind").is_string()) {
+            throw runtime_error(context + ".projectileKind must be a string");
+        }
+        parsed.projectileKind = process.at("projectileKind").get<std::string>();
+        if (!isSupportedParticleKind(parsed.projectileKind) || parsed.projectileKind == "e-") {
+            throw runtime_error(context + ".projectileKind must be a supported heavy-particle kind");
+        }
+    } else {
+        parsed.projectileKind = inferLegacyProjectileKind(parsed.processId, ion_mass_u, context);
+    }
+
+    if (process.contains("projectileFate")) {
+        if (!process.at("projectileFate").is_string()) {
+            throw runtime_error(context + ".projectileFate must be a string");
+        }
+        parsed.projectileFate = process.at("projectileFate").get<std::string>();
+    } else {
+        parsed.projectileFate = inferLegacyProjectileFate(parsed.processId, context);
+    }
+    if (parsed.projectileFate != "consume" && parsed.projectileFate != "survive") {
+        throw runtime_error(context + ".projectileFate must be either consume or survive");
+    }
+
+    if (process.contains("products")) {
+        if (!process.at("products").is_array()) {
+            throw runtime_error(context + ".products must be an array");
+        }
+        for (json::const_iterator it = process.at("products").begin();
+             it != process.at("products").end();
+             ++it) {
+            parsed.products.push_back(
+                parseCrossSectionProcessProductDefinition(*it, index, parsed.products.size()));
+        }
+    } else {
+        parsed.products = inferLegacyProducts(parsed.processId, ion_mass_u, context);
+    }
+
+    if (parsed.minimumEnergyEV < 0.0) {
+        throw runtime_error(context + ".minimumEnergyEV must be >= 0");
+    }
+    if (parsed.maximumEnergyEV > 0.0 && parsed.maximumEnergyEV < parsed.minimumEnergyEV) {
+        throw runtime_error(context + ".maximumEnergyEV must be >= minimumEnergyEV when provided");
+    }
+
+    return parsed;
+}
+
 const json* findDensityProfile(const json& profiles, const string& profile_name) {
     if (!profiles.is_array()) {
         return nullptr;
@@ -241,6 +709,7 @@ SimulationParameters::SimulationParameters()
       TPAR(0.0),
       E0_Z(0.0),
       U_PLASMA(0.0),
+    INITIAL_PLASMA_MAX_Z(0.0),
       N_PARTICLES(0U),
       EG_VOLTAGE(0.0),
       GG_VOLTAGE(0.0),
@@ -252,10 +721,6 @@ SimulationParameters::SimulationParameters()
       G5_VOLTAGE(0.0),
       MESH_SIZE(0.0),
       ITERATIONS(0U),
-      PGFILTER_SCALE(0.0),
-      CESMADCM_SCALE(0.0),
-      EXTFIELD_CASE(0U),
-      EXTFIELD_SCALE(0.0),
       SPLIT_DOMAIN(0U),
       JTOLERANCE(0.0),
       ALPHA_COEFF(0.0),
@@ -263,6 +728,20 @@ SimulationParameters::SimulationParameters()
       N_SOLIDS(0U),
       MGSOLVER(0U),
       SHIELD_MODEL(0U),
+    BICGSTAB_EPS(1.0e-4),
+    BICGSTAB_MAX_ITERATIONS(10000U),
+    BICGSTAB_NEWTON_EPS(1.0e-4),
+    BICGSTAB_NEWTON_MAX_ITERATIONS(10U),
+    BICGSTAB_GLOBALLY_CONVERGENT_NEWTON(1U),
+    MG_LEVELS(1U),
+    MG_TOLERANCE(1.0e-4),
+    MG_MAX_CYCLES(100U),
+    MG_GAMMA(1U),
+    MG_PRE_SMOOTH(5U),
+    MG_POST_SMOOTH(5U),
+    MG_COARSE_RELAXATION(1.7),
+    MG_COARSE_MAX_ITERATIONS(10000U),
+    MG_LOCAL_PLASMA_MAX_ITERATIONS(1U),
       EXT_GAP(0.0),
       DOMAIN_X_SIZE(-1.0),
       DOMAIN_Y_SIZE(-1.0),
@@ -272,10 +751,14 @@ SimulationParameters::SimulationParameters()
       domain_ii(0U),
       GEOMETRY_SOURCE_MODE(),
       GENERATED_GEOMETRY_SOLIDS(),
+    PARTICLE_TYPES(),
+    PARTICLE_SOURCES(),
       EXPLICIT_BOUNDARY_CONDITIONS(),
       MAGNETIC_FIELD_SOURCE_MODE("none"),
       MAGNETIC_FIELD_DIRECTORY(),
       MAGNETIC_FIELD_FILE(),
+            MAGNETIC_FIELDS(),
+            CROSS_SECTION_PROCESSES(),
       STRIPPING_DENSITY_PROFILE(),
       STRIPPING_MIN_Z(-1.0),
       SURFACE_COLLISIONS_MIN_Z(7.0e-3),
@@ -300,7 +783,24 @@ SimulationParameters::SimulationParameters()
       OUTPUT_LOGGING_FILE_LEVEL("debug"),
       OUTPUT_LOGGING_CAPTURE_STDOUT(1U),
       OUTPUT_LOGGING_WRITE_DEBUG_ARTIFACTS(0U),
-      OUTPUT_LOGGING_STRUCTURED_LOG_FILE("run.log") {
+        OUTPUT_LOGGING_STRUCTURED_LOG_FILE("run.log"),
+        OUTPUT_ITERATION_ENABLED(1U),
+        OUTPUT_ITERATION_EVERY_N_ITERATIONS(1U),
+        OUTPUT_ITERATION_EXPORT_PLANE_DIAGNOSTICS(1U),
+        OUTPUT_ITERATION_EXPORT_SIMULATION_STATE(0U),
+        OUTPUT_ITERATION_EXPORT_TRACED_PARTICLES(0U),
+            OUTPUT_ITERATION_PLANE_Z_POSITIONS(),
+    DIAGNOSTIC_SAMPLE_Z_POSITIONS(),
+    DIAGNOSTIC_SUMMARY_Z_POSITION(-1.0),
+    DIAGNOSTIC_EMITTER_EXPORT_Z_POSITION(-1.0),
+    DIAGNOSTIC_TRANSMISSION_PLANE_Z_POSITION(-1.0),
+    DIAGNOSTIC_APERTURE_RADIUS(7.0e-3),
+    DIAGNOSTIC_WRITE_PER_SPECIES_DIAGNOSTICS(1U),
+    DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER(1U),
+    DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS(1U),
+    DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY(1U),
+    DIAGNOSTIC_GRID_POWER_RANGES(),
+    DIAGNOSTIC_MENISCUS_PLOT() {
 }
 
 void SimulationParameters::readParametersFromFile(const string& input) {
@@ -408,7 +908,35 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         }
     }
 
-    if (hasObject(root, "particleSources") && hasObject(root.at("particleSources"), "negativeIonBeam")) {
+    PARTICLE_TYPES.clear();
+    PARTICLE_SOURCES.clear();
+
+    if (root.contains("particleTypes")) {
+        if (!root.at("particleTypes").is_array()) {
+            throw Error(ERROR_LOCATION, "particleTypes must be an array in the runtime JSON configuration");
+        }
+        for (json::const_iterator it = root.at("particleTypes").begin();
+             it != root.at("particleTypes").end();
+             ++it) {
+            try {
+                PARTICLE_TYPES.push_back(parseParticleTypeDefinition(*it, PARTICLE_TYPES.size()));
+            } catch (const std::runtime_error& e) {
+                throw Error(ERROR_LOCATION, e.what());
+            }
+        }
+    }
+
+    if (root.contains("particleSources") && root.at("particleSources").is_array()) {
+        for (json::const_iterator it = root.at("particleSources").begin();
+             it != root.at("particleSources").end();
+             ++it) {
+            try {
+                PARTICLE_SOURCES.push_back(parseParticleSourceDefinition(*it, PARTICLE_SOURCES.size()));
+            } catch (const std::runtime_error& e) {
+                throw Error(ERROR_LOCATION, e.what());
+            }
+        }
+    } else if (hasObject(root, "particleSources") && hasObject(root.at("particleSources"), "negativeIonBeam")) {
         const json& beam = root.at("particleSources").at("negativeIonBeam");
         if (beam.contains("massU")) {
             M_IONS = beam.at("massU").get<double>();
@@ -434,10 +962,53 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         if (beam.contains("electronsModelWeight")) {
             ELECTRONS = beam.at("electronsModelWeight").get<double>();
         }
+    } else if (root.contains("particleSources")) {
+        throw Error(
+            ERROR_LOCATION,
+            "particleSources must be either an array of explicit sources or the legacy negativeIonBeam object");
+    }
+
+    if (!PARTICLE_SOURCES.empty()) {
+        const SimulationParameters::ParticleSourceDefinition* primary_source = nullptr;
+        double aggregate_negative_current_density = 0.0;
+        uint aggregate_particle_count = 0U;
+        std::string heavy_negative_kind;
+        for (std::vector<SimulationParameters::ParticleSourceDefinition>::const_iterator it = PARTICLE_SOURCES.begin();
+             it != PARTICLE_SOURCES.end();
+             ++it) {
+            if (primary_source == nullptr && it->kind != "e-") {
+                primary_source = &(*it);
+            }
+            if (it->chargeState < 0.0 && it->kind != "e-") {
+                if (!heavy_negative_kind.empty() && heavy_negative_kind != it->kind) {
+                    throw Error(
+                        ERROR_LOCATION,
+                        "Mixed heavy-ion source kinds are not yet supported by the current C++ runtime: " +
+                            heavy_negative_kind + ", " + it->kind);
+                }
+                heavy_negative_kind = it->kind;
+                aggregate_negative_current_density += it->currentDensityAm2;
+            }
+            aggregate_particle_count += it->particleCount;
+        }
+        if (primary_source == nullptr) {
+            primary_source = &PARTICLE_SOURCES.front();
+        }
+
+        M_IONS = primary_source->massU;
+        Q_IONS = primary_source->chargeState;
+        J_ION = (aggregate_negative_current_density > 0.0)
+                    ? aggregate_negative_current_density
+                    : primary_source->currentDensityAm2;
+        TPERP = primary_source->perpendicularTemperatureEV;
+        TPAR = primary_source->parallelTemperatureEV;
+        E0_Z = primary_source->axialEnergyEV;
+        N_PARTICLES = aggregate_particle_count;
     }
 
     if (hasObject(root, "simulation")) {
         const json& simulation = root.at("simulation");
+        const bool has_explicit_particle_count = simulation.contains("particleCount");
         if (simulation.contains("particleCount")) {
             N_PARTICLES = simulation.at("particleCount").get<uint>();
         }
@@ -457,14 +1028,81 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
             if (solver.contains("type")) {
                 MGSOLVER = solverFromType(solver.at("type").get<string>());
             }
-            if (solver.contains("shieldModel")) {
+            if (hasObject(solver, "bicgstab")) {
+                const json& bicgstab = solver.at("bicgstab");
+                if (bicgstab.contains("eps")) {
+                    BICGSTAB_EPS = bicgstab.at("eps").get<double>();
+                }
+                if (bicgstab.contains("maxIterations")) {
+                    BICGSTAB_MAX_ITERATIONS = bicgstab.at("maxIterations").get<uint>();
+                }
+                if (bicgstab.contains("newtonEps")) {
+                    BICGSTAB_NEWTON_EPS = bicgstab.at("newtonEps").get<double>();
+                }
+                if (bicgstab.contains("newtonMaxIterations")) {
+                    BICGSTAB_NEWTON_MAX_ITERATIONS = bicgstab.at("newtonMaxIterations").get<uint>();
+                }
+                if (bicgstab.contains("globallyConvergentNewton")) {
+                    BICGSTAB_GLOBALLY_CONVERGENT_NEWTON =
+                        bicgstab.at("globallyConvergentNewton").get<bool>() ? 1U : 0U;
+                }
+            }
+            if (hasObject(solver, "multigrid")) {
+                const json& multigrid = solver.at("multigrid");
+                if (multigrid.contains("levels")) {
+                    MG_LEVELS = multigrid.at("levels").get<uint>();
+                }
+                if (multigrid.contains("mgTolerance")) {
+                    MG_TOLERANCE = multigrid.at("mgTolerance").get<double>();
+                }
+                if (multigrid.contains("maxCycles")) {
+                    MG_MAX_CYCLES = multigrid.at("maxCycles").get<uint>();
+                }
+                if (multigrid.contains("gamma")) {
+                    MG_GAMMA = multigrid.at("gamma").get<uint>();
+                }
+                if (multigrid.contains("preSmooth")) {
+                    MG_PRE_SMOOTH = multigrid.at("preSmooth").get<uint>();
+                }
+                if (multigrid.contains("postSmooth")) {
+                    MG_POST_SMOOTH = multigrid.at("postSmooth").get<uint>();
+                }
+                if (multigrid.contains("coarseRelaxation")) {
+                    MG_COARSE_RELAXATION = multigrid.at("coarseRelaxation").get<double>();
+                }
+                if (multigrid.contains("coarseMaxIterations")) {
+                    MG_COARSE_MAX_ITERATIONS = multigrid.at("coarseMaxIterations").get<uint>();
+                }
+                if (multigrid.contains("localPlasmaMaxIterations")) {
+                    MG_LOCAL_PLASMA_MAX_ITERATIONS = multigrid.at("localPlasmaMaxIterations").get<uint>();
+                }
+            }
+            if (solver.contains("plasmaModel")) {
+                SHIELD_MODEL = shieldModelFromType(solver.at("plasmaModel").get<string>());
+            } else if (solver.contains("shieldModel")) {
                 SHIELD_MODEL = shieldModelFromType(solver.at("shieldModel").get<string>());
             }
-            if (solver.contains("positiveIonTemperatureEV")) {
-                T_POSITIVE = solver.at("positiveIonTemperatureEV").get<double>();
+            if (solver.contains("initialPlasmaMaxZMeters")) {
+                INITIAL_PLASMA_MAX_Z = solver.at("initialPlasmaMaxZMeters").get<double>();
             }
-            if (solver.contains("plasmaPotentialVolts")) {
-                U_PLASMA = solver.at("plasmaPotentialVolts").get<double>();
+            if (SHIELD_MODEL == 0U) {
+                if (solver.contains("positiveIonTemperatureEV")) {
+                    T_POSITIVE = solver.at("positiveIonTemperatureEV").get<double>();
+                }
+                if (solver.contains("plasmaPotentialVolts")) {
+                    U_PLASMA = solver.at("plasmaPotentialVolts").get<double>();
+                }
+            } else {
+                if (solver.contains("tanhWidthEV")) {
+                    T_POSITIVE = solver.at("tanhWidthEV").get<double>();
+                } else if (solver.contains("positiveIonTemperatureEV")) {
+                    T_POSITIVE = solver.at("positiveIonTemperatureEV").get<double>();
+                }
+                if (solver.contains("meniscusVoltageVolts")) {
+                    U_PLASMA = solver.at("meniscusVoltageVolts").get<double>();
+                } else if (solver.contains("plasmaPotentialVolts")) {
+                    U_PLASMA = solver.at("plasmaPotentialVolts").get<double>();
+                }
             }
         }
 
@@ -473,18 +1111,26 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
             if (space_charge.contains("alphaCoeff")) {
                 ALPHA_COEFF = space_charge.at("alphaCoeff").get<double>();
             }
-            if (space_charge.contains("pgFilterScale")) {
-                PGFILTER_SCALE = space_charge.at("pgFilterScale").get<double>();
-            }
-            if (space_charge.contains("cesmadcmScale")) {
-                CESMADCM_SCALE = space_charge.at("cesmadcmScale").get<double>();
-            }
         }
 
         if (hasObject(simulation, "convergence")) {
             const json& convergence = simulation.at("convergence");
             if (convergence.contains("currentDensityTolerance")) {
                 JTOLERANCE = convergence.at("currentDensityTolerance").get<double>();
+            }
+        }
+
+        if (!PARTICLE_SOURCES.empty() && has_explicit_particle_count) {
+            uint derived_particle_count = 0U;
+            for (std::vector<SimulationParameters::ParticleSourceDefinition>::const_iterator it = PARTICLE_SOURCES.begin();
+                 it != PARTICLE_SOURCES.end();
+                 ++it) {
+                derived_particle_count += it->particleCount;
+            }
+            if (N_PARTICLES != derived_particle_count) {
+                throw Error(
+                    ERROR_LOCATION,
+                    "simulation.particleCount must match the sum of particleSources[*].particleCount");
             }
         }
     }
@@ -567,40 +1213,31 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
 
     if (hasObject(root, "externalMagneticField")) {
         const json& magnetic_field = root.at("externalMagneticField");
+        MAGNETIC_FIELDS.clear();
         if (magnetic_field.contains("enabled")) {
             B_ISON = magnetic_field.at("enabled").get<bool>() ? 1U : 0U;
         }
-        if (magnetic_field.contains("scale")) {
-            EXTFIELD_SCALE = magnetic_field.at("scale").get<double>();
-        }
+        MAGNETIC_FIELD_DIRECTORY = magnetic_field.value("directory", string());
         if (B_ISON != 0U) {
-            if (!magnetic_field.contains("sourceMode")) {
+            if (!magnetic_field.contains("fields") || !magnetic_field.at("fields").is_array()) {
                 throw Error(ERROR_LOCATION,
-                            "externalMagneticField.sourceMode is required when the magnetic field is enabled");
+                            "externalMagneticField.fields array is required when the magnetic field is enabled");
             }
 
-            MAGNETIC_FIELD_SOURCE_MODE = magnetic_field.at("sourceMode").get<string>();
-            if (MAGNETIC_FIELD_SOURCE_MODE == "directory") {
-                if (!magnetic_field.contains("directory")) {
-                    throw Error(ERROR_LOCATION,
-                                "externalMagneticField.directory is required when sourceMode='directory'");
+            for (json::const_iterator it = magnetic_field.at("fields").begin();
+                 it != magnetic_field.at("fields").end();
+                 ++it) {
+                try {
+                    MAGNETIC_FIELDS.push_back(parseMagneticFieldDefinition(*it, MAGNETIC_FIELDS.size()));
+                } catch (const std::runtime_error& e) {
+                    throw Error(ERROR_LOCATION, e.what());
                 }
-                MAGNETIC_FIELD_DIRECTORY = magnetic_field.at("directory").get<string>();
-                if (magnetic_field.contains("case")) {
-                    EXTFIELD_CASE = magnetic_field.at("case").get<uint>();
-                }
-            } else if (MAGNETIC_FIELD_SOURCE_MODE == "file") {
-                if (!magnetic_field.contains("file")) {
-                    throw Error(ERROR_LOCATION,
-                                "externalMagneticField.file is required when sourceMode='file'");
-                }
-                MAGNETIC_FIELD_FILE = magnetic_field.at("file").get<string>();
-            } else {
-                throw Error(ERROR_LOCATION,
-                            "externalMagneticField.sourceMode must be either 'directory' or 'file'");
             }
+
+            MAGNETIC_FIELD_SOURCE_MODE = MAGNETIC_FIELDS.empty() ? "none" : "list";
         } else {
             MAGNETIC_FIELD_SOURCE_MODE = "none";
+            MAGNETIC_FIELDS.clear();
         }
     }
 
@@ -670,10 +1307,226 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
                 OUTPUT_LOGGING_STRUCTURED_LOG_FILE = logging.at("structuredLogFile").get<string>();
             }
         }
+        if (hasObject(outputs, "iteration")) {
+            const json& iteration = outputs.at("iteration");
+            if (iteration.contains("enabled")) {
+                OUTPUT_ITERATION_ENABLED = iteration.at("enabled").get<bool>() ? 1U : 0U;
+            }
+            if (iteration.contains("everyNIterations")) {
+                OUTPUT_ITERATION_EVERY_N_ITERATIONS = iteration.at("everyNIterations").get<uint>();
+                if (OUTPUT_ITERATION_EVERY_N_ITERATIONS == 0U) {
+                    throw Error(ERROR_LOCATION, "outputs.iteration.everyNIterations must be >= 1");
+                }
+            }
+            if (iteration.contains("exportPlaneDiagnostics")) {
+                OUTPUT_ITERATION_EXPORT_PLANE_DIAGNOSTICS =
+                    iteration.at("exportPlaneDiagnostics").get<bool>() ? 1U : 0U;
+            }
+            if (iteration.contains("exportSimulationState")) {
+                OUTPUT_ITERATION_EXPORT_SIMULATION_STATE =
+                    iteration.at("exportSimulationState").get<bool>() ? 1U : 0U;
+            }
+            if (iteration.contains("exportTracedParticles")) {
+                OUTPUT_ITERATION_EXPORT_TRACED_PARTICLES =
+                    iteration.at("exportTracedParticles").get<bool>() ? 1U : 0U;
+            }
+            if (iteration.contains("planeZPositionsMeters")) {
+                if (!iteration.at("planeZPositionsMeters").is_array()) {
+                    throw Error(ERROR_LOCATION, "outputs.iteration.planeZPositionsMeters must be an array");
+                }
+                OUTPUT_ITERATION_PLANE_Z_POSITIONS.clear();
+                const double domain_z_min = DOMAIN_Z_START;
+                const double domain_z_max = DOMAIN_Z_START + DOMAIN_Z_SIZE;
+                for (json::const_iterator it = iteration.at("planeZPositionsMeters").begin();
+                     it != iteration.at("planeZPositionsMeters").end();
+                     ++it) {
+                    if (!it->is_number()) {
+                        throw Error(
+                            ERROR_LOCATION,
+                            "outputs.iteration.planeZPositionsMeters entries must be numeric"
+                        );
+                    }
+                    const double plane = it->get<double>();
+                    if (plane < domain_z_min || plane > domain_z_max) {
+                        throw Error(
+                            ERROR_LOCATION,
+                            "outputs.iteration.planeZPositionsMeters value " + std::to_string(plane) +
+                                " is outside geometry.domain z range"
+                        );
+                    }
+                    OUTPUT_ITERATION_PLANE_Z_POSITIONS.push_back(plane);
+                }
+            }
+        }
+    }
+
+    if (hasObject(root, "diagnostics")) {
+        const json& diagnostics = root.at("diagnostics");
+
+        if (hasObject(diagnostics, "planes")) {
+            const json& planes = diagnostics.at("planes");
+            if (planes.contains("sampleZPositionsMeters")) {
+                if (!planes.at("sampleZPositionsMeters").is_array()) {
+                    throw Error(ERROR_LOCATION, "diagnostics.planes.sampleZPositionsMeters must be an array");
+                }
+                DIAGNOSTIC_SAMPLE_Z_POSITIONS.clear();
+                for (json::const_iterator it = planes.at("sampleZPositionsMeters").begin();
+                     it != planes.at("sampleZPositionsMeters").end();
+                     ++it) {
+                    if (!it->is_number()) {
+                        throw Error(ERROR_LOCATION,
+                                    "diagnostics.planes.sampleZPositionsMeters must contain only numeric values");
+                    }
+                    DIAGNOSTIC_SAMPLE_Z_POSITIONS.push_back(it->get<double>());
+                }
+            }
+            if (planes.contains("summaryZPositionMeters")) {
+                DIAGNOSTIC_SUMMARY_Z_POSITION = planes.at("summaryZPositionMeters").get<double>();
+            }
+            if (planes.contains("emitterExportZPositionMeters")) {
+                DIAGNOSTIC_EMITTER_EXPORT_Z_POSITION =
+                    planes.at("emitterExportZPositionMeters").get<double>();
+            }
+        }
+
+        if (hasObject(diagnostics, "species")) {
+            const json& species = diagnostics.at("species");
+            if (species.contains("writePerSpeciesDiagnostics")) {
+                DIAGNOSTIC_WRITE_PER_SPECIES_DIAGNOSTICS =
+                    species.at("writePerSpeciesDiagnostics").get<bool>() ? 1U : 0U;
+            }
+            if (species.contains("writePerSpeciesGridPower")) {
+                DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER =
+                    species.at("writePerSpeciesGridPower").get<bool>() ? 1U : 0U;
+            }
+            if (species.contains("writePerSpeciesPlots")) {
+                DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS =
+                    species.at("writePerSpeciesPlots").get<bool>() ? 1U : 0U;
+            }
+            if (species.contains("writeNegativeIonSummary")) {
+                DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY =
+                    species.at("writeNegativeIonSummary").get<bool>() ? 1U : 0U;
+            }
+        }
+
+        if (hasObject(diagnostics, "gridPower")) {
+            const json& grid_power = diagnostics.at("gridPower");
+            if (grid_power.contains("ranges")) {
+                if (!grid_power.at("ranges").is_array()) {
+                    throw Error(ERROR_LOCATION, "diagnostics.gridPower.ranges must be an array");
+                }
+                DIAGNOSTIC_GRID_POWER_RANGES.clear();
+                std::set<int> seen_grid_power_ids;
+                for (json::const_iterator it = grid_power.at("ranges").begin();
+                     it != grid_power.at("ranges").end();
+                     ++it) {
+                    try {
+                        DiagnosticGridRangeDefinition definition =
+                            parseDiagnosticGridRangeDefinition(*it, DIAGNOSTIC_GRID_POWER_RANGES.size());
+                        if (!seen_grid_power_ids.insert(definition.id).second) {
+                            throw runtime_error(
+                                string("diagnostics.gridPower.ranges contains duplicate id: ") +
+                                std::to_string(definition.id));
+                        }
+                        DIAGNOSTIC_GRID_POWER_RANGES.push_back(definition);
+                    } catch (const std::runtime_error& e) {
+                        throw Error(ERROR_LOCATION, e.what());
+                    }
+                }
+            }
+        }
+
+        if (hasObject(diagnostics, "summary")) {
+            const json& summary = diagnostics.at("summary");
+            if (summary.contains("apertureRadiusMeters")) {
+                DIAGNOSTIC_APERTURE_RADIUS = summary.at("apertureRadiusMeters").get<double>();
+            }
+            if (summary.contains("transmissionPlaneZPositionMeters")) {
+                DIAGNOSTIC_TRANSMISSION_PLANE_Z_POSITION =
+                    summary.at("transmissionPlaneZPositionMeters").get<double>();
+            }
+        }
+
+        if (hasObject(diagnostics, "plots")) {
+            const json& plots = diagnostics.at("plots");
+            if (hasObject(plots, "meniscus")) {
+                const json& meniscus = plots.at("meniscus");
+                if (meniscus.contains("enabled")) {
+                    DIAGNOSTIC_MENISCUS_PLOT.enabled = meniscus.at("enabled").get<bool>();
+                }
+                if (meniscus.contains("zMinMeters")) {
+                    DIAGNOSTIC_MENISCUS_PLOT.zMinMeters = meniscus.at("zMinMeters").get<double>();
+                }
+                if (meniscus.contains("zMaxMeters")) {
+                    DIAGNOSTIC_MENISCUS_PLOT.zMaxMeters = meniscus.at("zMaxMeters").get<double>();
+                }
+                if (meniscus.contains("transverseMinMeters")) {
+                    DIAGNOSTIC_MENISCUS_PLOT.transverseMinMeters =
+                        meniscus.at("transverseMinMeters").get<double>();
+                }
+                if (meniscus.contains("transverseMaxMeters")) {
+                    DIAGNOSTIC_MENISCUS_PLOT.transverseMaxMeters =
+                        meniscus.at("transverseMaxMeters").get<double>();
+                }
+            }
+        }
     }
 
     if (hasObject(root, "physics")) {
         const json& physics = root.at("physics");
+        if (physics.contains("reactions")) {
+            if (!physics.at("reactions").is_array()) {
+                throw Error(ERROR_LOCATION, "physics.reactions must be an array when provided");
+            }
+
+            CROSS_SECTION_PROCESSES.clear();
+            std::set<std::string> seen_process_ids;
+            for (json::const_iterator it = physics.at("reactions").begin();
+                 it != physics.at("reactions").end();
+                 ++it) {
+                try {
+                    if (it->is_object() &&
+                        it->value("reactionId", string()) == "background_gas_ionization" &&
+                        !it->contains("projectileKind")) {
+                        const std::string family = particleFamilyPrefixFromIonMass(M_IONS);
+                        const std::string projectile_kinds[] = { family + "-", family + "0" };
+                        for (size_t projectile_index = 0; projectile_index < 2U; ++projectile_index) {
+                            json expanded_process = *it;
+                            expanded_process["projectileKind"] = projectile_kinds[projectile_index];
+                            CrossSectionProcessDefinition process_definition =
+                                parseCrossSectionProcessDefinition(
+                                    expanded_process,
+                                    CROSS_SECTION_PROCESSES.size(),
+                                    M_IONS);
+                            process_definition.processId =
+                                string("background_gas_ionization_") +
+                                normalizedProcessIdSuffix(projectile_kinds[projectile_index]);
+                            process_definition.name = process_definition.name +
+                                                      " (" + projectile_kinds[projectile_index] + ")";
+                            if (!seen_process_ids.insert(process_definition.processId).second) {
+                                throw runtime_error(
+                                    string("physics.reactions contains duplicate processId: ") +
+                                    process_definition.processId);
+                            }
+                            CROSS_SECTION_PROCESSES.push_back(process_definition);
+                        }
+                        continue;
+                    }
+
+                    CrossSectionProcessDefinition process_definition =
+                        parseCrossSectionProcessDefinition(*it, CROSS_SECTION_PROCESSES.size(), M_IONS);
+                    if (!seen_process_ids.insert(process_definition.processId).second) {
+                        throw runtime_error(
+                            string("physics.reactions contains duplicate processId: ") +
+                            process_definition.processId);
+                    }
+                    CROSS_SECTION_PROCESSES.push_back(process_definition);
+                } catch (const std::runtime_error& e) {
+                    throw Error(ERROR_LOCATION, e.what());
+                }
+            }
+        }
+
         if (hasObject(physics, "stripping")) {
             const json& stripping = physics.at("stripping");
             if (stripping.contains("mode")) {
@@ -702,6 +1555,10 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
     }
 
     if (INCLUDE_STRIPPING > 0) {
+        if (CROSS_SECTION_PROCESSES.empty()) {
+            throw Error(ERROR_LOCATION,
+                        "physics.reactions must contain at least one process when stripping is enabled");
+        }
         if (selected_density_profile_name.empty()) {
             throw Error(ERROR_LOCATION,
                         "physics.stripping.densityProfile is required when stripping is enabled");
@@ -739,6 +1596,19 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         STRIPPING_DENSITY_PROFILE = density_source.at("path").get<string>();
     }
 
+    clear_cross_section_processes();
+    for (std::vector<CrossSectionProcessDefinition>::const_iterator it = CROSS_SECTION_PROCESSES.begin();
+         it != CROSS_SECTION_PROCESSES.end();
+         ++it) {
+        configure_cross_section_process(it->processId,
+                                        it->sourcePath,
+                                        it->coefficients,
+                                        it->fitDegree,
+                                        it->scaleEnergyByIonMass,
+                                        it->minimumEnergyEV,
+                                        it->maximumEnergyEV);
+    }
+
     finalizeDerivedParameters();
 }
 
@@ -773,10 +1643,15 @@ double SimulationParameters::getDomainZSizeOrDefault() const {
 void SimulationParameters::setDefaultValues() {
     GEOMETRY_SOURCE_MODE.clear();
     GENERATED_GEOMETRY_SOLIDS.clear();
+    PARTICLE_TYPES.clear();
+    PARTICLE_SOURCES.clear();
     EXPLICIT_BOUNDARY_CONDITIONS.clear();
     MAGNETIC_FIELD_SOURCE_MODE = "none";
     MAGNETIC_FIELD_DIRECTORY.clear();
     MAGNETIC_FIELD_FILE.clear();
+    MAGNETIC_FIELDS.clear();
+    CROSS_SECTION_PROCESSES.clear();
+    clear_cross_section_processes();
 
     B_ISON = 0U;
     INCLUDE_STRIPPING = 0U;
@@ -789,6 +1664,7 @@ void SimulationParameters::setDefaultValues() {
     TPAR = 0.0;
     E0_Z = 3.0;
     U_PLASMA = 3.0;
+    INITIAL_PLASMA_MAX_Z = 7.0e-3;
     N_PARTICLES = 150000U;
 
     EG_VOLTAGE = 8000.0;
@@ -800,16 +1676,26 @@ void SimulationParameters::setDefaultValues() {
 
     MESH_SIZE = 0.0003;
     ITERATIONS = 5U;
-    PGFILTER_SCALE = 0.0;
-    CESMADCM_SCALE = 0.0;
-    EXTFIELD_CASE = 0U;
-    EXTFIELD_SCALE = 1.0;
     SPLIT_DOMAIN = 0U;
     JTOLERANCE = 1.0;
     ALPHA_COEFF = 0.3;
     T_POSITIVE = 0.8;
     MGSOLVER = 0U;
     SHIELD_MODEL = 0U;
+    BICGSTAB_EPS = 1.0e-4;
+    BICGSTAB_MAX_ITERATIONS = 10000U;
+    BICGSTAB_NEWTON_EPS = 1.0e-4;
+    BICGSTAB_NEWTON_MAX_ITERATIONS = 10U;
+    BICGSTAB_GLOBALLY_CONVERGENT_NEWTON = 1U;
+    MG_LEVELS = 1U;
+    MG_TOLERANCE = 1.0e-4;
+    MG_MAX_CYCLES = 100U;
+    MG_GAMMA = 1U;
+    MG_PRE_SMOOTH = 5U;
+    MG_POST_SMOOTH = 5U;
+    MG_COARSE_RELAXATION = 1.7;
+    MG_COARSE_MAX_ITERATIONS = 10000U;
+    MG_LOCAL_PLASMA_MAX_ITERATIONS = 1U;
 
     EXT_GAP = 0.006;
     DOMAIN_X_SIZE = -1.0;
@@ -844,6 +1730,17 @@ void SimulationParameters::setDefaultValues() {
     OUTPUT_LOGGING_CAPTURE_STDOUT = 1U;
     OUTPUT_LOGGING_WRITE_DEBUG_ARTIFACTS = 0U;
     OUTPUT_LOGGING_STRUCTURED_LOG_FILE = "run.log";
+    DIAGNOSTIC_SAMPLE_Z_POSITIONS.clear();
+    DIAGNOSTIC_SUMMARY_Z_POSITION = -1.0;
+    DIAGNOSTIC_EMITTER_EXPORT_Z_POSITION = -1.0;
+    DIAGNOSTIC_TRANSMISSION_PLANE_Z_POSITION = -1.0;
+    DIAGNOSTIC_APERTURE_RADIUS = 7.0e-3;
+    DIAGNOSTIC_WRITE_PER_SPECIES_DIAGNOSTICS = 1U;
+    DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER = 1U;
+    DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS = 1U;
+    DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY = 1U;
+    DIAGNOSTIC_GRID_POWER_RANGES.clear();
+    DIAGNOSTIC_MENISCUS_PLOT = DiagnosticMeniscusPlotDefinition();
     N_SOLIDS = 0U;
     finalizeDerivedParameters();
 }

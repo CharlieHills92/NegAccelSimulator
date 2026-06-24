@@ -112,8 +112,9 @@ public:
     /**
      * @brief Export particle trajectories to VTK format for ParaView visualization
      * @param filename Output VTK filename (without extension)
+        * @param ion_mass_u Active ion mass in atomic mass units for family-aware species tagging
      */
-    void exportTrajectoriesToVTK(const std::string& filename);
+        void exportTrajectoriesToVTK(const std::string& filename, double ion_mass_u);
 
     // Getters
     ParticleDataBase3D* getParticles() { return particles; }

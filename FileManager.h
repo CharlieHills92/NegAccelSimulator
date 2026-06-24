@@ -76,6 +76,12 @@ public:
      */
     void setFileTag(const std::string& filetag);
 
+    /**
+     * @brief Remove legacy summary artifacts for the active case tag.
+     * @return Filenames removed from the summary directory.
+     */
+    std::vector<std::string> removeLegacySummaryArtifacts() const;
+
     // Directory getters
     const std::string& getRefFolder() const { return ref_fold; }
     const std::string& getOutputSummaryFolder() const { return outsummary_fold; }
@@ -97,6 +103,9 @@ public:
     const std::vector<std::string>& getDiagFileSpecies() const { return diagfile_species; }
     const std::string& getIterationsFileEG() const { return iterationsfileEG; }
     const std::string& getIterationsFileOUT() const { return iterationsfileOUT; }
+    std::string buildIterationDiagnosticFile(const std::string& label) const;
+    std::string buildIterationDiagnosticFileForZPosition(double z_position_meters) const;
+    std::string buildIterationVTKBase(unsigned int iteration) const;
 
     // Setters for specific fields
     void setBFieldFolder(const std::string& folder) { bfield_fold = folder; }

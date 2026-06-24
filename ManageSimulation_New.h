@@ -212,48 +212,6 @@ public:
     std::vector<double> analyze_grid_power_loads(particle_kind pk = PARTICLE_ALL);
 
     /**
-     * @brief Create simulation summary
-     */
-    void create_simulation_summary(double zlocsummary, const std::string& summary_file_tag, bool append_at_end);
-    void create_simulation_summary(double zlocsummary, const std::string& summary_file_tag, 
-                                  bool append_at_end, particle_kind pk);
-
-    /**
-     * @brief Create individual simulation summary for scan
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation
-     * @param zlocsummary Z location for summary analysis
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void create_individual_simulation_summary(int scan_index, const std::string& simulation_tag,
-                                             double zlocsummary, particle_kind pk = PARTICLE_ALL);
-
-    /**
-     * @brief Add to scan-level beam properties summary
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation
-     * @param scan_folder Main scan folder path
-     * @param scan_file_tag Base scan file tag
-     * @param zlocsummary Z location for analysis
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void add_to_scan_beam_properties_summary(int scan_index, const std::string& simulation_tag,
-                                            const std::string& scan_folder, const std::string& scan_file_tag,
-                                            double zlocsummary, particle_kind pk = PARTICLE_ALL);
-
-    /**
-     * @brief Add to scan-level grid power summary
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation
-     * @param scan_folder Main scan folder path
-     * @param scan_file_tag Base scan file tag
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void add_to_scan_grid_power_summary(int scan_index, const std::string& simulation_tag,
-                                       const std::string& scan_folder, const std::string& scan_file_tag,
-                                       particle_kind pk = PARTICLE_ALL);
-
-    /**
      * @brief Export geometry and fields to VTK format for ParaView visualization
      * @param base_filename Base filename for VTK exports (without extension)
      */
@@ -305,6 +263,7 @@ public:
     uint get_stripping() const { return parameters->getIncludeStripping(); }
     double get_domain_z_size() const { return parameters->getDomainZSizeOrDefault(); }
     double get_domain_z_start() const { return parameters->getDomainZStart(); }
+    double get_domain_z_end() const { return get_domain_z_start() + get_domain_z_size(); }
 
     // Component access (for advanced usage)
     SimulationParameters* getParameters() const { return parameters.get(); }

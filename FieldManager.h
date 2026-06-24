@@ -10,6 +10,7 @@
 
 #include <string>
 #include <vector>
+#include "SimulationParameters.h"
 
 // Forward declarations
 class MeshVectorField;
@@ -17,7 +18,6 @@ class MeshScalarField;
 class EpotField;
 class EpotEfield;
 class Geometry;
-class SimulationParameters;
 
 /**
  * @class FieldManager
@@ -37,9 +37,9 @@ private:
     EpotEfield* electric;
 
     // Helper methods
-    void loadExternalField(std::vector<MeshVectorField*>& tempBfield,
-                          const bool fout[3], double fieldScale,
-                          const SimulationParameters& params, const std::string& bfield_fold);
+    MeshVectorField* loadMagneticFieldDefinition(const SimulationParameters::MagneticFieldDefinition& definition,
+                                                 const std::string& base_directory,
+                                                 const MeshVectorField* reference_mesh = NULL);
 
 public:
     /**

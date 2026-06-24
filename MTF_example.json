@@ -102,10 +102,15 @@
   },
   "magneticField": {
     "enabled": true,
-    "case": 1,
-    "scale": 1.0,
-    "sourceMode": "directory",
-    "directory": "Bfield_MTF"
+    "directory": "Bfield_MTF",
+    "fields": [
+      {
+        "name": "external",
+        "sourceType": "file",
+        "scale": 1.0,
+        "filePath": "EXTfield.fld"
+      }
+    ]
   },
   "gasInteractions": {
     "densityProfile": {
@@ -140,9 +145,7 @@
       "shieldModel": "nsimp"
     },
     "spaceCharge": {
-      "alphaCoeff": 0.5,
-      "pgFilterScale": 0.0,
-      "cesmadcmScale": 0.0
+      "alphaCoeff": 0.5
     },
     "convergence": {
       "currentDensityTolerance": 1.0

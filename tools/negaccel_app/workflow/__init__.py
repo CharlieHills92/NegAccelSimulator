@@ -28,6 +28,15 @@ from .geometry_files import (
     serialize_geometry_file_path,
     write_geometry_file,
 )
+from .domains.geometry_validation import derive_diagnostic_planes
+from .post_processing import (
+    aggregate_case_diagnostics,
+    parse_diagnostic_summary_txt,
+    parse_grid_power_summary_txt,
+    synthesize_scan_results,
+    write_case_diagnostics_aggregation,
+    write_scan_synthesis,
+)
 from .runtime import authored_to_runtime_case, materialize_authored_case, materialize_case
 from .scan import build_case_tag, expand_scan, run_scan
 
@@ -37,12 +46,14 @@ __all__ = [
     "WorkflowError",
     "apply_cli_overrides",
     "apply_override_pairs",
+    "aggregate_case_diagnostics",
     "authored_to_runtime_case",
     "build_case_tag",
     "build_parser",
     "TEMPLATES_DIR",
     "ensure_case_metadata",
     "expand_scan",
+    "derive_diagnostic_planes",
     "load_json",
     "load_geometry_file",
     "load_geometry_reference",
@@ -50,6 +61,8 @@ __all__ = [
     "materialize_authored_case",
     "materialize_case",
     "merge_objects",
+    "parse_diagnostic_summary_txt",
+    "parse_grid_power_summary_txt",
     "parse_path",
     "parse_value",
     "require_number",
@@ -61,6 +74,9 @@ __all__ = [
     "sanitize_case_tag",
     "serialize_geometry_file_path",
     "set_path",
+    "synthesize_scan_results",
+    "write_case_diagnostics_aggregation",
     "write_geometry_file",
     "write_json",
+    "write_scan_synthesis",
 ]

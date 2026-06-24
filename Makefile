@@ -47,7 +47,7 @@ LDFLAGS = -Wall -g -Wl,-rpath,$(IBSIMU_LIB_DIR)
 SOURCES = main.cpp ManageSimulation_New.cpp \
 		  SimulationParameters.cpp FileManager.cpp GeometryManager.cpp \
           FieldManager.cpp ParticleManager.cpp DiagnosticsManager.cpp \
-          TransverseData.cpp my_diagnostics.cpp globals.cpp funct.cpp \
+		  my_diagnostics.cpp globals.cpp funct.cpp \
 		  cross_sections.cpp THCallback.cpp
 
 # Object files  

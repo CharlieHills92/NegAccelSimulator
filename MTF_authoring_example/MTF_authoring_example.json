@@ -3,7 +3,7 @@
     "schemaVersion": "1.0.0",
     "caseTag": "MTF_authoring_example",
     "title": "MTF authoring example",
-    "description": "User-facing Python-side input file organized by geometry, boundary conditions, source, gas, physics, run controls, and outputs."
+    "description": "User-facing Python-side input file organized by geometry, boundary conditions, particles, gas, physics, run controls, and outputs."
   },
   "geometry": {
     "source": {
@@ -23,39 +23,40 @@
     },
     "solids": [
       {
-        "name": "PG",
-        "kind": "solid",
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "rectangular-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021
+        },
         "boundaryId": 7,
-        "zProfileMeters": [
-          0.003,
-          0.007,
-          0.009
-        ],
+        "kind": "solid",
+        "name": "PG",
         "rProfileMeters": [
           0.01,
           0.007,
           0.0085
         ],
-        "aperturePattern": {
-          "layout": "rectangular-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "outsidePatternIsSolid": true
-        }
+        "zProfileMeters": [
+          0.003,
+          0.007,
+          0.009
+        ]
       },
       {
-        "name": "EG",
-        "kind": "solid",
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "rectangular-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021
+        },
         "boundaryId": 8,
-        "zProfileMeters": [
-          0.015,
-          0.0155,
-          0.022,
-          0.028,
-          0.0285
-        ],
+        "kind": "solid",
+        "name": "EG",
         "rProfileMeters": [
           0.007,
           0.0065,
@@ -63,44 +64,59 @@
           0.0075,
           0.0075
         ],
-        "aperturePattern": {
-          "layout": "rectangular-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "outsidePatternIsSolid": true
-        }
+        "zProfileMeters": [
+          0.015,
+          0.0155,
+          0.022,
+          0.028,
+          0.0285
+        ]
       },
       {
-        "name": "SG",
-        "kind": "solid",
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "staggered-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021,
+          "rowShiftXMeters": -0.001,
+          "yOffsetMeters": -0.0007
+        },
         "boundaryId": 8,
-        "zProfileMeters": [
-          0.0285,
-          0.03,
-          0.0315
-        ],
+        "kind": "solid",
+        "name": "SG",
         "rProfileMeters": [
           0.008,
           0.008,
           0.009
         ],
-        "aperturePattern": {
-          "layout": "staggered-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "yOffsetMeters": -0.0007,
-          "rowShiftXMeters": -0.001,
-          "outsidePatternIsSolid": true
-        }
+        "zProfileMeters": [
+          0.0285,
+          0.03,
+          0.0315
+        ]
       },
       {
-        "name": "AG1",
-        "kind": "solid",
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "rectangular-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021
+        },
         "boundaryId": 9,
+        "kind": "solid",
+        "name": "AG1",
+        "rProfileMeters": [
+          0.008,
+          0.007,
+          0.007,
+          0.0085,
+          0.007,
+          0.0085
+        ],
         "zProfileMeters": [
           0.1195,
           0.1205,
@@ -108,7 +124,20 @@
           0.135,
           0.135,
           0.1365
-        ],
+        ]
+      },
+      {
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "rectangular-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021
+        },
+        "boundaryId": 10,
+        "kind": "solid",
+        "name": "AG2",
         "rProfileMeters": [
           0.008,
           0.007,
@@ -117,19 +146,6 @@
           0.007,
           0.0085
         ],
-        "aperturePattern": {
-          "layout": "rectangular-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "outsidePatternIsSolid": true
-        }
-      },
-      {
-        "name": "AG2",
-        "kind": "solid",
-        "boundaryId": 10,
         "zProfileMeters": [
           0.2245,
           0.2255,
@@ -137,28 +153,28 @@
           0.24,
           0.24,
           0.2415
-        ],
-        "rProfileMeters": [
-          0.008,
-          0.007,
-          0.007,
-          0.0085,
-          0.007,
-          0.0085
-        ],
-        "aperturePattern": {
-          "layout": "rectangular-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "outsidePatternIsSolid": true
-        }
+        ]
       },
       {
-        "name": "AG3",
-        "kind": "solid",
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "rectangular-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021
+        },
         "boundaryId": 11,
+        "kind": "solid",
+        "name": "AG3",
+        "rProfileMeters": [
+          0.009,
+          0.008,
+          0.008,
+          0.009,
+          0.008,
+          0.0095
+        ],
         "zProfileMeters": [
           0.3295,
           0.3305,
@@ -166,7 +182,20 @@
           0.345,
           0.345,
           0.3465
-        ],
+        ]
+      },
+      {
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "rectangular-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021
+        },
+        "boundaryId": 12,
+        "kind": "solid",
+        "name": "AG4",
         "rProfileMeters": [
           0.009,
           0.008,
@@ -175,19 +204,6 @@
           0.008,
           0.0095
         ],
-        "aperturePattern": {
-          "layout": "rectangular-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "outsidePatternIsSolid": true
-        }
-      },
-      {
-        "name": "AG4",
-        "kind": "solid",
-        "boundaryId": 12,
         "zProfileMeters": [
           0.4345,
           0.4355,
@@ -195,7 +211,20 @@
           0.45,
           0.45,
           0.4515
-        ],
+        ]
+      },
+      {
+        "aperturePattern": {
+          "countX": 5,
+          "countY": 5,
+          "layout": "rectangular-grid",
+          "outsidePatternIsSolid": true,
+          "pitchXMeters": 0.019,
+          "pitchYMeters": 0.021
+        },
+        "boundaryId": 13,
+        "kind": "solid",
+        "name": "AG5",
         "rProfileMeters": [
           0.009,
           0.008,
@@ -204,19 +233,6 @@
           0.008,
           0.0095
         ],
-        "aperturePattern": {
-          "layout": "rectangular-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "outsidePatternIsSolid": true
-        }
-      },
-      {
-        "name": "AG5",
-        "kind": "solid",
-        "boundaryId": 13,
         "zProfileMeters": [
           0.5395,
           0.5405,
@@ -224,37 +240,45 @@
           0.555,
           0.555,
           0.5565
-        ],
-        "rProfileMeters": [
-          0.009,
-          0.008,
-          0.008,
-          0.009,
-          0.008,
-          0.0095
-        ],
-        "aperturePattern": {
-          "layout": "rectangular-grid",
-          "countX": 5,
-          "countY": 5,
-          "pitchXMeters": 0.019,
-          "pitchYMeters": 0.021,
-          "outsidePatternIsSolid": true
-        }
+        ]
       }
     ]
   },
-  "particleSources": {
-    "negativeIonBeam": {
-      "species": "H-",
+  "particleSources": [
+    {
+      "id": "source-1",
+      "name": "Main extraction source",
+      "particleTypeId": "hminus",
+      "kind": "H-",
       "chargeState": -1.0,
       "massU": 1.0,
+      "particleCount": 50000,
       "currentDensityAm2": 270.0,
       "perpendicularTemperatureEV": 0.0,
+      "parallelTemperatureEV": 0.0,
       "axialEnergyEV": 3.0,
-      "sourceModel": "uniform"
+      "sourceModel": "uniform",
+      "uniform": {
+        "centerMeters": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "mainDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "inPlaneReferenceDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "widthMeters": 0.02,
+        "heightMeters": 0.02
+      }
     }
-  },
+  ],
   "simulation": {
     "particleCount": 50000,
     "iterations": 4,
@@ -263,12 +287,19 @@
     },
     "solver": {
       "type": "bicgstab",
-      "shieldModel": "nsimp"
+      "plasmaModel": "nsimp",
+      "positiveIonTemperatureEV": 0.8,
+      "plasmaPotentialVolts": 0.0,
+      "bicgstab": {
+        "eps": 0.0001,
+        "maxIterations": 10000,
+        "newtonEps": 0.0001,
+        "newtonMaxIterations": 10,
+        "globallyConvergentNewton": true
+      }
     },
     "spaceCharge": {
-      "alphaCoeff": 0.5,
-      "pgFilterScale": 0.0,
-      "cesmadcmScale": 0.0
+      "alphaCoeff": 0.5
     },
     "convergence": {
       "currentDensityTolerance": 1.0
@@ -358,10 +389,14 @@
   },
   "externalMagneticField": {
     "enabled": true,
-    "sourceMode": "directory",
-    "scale": 1.0,
-    "case": 1,
-    "directory": "Bfield_MTF"
+    "fields": [
+      {
+        "name": "external",
+        "sourceType": "file",
+        "scale": 1.0,
+        "filePath": "Bfield_MTF/EXTfield.fld"
+      }
+    ]
   },
   "gasDensity": {
     "defaultProfile": "mtf-background",
@@ -371,18 +406,221 @@
         "species": "H2",
         "source": {
           "mode": "file",
-          "path": "densprofiles/MTF_dens.txt",
+          "path": "densprofiles/MTF_dens.dens",
           "format": "z-density-columns"
-        },
-        "useFor": [
-          "stripping",
-          "secondaryEmission",
-          "diagnostics"
-        ]
+        }
       }
     ]
   },
   "physics": {
+    "reactions": [
+      {
+        "processId": "hm_single_strip",
+        "name": "H- single stripping",
+        "projectileKind": "H-",
+        "sourcePath": "Cross-sections/negative_ion_single_stripping.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          -0.0012999999972695677,
+          0.03129999994414412,
+          -0.29119999957173487,
+          1.2931999984597313,
+          -2.8822999972746466,
+          3.275999997580597,
+          -20.891999999001698
+        ],
+        "scaleEnergyByIonMass": true,
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H0",
+            "count": 1,
+            "speedClass": "fast",
+            "chargeState": 0.0,
+            "massU": 1.0
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "fast",
+            "chargeState": -1.0,
+            "massU": 0.000548579909065
+          }
+        ],
+        "minimumEnergyEV": 2.4
+      },
+      {
+        "processId": "hm_double_strip",
+        "name": "H- double stripping",
+        "projectileKind": "H-",
+        "sourcePath": "Cross-sections/negative_ion_double_stripping.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          -0.010114000052505486,
+          0.3035230016419677,
+          -3.7116950210347843,
+          23.6746071411723,
+          -83.40612152309616,
+          154.86711201387308,
+          -139.733509802499
+        ],
+        "scaleEnergyByIonMass": true,
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H+",
+            "count": 1,
+            "speedClass": "fast",
+            "chargeState": 1.0,
+            "massU": 1.0
+          },
+          {
+            "particleKind": "e-",
+            "count": 2,
+            "speedClass": "fast",
+            "chargeState": -1.0,
+            "massU": 0.000548579909065
+          }
+        ],
+        "minimumEnergyEV": 1000.0
+      },
+      {
+        "processId": "hm_background_ionization",
+        "name": "H- background gas ionization",
+        "projectileKind": "H-",
+        "sourcePath": "Cross-sections/background_gas_ionization.cross",
+        "fitDegree": 4,
+        "coefficients": [
+          0.003644000031691769,
+          -0.05939000052609923,
+          -0.10019999693997146,
+          3.347999992726043,
+          -28.99999999417133
+        ],
+        "scaleEnergyByIonMass": true,
+        "projectileFate": "survive",
+        "products": [
+          {
+            "particleKind": "H2+",
+            "count": 1,
+            "speedClass": "slow",
+            "chargeState": 1.0,
+            "massU": 2.0
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "slow",
+            "chargeState": -1.0,
+            "massU": 0.000548579909065
+          }
+        ],
+        "minimumEnergyEV": 10.0,
+        "maximumEnergyEV": 10000000.0
+      },
+      {
+        "processId": "h0_background_ionization",
+        "name": "H0 background gas ionization",
+        "projectileKind": "H0",
+        "sourcePath": "Cross-sections/background_gas_ionization.cross",
+        "fitDegree": 4,
+        "coefficients": [
+          0.003644000031691769,
+          -0.05939000052609923,
+          -0.10019999693997146,
+          3.347999992726043,
+          -28.99999999417133
+        ],
+        "scaleEnergyByIonMass": true,
+        "projectileFate": "survive",
+        "products": [
+          {
+            "particleKind": "H2+",
+            "count": 1,
+            "speedClass": "slow",
+            "chargeState": 1.0,
+            "massU": 2.0
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "slow",
+            "chargeState": -1.0,
+            "massU": 0.000548579909065
+          }
+        ],
+        "minimumEnergyEV": 10.0,
+        "maximumEnergyEV": 10000000.0
+      },
+      {
+        "processId": "h0_projectile_ionization",
+        "name": "H0 projectile ionization",
+        "projectileKind": "H0",
+        "sourcePath": "Cross-sections/neutral_projectile_ionization.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          0.00018600000864367139,
+          -0.0004000001849757334,
+          -0.05520799848157141,
+          0.7340799939916685,
+          -4.288930988170697,
+          12.812773989304423,
+          -35.75243699668655
+        ],
+        "scaleEnergyByIonMass": true,
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H+",
+            "count": 1,
+            "speedClass": "fast",
+            "chargeState": 1.0,
+            "massU": 1.0
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "fast",
+            "chargeState": -1.0,
+            "massU": 0.000548579909065
+          }
+        ]
+      },
+      {
+        "processId": "hp_charge_exchange",
+        "name": "H+ charge exchange",
+        "projectileKind": "H+",
+        "sourcePath": "Cross-sections/positive_ion_charge_exchange.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          0.012630699993772537,
+          -0.2576709998556906,
+          2.049409998693898,
+          -8.16386999423829,
+          16.749299987445394,
+          -14.759399988029225,
+          -18.033900003439705
+        ],
+        "scaleEnergyByIonMass": true,
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H2+",
+            "count": 1,
+            "speedClass": "slow",
+            "chargeState": 1.0,
+            "massU": 2.0
+          },
+          {
+            "particleKind": "H0",
+            "count": 1,
+            "speedClass": "fast",
+            "chargeState": 0.0,
+            "massU": 1.0
+          }
+        ]
+      }
+    ],
     "stripping": {
       "mode": "withSecondaries",
       "minimumZMeters": 0.009,
@@ -397,8 +635,110 @@
       "debug": false
     }
   },
+  "diagnostics": {
+    "planes": {
+      "sampleZPositionsMeters": [
+        0.0,
+        0.009,
+        0.015,
+        0.032,
+        0.12,
+        0.137,
+        0.225,
+        0.242,
+        0.33,
+        0.347,
+        0.435,
+        0.452,
+        0.54,
+        0.557,
+        0.565
+      ],
+      "summaryZPositionMeters": 0.565,
+      "emitterExportZPositionMeters": 0.565
+    },
+    "species": {
+      "writePerSpeciesDiagnostics": true,
+      "writePerSpeciesGridPower": true,
+      "writePerSpeciesPlots": true,
+      "writeNegativeIonSummary": true
+    },
+    "gridPower": {
+      "ranges": [
+        {
+          "id": 0,
+          "includeInTotal": false
+        },
+        {
+          "id": 1,
+          "includeInTotal": false
+        },
+        {
+          "id": 2,
+          "includeInTotal": false
+        },
+        {
+          "id": 3,
+          "includeInTotal": false
+        },
+        {
+          "id": 4,
+          "includeInTotal": false
+        },
+        {
+          "id": 5,
+          "includeInTotal": false
+        },
+        {
+          "id": 6,
+          "includeInTotal": false
+        },
+        {
+          "id": 7,
+          "includeInTotal": false
+        },
+        {
+          "id": 8,
+          "includeInTotal": true
+        },
+        {
+          "id": 9,
+          "includeInTotal": true
+        },
+        {
+          "id": 10,
+          "includeInTotal": true
+        },
+        {
+          "id": 11,
+          "includeInTotal": true
+        },
+        {
+          "id": 12,
+          "includeInTotal": true
+        },
+        {
+          "id": 13,
+          "includeInTotal": true
+        }
+      ]
+    },
+    "summary": {
+      "apertureRadiusMeters": 0.007,
+      "transmissionPlaneZPositionMeters": 0.565
+    },
+    "plots": {
+      "meniscus": {
+        "enabled": true,
+        "zMinMeters": 0.0,
+        "zMaxMeters": 0.034,
+        "transverseMinMeters": -0.01,
+        "transverseMaxMeters": 0.01
+      }
+    }
+  },
   "outputs": {
-    "rootDirectory": "MTF_authoring_example",
+    "rootDirectory": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/MTF_authoring_example",
     "summary": {
       "enabled": true,
       "directory": "Summary"
@@ -424,6 +764,78 @@
       "captureStdout": true,
       "writeDebugArtifacts": false,
       "structuredLogFile": "run.log"
+    },
+    "iteration": {
+      "enabled": true,
+      "everyNIterations": 2,
+      "exportPlaneDiagnostics": true,
+      "exportSimulationState": false,
+      "exportTracedParticles": false,
+      "planeZPositionsMeters": [
+        0.009,
+        0.565
+      ]
     }
+  },
+  "particleTypes": [
+    {
+      "id": "hminus",
+      "kind": "H-",
+      "name": "H-",
+      "chargeState": -1.0,
+      "massU": 1.0,
+      "sourceable": true
+    },
+    {
+      "id": "h0",
+      "kind": "H0",
+      "name": "H0",
+      "chargeState": 0.0,
+      "massU": 1.0,
+      "sourceable": true
+    },
+    {
+      "id": "hplus",
+      "kind": "H+",
+      "name": "H+",
+      "chargeState": 1.0,
+      "massU": 1.0,
+      "sourceable": true
+    },
+    {
+      "id": "h2plus",
+      "kind": "H2+",
+      "name": "H2+",
+      "chargeState": 1.0,
+      "massU": 2.0,
+      "sourceable": true
+    },
+    {
+      "id": "h20",
+      "kind": "H20",
+      "name": "H20",
+      "chargeState": 0.0,
+      "massU": 2.0,
+      "sourceable": true
+    },
+    {
+      "id": "h3plus",
+      "kind": "H3+",
+      "name": "H3+",
+      "chargeState": 1.0,
+      "massU": 3.0,
+      "sourceable": true
+    },
+    {
+      "id": "electrons",
+      "kind": "e-",
+      "name": "Electrons",
+      "chargeState": -1.0,
+      "massU": 0.000548579909065,
+      "sourceable": true
+    }
+  ],
+  "execution": {
+    "serverCommand": "srun --pty /bin/bash"
   }
 }

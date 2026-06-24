@@ -7,13 +7,16 @@ from ..common import QFormLayout, QLineEdit, QTextEdit, nested_get
 
 def build_form(window) -> QFormLayout:
     layout = QFormLayout()
-    window.widgets["caseTag"] = QLineEdit()
-    window.widgets["caseTag"].textEdited.connect(window.on_case_tag_edited)
-    window.widgets["title"] = QLineEdit()
-    window.widgets["author"] = QLineEdit()
-    window.widgets["description"] = QTextEdit()
+    if "caseTag" not in window.widgets:
+        window.widgets["caseTag"] = QLineEdit()
+        window.widgets["caseTag"].textEdited.connect(window.on_case_tag_edited)
+    if "title" not in window.widgets:
+        window.widgets["title"] = QLineEdit()
+    if "author" not in window.widgets:
+        window.widgets["author"] = QLineEdit()
+    if "description" not in window.widgets:
+        window.widgets["description"] = QTextEdit()
     window.widgets["description"].setMinimumHeight(100)
-    layout.addRow("Case tag", window.widgets["caseTag"])
     layout.addRow("Title", window.widgets["title"])
     layout.addRow("Author", window.widgets["author"])
     layout.addRow("Description", window.widgets["description"])

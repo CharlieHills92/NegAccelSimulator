@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 from typing import Any
 
 try:
-    from PySide6.QtCore import QProcess, Qt, QTimer
+    from PySide6.QtCore import QProcess, Qt, QTimer, qInstallMessageHandler
     from PySide6.QtGui import QFontDatabase, QTextCursor
     from PySide6.QtWidgets import (
         QApplication,
@@ -19,12 +20,17 @@ try:
         QHBoxLayout,
         QLabel,
         QLineEdit,
+        QListWidget,
+        QListWidgetItem,
         QMainWindow,
         QMessageBox,
         QPlainTextEdit,
+        QProgressBar,
         QPushButton,
+        QSizePolicy,
         QScrollArea,
         QSpinBox,
+        QStackedWidget,
         QSplitter,
         QTabWidget,
         QTextEdit,
@@ -53,6 +59,28 @@ DEFAULT_SIMULATOR_PATH = REPO_ROOT / "NegAccelExec"
 DEFAULT_SETUP_SCRIPT = REPO_ROOT / "setup_environment.sh"
 LOG_LEVELS = ["critical", "error", "warning", "info", "debug", "trace"]
 MAGNETIC_SOURCE_MODES = ["directory", "file", "none"]
+_qt_message_handler_installed = False
+_previous_qt_message_handler = None
+
+
+def _filtered_qt_message_handler(message_type, context, message) -> None:
+    if message.startswith("QPainter::end: Painter ended with ") and message.endswith(" saved states"):
+        return
+
+    if _previous_qt_message_handler is not None:
+        _previous_qt_message_handler(message_type, context, message)
+        return
+
+    sys.stderr.write(f"{message}\n")
+
+
+def install_qt_message_filter() -> None:
+    global _qt_message_handler_installed, _previous_qt_message_handler
+    if _qt_message_handler_installed:
+        return
+
+    _previous_qt_message_handler = qInstallMessageHandler(_filtered_qt_message_handler)
+    _qt_message_handler_installed = True
 
 
 def nested_get(document: dict[str, Any], *path: str, default: Any = None) -> Any:
@@ -81,9 +109,39 @@ def format_number_list(values: list[Any]) -> str:
     return ", ".join(f"{float(value):g}" for value in values)
 
 
-def default_runtime_path(case_tag: str) -> Path:
+def resolve_runtime_parent_directory(parent_directory: str | Path | None = None) -> Path:
+    if isinstance(parent_directory, Path):
+        candidate = parent_directory
+    elif isinstance(parent_directory, str) and parent_directory.strip():
+        candidate = Path(parent_directory.strip()).expanduser()
+    else:
+        candidate = REPO_ROOT
+
+    if not candidate.is_absolute():
+        candidate = (REPO_ROOT / candidate).resolve()
+    else:
+        candidate = candidate.resolve()
+    return candidate
+
+
+def build_runtime_path(case_tag: str, parent_directory: str | Path | None = None) -> Path:
     sanitized = sanitize_case_tag(case_tag or "negaccel_case")
-    return REPO_ROOT / sanitized / f"{sanitized}.json"
+    root_directory = resolve_runtime_parent_directory(parent_directory)
+    return root_directory / sanitized / f"{sanitized}.json"
+
+
+def default_runtime_path(case_tag: str) -> Path:
+    return build_runtime_path(case_tag)
+
+
+def runtime_path_parent_seed(runtime_path: Path | None) -> Path:
+    if runtime_path is None:
+        return REPO_ROOT
+
+    resolved_path = runtime_path.resolve()
+    if resolved_path.parent.name == resolved_path.stem:
+        return resolved_path.parent.parent
+    return resolved_path.parent
 
 
 def create_scrollable_form(form_layout: QFormLayout) -> QScrollArea:

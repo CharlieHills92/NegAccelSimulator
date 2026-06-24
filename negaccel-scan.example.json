@@ -12,7 +12,7 @@
   },
   "overrides": [
     {
-      "path": "run.particleCount",
+      "path": "particles.sources[0].particleCount",
       "value": 20000
     }
   ],

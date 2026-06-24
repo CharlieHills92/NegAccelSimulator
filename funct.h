@@ -9,6 +9,12 @@
 using namespace std;
 
 
+enum particle_family {
+    PARTICLE_FAMILY_H = 0,
+    PARTICLE_FAMILY_D = 1
+};
+
+
 enum particle_kind {
     PARTICLE_ALL=-100,
     PARTICLE_WRONG=-1,
@@ -17,15 +23,33 @@ enum particle_kind {
     PARTICLE_HP = 2,
     PARTICLE_H2P = 3,
     PARTICLE_H20 = 4,
-    PARTICLE_E = 5
+    PARTICLE_H3P = 5,
+    PARTICLE_E = 6,
+    PARTICLE_NEGATIVE_ION = PARTICLE_HM,
+    PARTICLE_NEUTRAL_ATOM = PARTICLE_H0,
+    PARTICLE_POSITIVE_ION = PARTICLE_HP,
+    PARTICLE_MOLECULAR_POSITIVE_ION = PARTICLE_H2P,
+    PARTICLE_MOLECULAR_NEUTRAL = PARTICLE_H20,
+    PARTICLE_TRIATOMIC_POSITIVE_ION = PARTICLE_H3P,
+    PARTICLE_ELECTRON = PARTICLE_E
 };
 
 string get_particle_name(particle_kind pk);
 int get_particle_int(particle_kind pk);
 
 particle_kind int2kind(int num);
+size_t particle_kind_count();
+
+particle_family infer_particle_family(double ion_mass_u);
+void set_active_particle_family(particle_family family);
+particle_family get_active_particle_family();
 
 particle_kind identify_particle_species( double mass, double charge, double ION_MASS );
+particle_kind particle_kind_from_config_name(const std::string& kind);
+double particle_kind_charge_state(particle_kind kind);
+double particle_kind_mass_u(particle_kind kind, double ion_mass_u);
+bool particle_kind_is_electron(particle_kind kind);
+bool particle_kind_is_positive_ion(particle_kind kind);
 double density_at_z( double zc, double pressure, vector<double>& pos, vector<double>& dens, bool & ciaone );
 void load_density_profile( string filename, vector<double>& pos, vector<double>& dens );
 /// 1 D interpolation of a float in a interval of 2 float

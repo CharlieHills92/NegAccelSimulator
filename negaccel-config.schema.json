@@ -14,6 +14,7 @@
     "externalMagneticField",
     "gasDensity",
     "physics",
+    "diagnostics",
     "outputs"
   ],
   "properties": {
@@ -113,66 +114,234 @@
         }
       }
     },
-    "particleSources": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "negativeIonBeam"
-      ],
-      "properties": {
-        "negativeIonBeam": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "massU",
-            "currentDensityAm2",
-            "axialEnergyEV"
-          ],
-          "properties": {
-            "species": {
-              "type": "string",
-              "enum": [
-                "H-",
-                "D-",
-                "custom"
-              ]
-            },
-            "chargeState": {
-              "type": "number"
-            },
-            "massU": {
-              "$ref": "#/$defs/positiveNumber"
-            },
-            "currentDensityAm2": {
-              "$ref": "#/$defs/nonNegativeNumber"
-            },
-            "perpendicularTemperatureEV": {
-              "$ref": "#/$defs/nonNegativeNumber"
-            },
-            "parallelTemperatureEV": {
-              "$ref": "#/$defs/nonNegativeNumber"
-            },
-            "axialEnergyEV": {
-              "$ref": "#/$defs/nonNegativeNumber"
-            },
-            "plasmaPotentialVolts": {
-              "type": "number"
-            },
-            "electronsModelWeight": {
-              "$ref": "#/$defs/nonNegativeNumber"
-            },
-            "sourceModel": {
-              "type": "string",
-              "enum": [
-                "uniform",
-                "gaussian",
-                "measured",
-                "custom"
-              ]
-            }
+    "particleTypes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "chargeState",
+          "massU"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "name": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "H-",
+              "H0",
+              "H+",
+              "H2+",
+              "H20",
+              "H3+",
+              "D-",
+              "D0",
+              "D+",
+              "D2+",
+              "D20",
+              "D3+",
+              "e-"
+            ]
+          },
+          "chargeState": {
+            "type": "number"
+          },
+          "massU": {
+            "$ref": "#/$defs/positiveNumber"
+          },
+          "sourceable": {
+            "type": "boolean"
           }
         }
       }
+    },
+    "particleSources": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "negativeIonBeam": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "massU",
+                "currentDensityAm2",
+                "axialEnergyEV"
+              ],
+              "properties": {
+                "species": {
+                  "type": "string",
+                  "enum": [
+                    "H-",
+                    "D-",
+                    "custom"
+                  ]
+                },
+                "chargeState": {
+                  "type": "number"
+                },
+                "massU": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "currentDensityAm2": {
+                  "$ref": "#/$defs/nonNegativeNumber"
+                },
+                "perpendicularTemperatureEV": {
+                  "$ref": "#/$defs/nonNegativeNumber"
+                },
+                "parallelTemperatureEV": {
+                  "$ref": "#/$defs/nonNegativeNumber"
+                },
+                "axialEnergyEV": {
+                  "$ref": "#/$defs/nonNegativeNumber"
+                },
+                "plasmaPotentialVolts": {
+                  "type": "number"
+                },
+                "electronsModelWeight": {
+                  "$ref": "#/$defs/nonNegativeNumber"
+                },
+                "sourceModel": {
+                  "type": "string",
+                  "enum": [
+                    "uniform",
+                    "gaussian",
+                    "measured",
+                    "custom"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "particleTypeId",
+              "kind",
+              "chargeState",
+              "massU",
+              "particleCount",
+              "currentDensityAm2",
+              "axialEnergyEV",
+              "sourceModel",
+              "uniform"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "name": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "particleTypeId": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "H-",
+                  "H0",
+                  "H+",
+                  "H2+",
+                  "H20",
+                  "D-",
+                  "D0",
+                  "D+",
+                  "D2+",
+                  "D20",
+                  "e-"
+                ]
+              },
+              "chargeState": {
+                "type": "number"
+              },
+              "massU": {
+                "$ref": "#/$defs/positiveNumber"
+              },
+              "particleCount": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "currentDensityAm2": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "perpendicularTemperatureEV": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "parallelTemperatureEV": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "axialEnergyEV": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "sourceModel": {
+                "type": "string",
+                "enum": [
+                  "uniform"
+                ]
+              },
+              "uniform": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "centerMeters",
+                  "mainDirection",
+                  "inPlaneReferenceDirection",
+                  "widthMeters",
+                  "heightMeters"
+                ],
+                "properties": {
+                  "centerMeters": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "mainDirection": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "inPlaneReferenceDirection": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "widthMeters": {
+                    "$ref": "#/$defs/positiveNumber"
+                  },
+                  "heightMeters": {
+                    "$ref": "#/$defs/positiveNumber"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "simulation": {
       "type": "object",
@@ -214,8 +383,19 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "type",
-            "shieldModel"
+            "type"
+          ],
+          "anyOf": [
+            {
+              "required": [
+                "shieldModel"
+              ]
+            },
+            {
+              "required": [
+                "plasmaModel"
+              ]
+            }
           ],
           "properties": {
             "type": {
@@ -231,6 +411,91 @@
                 "nsimp",
                 "shield"
               ]
+            },
+            "plasmaModel": {
+              "type": "string",
+              "enum": [
+                "nsimp",
+                "shield"
+              ]
+            },
+            "initialPlasmaMaxZMeters": {
+              "type": "number"
+            },
+            "positiveIonTemperatureEV": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            },
+            "plasmaPotentialVolts": {
+              "type": "number"
+            },
+            "tanhWidthEV": {
+              "$ref": "#/$defs/positiveNumber"
+            },
+            "meniscusVoltageVolts": {
+              "type": "number"
+            },
+            "bicgstab": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "eps": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "maxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "newtonEps": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "newtonMaxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "globallyConvergentNewton": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "multigrid": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "levels": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "mgTolerance": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "maxCycles": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "gamma": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "preSmooth": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "postSmooth": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "coarseRelaxation": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "coarseMaxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "localPlasmaMaxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
             }
           }
         },
@@ -238,18 +503,10 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "alphaCoeff",
-            "pgFilterScale",
-            "cesmadcmScale"
+            "alphaCoeff"
           ],
           "properties": {
             "alphaCoeff": {
-              "$ref": "#/$defs/nonNegativeNumber"
-            },
-            "pgFilterScale": {
-              "$ref": "#/$defs/nonNegativeNumber"
-            },
-            "cesmadcmScale": {
               "$ref": "#/$defs/nonNegativeNumber"
             }
           }
@@ -265,6 +522,16 @@
               "$ref": "#/$defs/nonNegativeNumber"
             }
           }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serverCommand": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Optional GUI launch wrapper command used to run the simulator inside a remote or cluster shell. The C++ simulator ignores this block."
         }
       }
     },
@@ -310,87 +577,96 @@
       "additionalProperties": false,
       "required": [
         "enabled",
-        "sourceMode",
-        "scale"
+        "fields"
       ],
       "properties": {
         "enabled": {
           "type": "boolean"
         },
-        "sourceMode": {
-          "type": "string",
-          "enum": [
-            "none",
-            "directory",
-            "file"
-          ]
-        },
-        "case": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "scale": {
-          "$ref": "#/$defs/nonNegativeNumber"
-        },
         "directory": {
-          "$ref": "#/$defs/nonEmptyString"
+          "type": "string"
         },
-        "file": {
-          "$ref": "#/$defs/nonEmptyString"
-        }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "enabled": {
-                "const": true
-              }
-            },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
             "required": [
-              "enabled"
-            ]
-          },
-          "then": {
+              "name",
+              "sourceType",
+              "scale"
+            ],
             "properties": {
-              "sourceMode": {
+              "name": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "sourceType": {
+                "type": "string",
                 "enum": [
-                  "directory",
+                  "constant",
                   "file"
                 ]
+              },
+              "scale": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "constantValue": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "bx",
+                  "by",
+                  "bz"
+                ],
+                "properties": {
+                  "bx": {
+                    "type": "number"
+                  },
+                  "by": {
+                    "type": "number"
+                  },
+                  "bz": {
+                    "type": "number"
+                  }
+                }
+              },
+              "filePath": {
+                "$ref": "#/$defs/nonEmptyString"
               }
-            }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "sourceMode": {
-                "const": "directory"
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "sourceType": {
+                      "const": "constant"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "constantValue"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "sourceType": {
+                      "const": "file"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "filePath"
+                  ]
+                }
               }
-            }
-          },
-          "then": {
-            "required": [
-              "directory"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "sourceMode": {
-                "const": "file"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "file"
             ]
           }
         }
-      ]
+      }
     },
     "gasDensity": {
       "type": "object",
@@ -462,6 +738,12 @@
             }
           ]
         },
+        "reactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/crossSectionProcessRuntime"
+          }
+        },
         "surfaceCollisions": {
           "type": "object",
           "additionalProperties": false,
@@ -493,7 +775,30 @@
             }
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "stripping": {
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "primaryOnly",
+                      "withSecondaries"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reactions"
+            ]
+          }
+        }
+      ]
     },
     "outputs": {
       "type": "object",
@@ -504,6 +809,7 @@
         "plots",
         "data",
         "vtk",
+        "iteration",
         "logging"
       ],
       "properties": {
@@ -547,6 +853,42 @@
             }
           }
         },
+        "iteration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "everyNIterations",
+            "exportPlaneDiagnostics",
+            "exportSimulationState",
+            "exportTracedParticles",
+            "planeZPositionsMeters"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "everyNIterations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "exportPlaneDiagnostics": {
+              "type": "boolean"
+            },
+            "exportSimulationState": {
+              "type": "boolean"
+            },
+            "exportTracedParticles": {
+              "type": "boolean"
+            },
+            "planeZPositionsMeters": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        },
         "logging": {
           "type": "object",
           "additionalProperties": false,
@@ -576,6 +918,9 @@
           }
         }
       }
+    },
+    "diagnostics": {
+      "$ref": "#/$defs/diagnosticsConfig"
     }
   },
   "$defs": {
@@ -765,8 +1110,7 @@
       "required": [
         "name",
         "species",
-        "source",
-        "useFor"
+        "source"
       ],
       "properties": {
         "name": {
@@ -776,8 +1120,11 @@
           "type": "string",
           "enum": [
             "H2",
+            "D2",
             "H0",
             "H+",
+            "D0",
+            "D+",
             "e-",
             "custom"
           ]
@@ -803,19 +1150,135 @@
         },
         "pressureScale": {
           "$ref": "#/$defs/nonNegativeNumber"
+        }
+      }
+    },
+    "particleKind": {
+      "type": "string",
+      "enum": [
+        "H-",
+        "H0",
+        "H+",
+        "H2+",
+        "H20",
+        "H3+",
+        "D-",
+        "D0",
+        "D+",
+        "D2+",
+        "D20",
+        "D3+",
+        "e-"
+      ]
+    },
+    "crossSectionProcessProductRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "particleKind",
+        "speedClass"
+      ],
+      "properties": {
+        "particleKind": {
+          "$ref": "#/$defs/particleKind"
         },
-        "useFor": {
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "speedClass": {
+          "type": "string",
+          "enum": [
+            "fast",
+            "slow"
+          ]
+        },
+        "chargeState": {
+          "type": "number"
+        },
+        "massU": {
+          "$ref": "#/$defs/positiveNumber"
+        }
+      }
+    },
+    "crossSectionProcessRuntime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourcePath",
+        "fitDegree",
+        "coefficients"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "reactionId"
+          ]
+        },
+        {
+          "required": [
+            "processId",
+            "projectileKind",
+            "projectileFate"
+          ]
+        }
+      ],
+      "properties": {
+        "reactionId": {
+          "type": "string",
+          "enum": [
+            "negative_ion_single_stripping",
+            "negative_ion_double_stripping",
+            "background_gas_ionization",
+            "neutral_projectile_ionization",
+            "positive_ion_charge_exchange"
+          ]
+        },
+        "processId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "projectileKind": {
+          "$ref": "#/$defs/particleKind"
+        },
+        "projectileFate": {
+          "type": "string",
+          "enum": [
+            "consume",
+            "survive"
+          ]
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/crossSectionProcessProductRuntime"
+          }
+        },
+        "sourcePath": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "fitDegree": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "coefficients": {
           "type": "array",
           "minItems": 1,
-          "uniqueItems": true,
           "items": {
-            "type": "string",
-            "enum": [
-              "stripping",
-              "secondaryEmission",
-              "diagnostics"
-            ]
+            "type": "number"
           }
+        },
+        "scaleEnergyByIonMass": {
+          "type": "boolean"
+        },
+        "minimumEnergyEV": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "maximumEnergyEV": {
+          "$ref": "#/$defs/nonNegativeNumber"
         }
       }
     },
@@ -832,6 +1295,172 @@
         },
         "directory": {
           "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "diagnosticsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planes",
+        "species",
+        "gridPower",
+        "summary",
+        "plots"
+      ],
+      "properties": {
+        "planes": {
+          "$ref": "#/$defs/diagnosticPlanes"
+        },
+        "species": {
+          "$ref": "#/$defs/diagnosticSpeciesConfig"
+        },
+        "gridPower": {
+          "$ref": "#/$defs/diagnosticGridPowerConfig"
+        },
+        "summary": {
+          "$ref": "#/$defs/diagnosticSummaryConfig"
+        },
+        "plots": {
+          "$ref": "#/$defs/diagnosticPlotConfig"
+        }
+      }
+    },
+    "diagnosticPlanes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleZPositionsMeters",
+        "summaryZPositionMeters",
+        "emitterExportZPositionMeters"
+      ],
+      "properties": {
+        "sampleZPositionsMeters": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "number"
+          }
+        },
+        "summaryZPositionMeters": {
+          "type": "number"
+        },
+        "emitterExportZPositionMeters": {
+          "type": "number"
+        }
+      }
+    },
+    "diagnosticSpeciesConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "writePerSpeciesDiagnostics",
+        "writePerSpeciesGridPower",
+        "writePerSpeciesPlots",
+        "writeNegativeIonSummary"
+      ],
+      "properties": {
+        "writePerSpeciesDiagnostics": {
+          "type": "boolean"
+        },
+        "writePerSpeciesGridPower": {
+          "type": "boolean"
+        },
+        "writePerSpeciesPlots": {
+          "type": "boolean"
+        },
+        "writeNegativeIonSummary": {
+          "type": "boolean"
+        }
+      }
+    },
+    "diagnosticGridPowerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ranges"
+      ],
+      "properties": {
+        "ranges": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/diagnosticGridRange"
+          }
+        }
+      }
+    },
+    "diagnosticGridRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "includeInTotal"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "includeInTotal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "diagnosticSummaryConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apertureRadiusMeters",
+        "transmissionPlaneZPositionMeters"
+      ],
+      "properties": {
+        "apertureRadiusMeters": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "transmissionPlaneZPositionMeters": {
+          "type": "number",
+          "description": "Z position where the extracted current after the PG is evaluated and the EG iteration diagnostic is sampled."
+        }
+      }
+    },
+    "diagnosticPlotConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meniscus"
+      ],
+      "properties": {
+        "meniscus": {
+          "$ref": "#/$defs/diagnosticMeniscusPlotConfig"
+        }
+      }
+    },
+    "diagnosticMeniscusPlotConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "zMinMeters",
+        "zMaxMeters",
+        "transverseMinMeters",
+        "transverseMaxMeters"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "zMinMeters": {
+          "type": "number"
+        },
+        "zMaxMeters": {
+          "type": "number"
+        },
+        "transverseMinMeters": {
+          "type": "number"
+        },
+        "transverseMaxMeters": {
+          "type": "number"
         }
       }
     }

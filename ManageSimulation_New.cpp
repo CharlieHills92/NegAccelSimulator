@@ -21,29 +21,34 @@
 #include "THCallback.h"
 #include "THCallback_surf_EAMCC.h"
 
+#include <algorithm>
 #include <iostream>
 
 using namespace std;
 
 class ForcedPot : public CallbackFunctorB_V {
     public:
-        ForcedPot() {}
+        explicit ForcedPot( double zmax )
+            : _zmax( zmax ) {}
         ~ForcedPot() {}
 
         virtual bool operator()( const Vec3D &x ) const {
             // return( x[2] < 0.2e-3 && x[0]*x[0]+x[1]*x[1] > 7e-3*7e-3 );
-            return( x[2] < 7e-3 && (abs(x[0])>0.01 || abs(x[1])>0.01) );
+            return( x[2] < _zmax && (abs(x[0])>0.01 || abs(x[1])>0.01) );
             // return( x[2] < 7e-3 );
         }
+
+    private:
+        double _zmax;
 };
 
 ManageSimulation::ManageSimulation(const std::string& scan_name, const std::string& foldername) {
     try {
         initializeComponents(scan_name, foldername);
         initializeIbsimu();
-        
+
         ibsimu.message(1) << endl << "*** SIMULATION INITIALIZED ***" << endl << endl;
-        
+
     } catch (const exception& e) {
         throw Error(ERROR_LOCATION, "Simulation initialization failed: " + string(e.what()));
     }
@@ -62,6 +67,7 @@ void ManageSimulation::initializeComponents(const std::string& scan_name, const 
 
     // Read parameters from the generated JSON case file before configuring output paths.
     parameters->readParametersFromFile(input_file);
+    set_active_particle_family(infer_particle_family(parameters->getMIons()));
 
     fileManager = std::unique_ptr<FileManager>(new FileManager(
         foldername,
@@ -76,6 +82,16 @@ void ManageSimulation::initializeComponents(const std::string& scan_name, const 
     
     // Set file tag after directories are configured.
     fileManager->setFileTag(scan_name);
+    const vector<string> removed_legacy_summary_files = fileManager->removeLegacySummaryArtifacts();
+    if (!removed_legacy_summary_files.empty()) {
+        cout << "Removed " << removed_legacy_summary_files.size()
+             << " legacy summary artifact(s) for case " << scan_name << endl;
+        if (debug) {
+            for (size_t index = 0; index < removed_legacy_summary_files.size(); ++index) {
+                cout << "  cleanup: " << removed_legacy_summary_files[index] << endl;
+            }
+        }
+    }
     diagnosticsManager->setDensityProfileFilename(parameters->getStrippingDensityProfile());
 }
 
@@ -146,10 +162,12 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
     }
     
     if (true) {
+        ibsimu.message(1) << "Initialization: mesh generation..." << endl;
         geometry->build_mesh();
         if (debug) logfile << "MESH... " << flush;
     }
     if (true) {
+        ibsimu.message(1) << "Initialization: boundary definition..." << endl;
         geometry->build_surface();
         if (debug) logfile << "SURFACES... " << flush;
     }
@@ -165,35 +183,55 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
     EpotBiCGSTABSolver* bicgstab_solver = nullptr;
     EpotMGSolver* mg_solver = nullptr;
     
-    InitialPlasma initp( AXIS_Z, 7e-3 );
-    ForcedPot force;
+    const double initial_plasma_max_z = parameters->getInitialPlasmaMaxZ();
+    InitialPlasma initp( AXIS_Z, initial_plasma_max_z );
+    ForcedPot force( initial_plasma_max_z );
 
     if (solver_type == 0) {
         logfile << "Using BiCGSTAB solver... " << flush;
         bicgstab_solver = new EpotBiCGSTABSolver(*geometry);
-        if (meniscus_type == 1U) {
-            ibsimu.message(1) << " Setting meniscus shield model in BiCGSTAB solver.\n";
-            // bicgstab_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
-            // bicgstab_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
-            bicgstab_solver->set_initial_plasma(0, &initp);
-        } else {
-            ibsimu.message(1) << " Setting nsimp plasma model in BiCGSTAB solver.\n";
-            bicgstab_solver->set_nsimp_initial_plasma( &initp );
-        }
+        bicgstab_solver->set_eps(parameters->getBiCGSTABEps());
+        bicgstab_solver->set_imax(parameters->getBiCGSTABMaxIterations());
+        bicgstab_solver->set_newton_eps(parameters->getBiCGSTABNewtonEps());
+        bicgstab_solver->set_newton_imax(parameters->getBiCGSTABNewtonMaxIterations());
+        bicgstab_solver->set_gnewton(parameters->getBiCGSTABGloballyConvergentNewton());
+        // if (meniscus_type == 1U) {
+        //     ibsimu.message(1) << " Setting initial meniscus shield model in BiCGSTAB solver.\n";
+        //     // bicgstab_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
+        //     // bicgstab_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+        //     bicgstab_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+        // } else {
+        //     ibsimu.message(1) << " Setting initial nsimp plasma model in BiCGSTAB solver.\n";
+        //     bicgstab_solver->set_nsimp_initial_plasma( &initp );
+        //     bicgstab_solver->set_forced_potential_volume( 0.0, &force );
+        // }
+        ibsimu.message(1) << " Setting initial plasma model in BiCGSTAB solver.\n";
+        bicgstab_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
         // bicgstab_solver->set_forced_potential_volume( 0.0, &force );
         solver = bicgstab_solver;
     } else {
         logfile << "Using MG solver... " << flush;
         mg_solver = new EpotMGSolver(*geometry);
-        if (meniscus_type == 1U) {
-            // ibsimu.message(1) << " Setting meniscus shield model in MG solver.\n";
-            // mg_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
-            // mg_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
-            mg_solver->set_initial_plasma(0, &initp);
-        } else {
-            ibsimu.message(1) << " Setting nsimp plasma model in MG solver.\n";
-            mg_solver->set_nsimp_initial_plasma( &initp );
-        }
+        mg_solver->set_levels(parameters->getMGLevels());
+        mg_solver->set_mgeps(parameters->getMGTolerance());
+        mg_solver->set_mgcycmax(parameters->getMGMaxCycles());
+        mg_solver->set_gamma(parameters->getMGGamma());
+        mg_solver->set_npre(parameters->getMGPreSmooth());
+        mg_solver->set_npost(parameters->getMGPostSmooth());
+        mg_solver->set_w(parameters->getMGCoarseRelaxation());
+        mg_solver->set_imax(parameters->getMGCoarseMaxIterations());
+        mg_solver->set_local_imax(parameters->getMGLocalPlasmaMaxIterations());
+        // if (meniscus_type == 1U) {
+        //     ibsimu.message(1) << " Setting initial meniscus shield model in MG solver.\n";
+        //     // mg_solver->set_shield_plasma(parameters->getTPositive(), parameters->getUPlasma());
+        //     // mg_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+        //     mg_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
+        // } else {
+        //     ibsimu.message(1) << " Setting initial nsimp plasma model in MG solver.\n";
+        //     mg_solver->set_nsimp_initial_plasma( &initp );
+        // }
+        ibsimu.message(1) << " Setting initial plasma model in MG solver.\n";
+        mg_solver->set_initial_plasma(parameters->getUPlasma(), &initp);
         // mg_solver->set_forced_potential_volume( 0.0, &force );
         solver = mg_solver;
     }
@@ -269,8 +307,9 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
                 ibsimu.message(1) << " Setting nsimp plasma model in solver.\n";
                 std::vector<double> Ei, rhoi;
                 Ei.push_back( parameters->getTPositive() ); // Temperature of positive ions
-                rhoi.push_back( 0.5*rho_h );
-                double rhop = rho_tot - rho_h*0.5;
+                double Rf = 0.5;
+                rhoi.push_back( (1-Rf)*rho_h );
+                double rhop = rho_tot - rho_h*Rf;
                 solver->set_nsimp_plasma(rhop, parameters->getUPlasma(), rhoi, Ei);
 
                 std::cout << " rhop = " << rhop << "\n";
@@ -306,6 +345,7 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         //     }
         // }
 
+        ibsimu.message(1) << "Iteration " << i+1 << "/" << n_iterations << ": solving Poisson..." << endl;
         solver->solve(*epot, scharge_ave);
         efield->recalculate();
 
@@ -340,17 +380,21 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         THCallback_secondaries* thcsec = nullptr;
 
         if (parameters->getIncludeStripping() > 0) {
+            const std::vector<SimulationParameters::CrossSectionProcessDefinition>& cross_section_processes =
+                parameters->getCrossSectionProcesses();
             // Create stripping callback objects if not already created
             if (thcstr == nullptr) {
                 static double mass = parameters->getMIons();
                 string density_profile = parameters->getStrippingDensityProfile();
-                thcstr = new THCallback_strip(debugprint, pdb, mass, periodicity_empty, density_profile);
+                thcstr = new THCallback_strip(debugprint, pdb, mass, periodicity_empty,
+                                             cross_section_processes, density_profile);
             }
             if (thcsec == nullptr) {
                 static double mass = parameters->getMIons();
                 string density_profile = parameters->getStrippingDensityProfile();
                 double secondary_z_min = parameters->getStrippingMinimumZ();
-                thcsec = new THCallback_secondaries(pdb, mass, periodicity, density_profile,
+                thcsec = new THCallback_secondaries(pdb, mass, periodicity, cross_section_processes,
+                                                    density_profile,
                                                     secondary_z_min);
             }
             
@@ -403,6 +447,7 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
     
         
         try {
+            ibsimu.message(1) << "Iteration " << i+1 << "/" << n_iterations << ": tracing particles..." << endl;
             ibsimu.message(1) << "Starting particle trajectory calculation..." << endl;
             
             // Check particle database size before iteration
@@ -477,31 +522,87 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
         
         ibsimu.message(1) << " DONE!" << endl;
 
-        bool saveITperf = parameters->getOutputSummaryEnabled();
-        if (saveITperf) {
-            // Update field manager with current fields
+        const unsigned int iteration_number = static_cast<unsigned int>(i + 1);
+        const bool write_iteration_outputs = parameters->getOutputIterationEnabled() &&
+            ((iteration_number % parameters->getOutputIterationEveryNIterations()) == 0U ||
+             iteration_number == static_cast<unsigned int>(n_iterations));
+
+        if (write_iteration_outputs) {
             fieldManager->setPotential(epot);
             fieldManager->setSpacecharge(scharge);
             fieldManager->setElectric(efield);
-            
-            vector<double> zlocitsumEG, zlocitsumOUT;
-            Vec3D lastpt = geometry->max();
-            zlocitsumEG.push_back(0.009);
-            zlocitsumOUT.push_back(lastpt[2] - parameters->getMeshSize());
 
-            if (debug) logfile << "DEBUG:  Iteration summary at z=" << zlocitsumEG[0] << "\n" << flush;
-            if (debug) logfile << "DEBUG:  Iteration summary at z=" << zlocitsumOUT[0] << "\n" << flush;
-
-            string iterationsfileEG = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_it_EG.txt";
-            string iterationsfileOUT = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_it_OUT.txt";
-
-            if (i==0) {
-                diagnostic_data_alongZ(zlocitsumEG, i, iterationsfileEG, false);
-                diagnostic_data_alongZ(zlocitsumOUT, i, iterationsfileOUT, false);
+            if (parameters->getOutputVTKEnabled() &&
+                parameters->getOutputIterationExportSimulationState()) {
+                const std::string vtk_base = fileManager->buildIterationVTKBase(iteration_number);
+                geometryManager->exportPotentialToVTK(*epot, vtk_base);
+                geometryManager->exportSpacechargeToVTK(*scharge, vtk_base);
             }
-            else { 
-                diagnostic_data_alongZ(zlocitsumEG, i, iterationsfileEG, true);
-                diagnostic_data_alongZ(zlocitsumOUT, i, iterationsfileOUT, true);
+
+            if (parameters->getOutputVTKEnabled() &&
+                parameters->getOutputIterationExportTracedParticles() &&
+                particleManager && particleManager->getParticles() &&
+                particleManager->getParticles()->size() > 0) {
+                particleManager->exportTrajectoriesToVTK(
+                    fileManager->buildIterationVTKBase(iteration_number),
+                    parameters->getMIons());
+            }
+        }
+
+        bool saveITperf = write_iteration_outputs &&
+                          parameters->getOutputSummaryEnabled() &&
+                          parameters->getOutputIterationExportPlaneDiagnostics();
+        if (saveITperf) {
+            if (parameters->hasOutputIterationPlaneZPositions()) {
+                const vector<double>& iteration_planes = parameters->getOutputIterationPlaneZPositions();
+                for (size_t plane_index = 0; plane_index < iteration_planes.size(); ++plane_index) {
+                    if (debug) {
+                        logfile << "DEBUG:  Iteration summary at z=" << iteration_planes[plane_index] << "\n" << flush;
+                    }
+                    vector<double> plane_position(1, iteration_planes[plane_index]);
+                    const string iterationsfile = fileManager->buildIterationDiagnosticFileForZPosition(
+                        iteration_planes[plane_index]
+                    );
+                    diagnostic_data_alongZ(plane_position, i, iterationsfile, i != 0);
+                }
+            } else {
+                vector<double> zlocitsumEG, zlocitsumOUT;
+                Vec3D lastpt = geometry->max();
+                double eg_iteration_plane = -1.0;
+                if (parameters->hasDiagnosticTransmissionPlaneZPosition()) {
+                    eg_iteration_plane = parameters->getDiagnosticTransmissionPlaneZPosition();
+                } else {
+                    const std::vector<double>& zgrids = geometryManager->getZGrids();
+                    if (!zgrids.empty()) {
+                        eg_iteration_plane = *std::min_element(zgrids.begin(), zgrids.end());
+                    }
+                }
+                if (eg_iteration_plane >= 0.0) {
+                    zlocitsumEG.push_back(eg_iteration_plane);
+                }
+                zlocitsumOUT.push_back(lastpt[2] - parameters->getMeshSize());
+
+                if (debug && !zlocitsumEG.empty()) logfile << "DEBUG:  Iteration summary at z=" << zlocitsumEG[0] << "\n" << flush;
+                if (debug) logfile << "DEBUG:  Iteration summary at z=" << zlocitsumOUT[0] << "\n" << flush;
+
+                const string& iterationsfileEG = fileManager->getIterationsFileEG();
+                const string& iterationsfileOUT = fileManager->getIterationsFileOUT();
+
+                if (i==0) {
+                    if (!zlocitsumEG.empty()) {
+                        diagnostic_data_alongZ(zlocitsumEG, i, iterationsfileEG, false);
+                    }
+                    diagnostic_data_alongZ(zlocitsumOUT, i, iterationsfileOUT, false);
+                }
+                else {
+                    if (!zlocitsumEG.empty()) {
+                        diagnostic_data_alongZ(zlocitsumEG, i, iterationsfileEG, true);
+                    }
+                    diagnostic_data_alongZ(zlocitsumOUT, i, iterationsfileOUT, true);
+                }
+                if (zlocitsumEG.empty()) {
+                    logfile << "Skipping EG iteration diagnostics because no transmission-plane z position is available\n" << flush;
+                }
             }
             if (debug) logfile << "DEBUG:  Iteration summaries saved!\n" << flush;
         }
@@ -513,6 +614,8 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
     fieldManager->setPotential(epot);
     fieldManager->setSpacecharge(scharge);
     fieldManager->setElectric(efield);
+
+    ibsimu.message(1) << "Simulation end: saving outputs..." << endl;
 
     if (parameters->getOutputDataEnabled()) {
         const string epotfile = fileManager->getDataFolder() + fileManager->getFileTag() + "_epot.dat";
@@ -733,14 +836,18 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
             double mass = parameters->getMIons();
             string density_profile = parameters->getStrippingDensityProfile();
             vector<double> periodicity_empty; // no periodicity for main stripping
+            const std::vector<SimulationParameters::CrossSectionProcessDefinition>& cross_section_processes =
+                parameters->getCrossSectionProcesses();
             
-            thcstr = new THCallback_strip(false, pdb, mass, periodicity_empty, density_profile);
+            thcstr = new THCallback_strip(false, pdb, mass, periodicity_empty,
+                                          cross_section_processes, density_profile);
             
             // if (parameters->getIncludeStripping() > 1) {
             if (true) { // Always create secondaries callback for tracing if stripping is enabled
                 const vector<double> periodicity = parameters->getPeriodicityBounds();
                 double secondary_z_min = parameters->getStrippingMinimumZ();
-                thcsec = new THCallback_secondaries(pdb, mass, periodicity, density_profile,
+                thcsec = new THCallback_secondaries(pdb, mass, periodicity, cross_section_processes,
+                                                    density_profile,
                                                     secondary_z_min);
                 pdb->set_trajectory_handler_callback(thcsec);
                 ibsimu.message(1) << "Using secondaries stripping callback" << endl;
@@ -802,7 +909,7 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
         if (parameters->getOutputVTKEnabled() && parameters->getOutputVTKExportTracedParticles() &&
             particleManager && particleManager->getParticles() && particleManager->getParticles()->size() > 0) {
             const string vtk_base = fileManager->getVTKFolder() + fileManager->getFileTag() + "_traced";
-            particleManager->exportTrajectoriesToVTK(vtk_base);
+            particleManager->exportTrajectoriesToVTK(vtk_base, parameters->getMIons());
             ibsimu.message(1) << "Traced trajectories exported to VTK: " << vtk_base << "_trajectories.vtk" << endl;
         }
         
@@ -846,7 +953,8 @@ void ManageSimulation::plot_simulation(int argc, char **argv) {
         return;
     }
 
-    diagnosticsManager->createPlots(argc, argv, 
+    diagnosticsManager->createPlots(argc, argv,
+                                   *parameters,
                                    geometryManager->getGeometry(),
                                    fieldManager->getPotential(),
                                    fieldManager->getMagnetic(),
@@ -864,6 +972,7 @@ void ManageSimulation::plot_simulation(int argc, char **argv, particle_kind pk) 
     }
 
     diagnosticsManager->createPlots(argc, argv,
+                                   *parameters,
                                    geometryManager->getGeometry(),
                                    fieldManager->getPotential(),
                                    fieldManager->getMagnetic(),
@@ -882,6 +991,8 @@ void ManageSimulation::analysis(double zlocsummary) {
         return;
     }
 
+    std::vector<double> diagnostic_grid_ranges = geometryManager->getZGrids();
+
     // Use enhanced analysis with field calculations
     diagnosticsManager->performAnalysis(particleManager->getParticles(), *parameters,
                                        geometryManager->getGeometry(),
@@ -889,7 +1000,7 @@ void ManageSimulation::analysis(double zlocsummary) {
                                        fieldManager->getMagnetic(),zlocsummary,
                                        particleManager->getParticleSpecies(),
                                        true, fileManager.get(),
-                                       geometryManager->getZGrids());
+                                       diagnostic_grid_ranges);
 }
 
 void ManageSimulation::fill_particle_dbs() {
@@ -918,24 +1029,16 @@ std::vector<double> ManageSimulation::analyze_grid_power_loads(particle_kind pk)
         ibsimu.message(1) << "Error: Missing particle database or geometry for grid power analysis" << endl;
         return std::vector<double>();
     }
-    
-    // Get grid positions and mesh size from parameters
-    std::vector<double> zgrids = geometryManager->getZGrids();
+
     double mesh_size = parameters->getMeshSize();
     double ionmass = parameters->getMIons();
-    
-    // Use default grid positions if none available
-    if (zgrids.empty()) {
-        zgrids = {0.0, 0.009, 0.015, 0.032, 0.120, 0.137, 0.225, 0.242, 0.330, 0.347, 0.435, 0.452, 0.540, 0.557};
-        ibsimu.message(1) << "Using default MTF grid positions for power analysis" << endl;
-    }
-    
+
     ibsimu.message(1) << "Analyzing grid power loads..." << endl;
-    
+
     // Call the diagnostics manager to perform the analysis
     std::vector<double> power_results = diagnosticsManager->analyzeGridPowerLoads(
         particleManager->getParticles(),
-        zgrids,
+        *parameters,
         mesh_size,
         geometryManager->getGeometry(),
         ionmass,
@@ -949,91 +1052,6 @@ std::vector<double> ManageSimulation::analyze_grid_power_loads(particle_kind pk)
     return power_results;
 }
 
-void ManageSimulation::create_simulation_summary(double zlocsummary, const std::string& summary_file_tag, 
-                                                bool append_at_end) {
-    // Calculate extracted current density at EG exit using ParticleManager
-    double oriJ = parameters->getJIon();  // Original input current density
-    double extsimJ = 0.0;  // Will be filled by checkEGExtractedCurrent
-    
-    // Get the extracted current density
-    bool eg_check = particleManager->checkEGExtractedCurrent(oriJ, extsimJ, *parameters);
-    
-    if (debug) {
-        logfile << "DEBUG: EG extracted current check: " << (eg_check ? "PASS" : "FAIL") << endl;
-        logfile << "DEBUG: Target J=" << oriJ << " A/m², Extracted J=" << extsimJ << " A/m²" << endl;
-    }
-    
-    // Use the enhanced version with field calculations and extracted current density
-    diagnosticsManager->createSimulationSummary(zlocsummary, summary_file_tag, append_at_end,
-                                               particleManager->getParticles(),
-                                               fileManager->getOutputSummaryFolder(),
-                                               geometryManager->getGeometry(),
-                                               fieldManager->getPotential(),
-                                               fieldManager->getMagnetic(),
-                                               extsimJ);  // Pass extracted current density
-}
-
-void ManageSimulation::create_simulation_summary(double zlocsummary, const std::string& summary_file_tag, 
-                                                bool append_at_end, particle_kind pk) {
-    diagnosticsManager->createSimulationSummary(zlocsummary, summary_file_tag, append_at_end,
-                                               particleManager->getParticleSpecies(), pk,
-                                               fileManager->getOutputSummaryFolder());
-}
-
-// Individual simulation summary for scan
-void ManageSimulation::create_individual_simulation_summary(int scan_index, const std::string& simulation_tag,
-                                         double zlocsummary, particle_kind pk) {
-    // Calculate extracted current density at EG exit using ParticleManager
-    double oriJ = parameters->getJIon();  // Original input current density
-    double extsimJ = 0.0;  // Will be filled by checkEGExtractedCurrent
-    
-    // Get the extracted current density
-    bool eg_check = particleManager->checkEGExtractedCurrent(oriJ, extsimJ, *parameters);
-    
-    if (debug) {
-        logfile << "DEBUG: Individual summary EG extracted current check: " << (eg_check ? "PASS" : "FAIL") << endl;
-        logfile << "DEBUG: Target J=" << oriJ << " A/m², Extracted J=" << extsimJ << " A/m²" << endl;
-    }
-    
-    diagnosticsManager->createIndividualSimulationSummary(scan_index, zlocsummary,
-                                                         particleManager->getParticles(),
-                                                         extsimJ,
-                                                         fileManager.get(),
-                                                         pk);
-}
-
-// Add to scan-level beam properties summary
-void ManageSimulation::add_to_scan_beam_properties_summary(int scan_index, const std::string& simulation_tag,
-                                        const std::string& scan_folder, const std::string& scan_file_tag,
-                                        double zlocsummary, particle_kind pk) {
-    // Calculate extracted current density at EG exit using ParticleManager
-    double oriJ = parameters->getJIon();  // Original input current density
-    double extsimJ = 0.0;  // Will be filled by checkEGExtractedCurrent
-    const ParticleDataBase3D* beam_property_particles = particleManager->getParticles();
-    const std::vector<ParticleDataBase3D*>& particle_species = particleManager->getParticleSpecies();
-    int negion_index = get_particle_int(PARTICLE_HM);
-    if (negion_index >= 0 && negion_index < static_cast<int>(particle_species.size()) && particle_species[negion_index]) {
-        beam_property_particles = particle_species[negion_index];
-    }
-    
-    // Get the extracted current density
-    particleManager->checkEGExtractedCurrent(oriJ, extsimJ, *parameters);
-    
-    diagnosticsManager->addToScanBeamPropertiesSummary(scan_index, simulation_tag, scan_folder, scan_file_tag,
-                                                      zlocsummary, beam_property_particles,
-                                                      extsimJ, fieldManager->getMagnetic(),
-                                                      fieldManager->getPotential(), pk);
-}
-
-// Add to scan-level grid power summary
-void ManageSimulation::add_to_scan_grid_power_summary(int scan_index, const std::string& simulation_tag,
-                                     const std::string& scan_folder, const std::string& scan_file_tag,
-                                     particle_kind pk) {
-    diagnosticsManager->addToScanGridPowerSummary(scan_index, simulation_tag, scan_folder, scan_file_tag,
-                                                 particleManager->getParticles(), 
-                                                 geometryManager->getGeometry(), pk);
-}
-
 void ManageSimulation::set_file_tag(const std::string& filetag) {
     fileManager->setFileTag(filetag);
 }
@@ -1044,7 +1062,7 @@ void PowerStruct::add(const Particle3D &pp) {
     Vec3D vel = pp.velocity();
     size_t ps = identify_particle_species(pp.m(), pp.q(), ionmass);
     bool addpart = true;
-    if (ps == PARTICLE_HM && vel[2] < 0) addpart = false;
+    if (ps == PARTICLE_NEGATIVE_ION && vel[2] < 0) addpart = false;
 
     if (addpart) {
         xdata.push_back(x[0]);
@@ -1070,8 +1088,8 @@ void PowerStruct::calculate_total_power() {
     total_power = 0.;
     total_current = 0.;
 
-    total_power_perspecies.assign(6, 0.0);
-    total_current_perspecies.assign(6, 0.0);
+    total_power_perspecies.assign(particle_kind_count(), 0.0);
+    total_current_perspecies.assign(particle_kind_count(), 0.0);
 
     total_power_pergen.assign(6, 0.0);
     total_current_pergen.assign(6, 0.0);
@@ -1218,7 +1236,7 @@ void ManageSimulation::export_simulation_results_to_vtk(const std::string& base_
     // Export particle trajectories
     if (parameters->getOutputVTKExportTracedParticles() &&
         particleManager && particleManager->getParticles() && particleManager->getParticles()->size() > 0) {
-        particleManager->exportTrajectoriesToVTK(base_filename);
+        particleManager->exportTrajectoriesToVTK(base_filename, parameters->getMIons());
     } else if (parameters->getOutputVTKExportTracedParticles()) {
         ibsimu.message(1) << "Warning: No particle trajectories available for VTK export" << endl;
     }

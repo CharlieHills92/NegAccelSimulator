@@ -8,16 +8,17 @@
 #include "DiagnosticsManager.h"
 #include "SimulationParameters.h"
 #include "FileManager.h"
-#include "TransverseData.h"
 #include "ManageSimulation_New.h"  // For PowerStruct
 #include "globals.h"
 #include "my_diagnostics.h"
 #include "funct.h"
 #include "cross_sections.h"
-#include <chrono>
+#include <algorithm>
 #include <iomanip>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <set>
 #include <cmath>
 
 #include "geometry.hpp"
@@ -32,6 +33,141 @@
 #include <iomanip>
 
 using namespace std;
+
+namespace {
+
+std::string gridPowerRowName(const SimulationParameters& params, int id) {
+    if (id == 0) {
+        return "In_volume";
+    }
+
+    SimulationParameters::BoundaryConditionDefinition definition;
+    if (params.tryGetBoundaryCondition(id, definition) && !definition.name.empty()) {
+        return definition.name;
+    }
+
+    switch (id) {
+        case 1: return "x-min";
+        case 2: return "x-max";
+        case 3: return "y-min";
+        case 4: return "y-max";
+        case 5: return "z-min";
+        case 6: return "z-max";
+        default: return string("Boundary_") + to_string(id);
+    }
+}
+
+bool defaultGridPowerIncludeInTotal(const SimulationParameters& params, int id) {
+    if (id <= 6) {
+        return false;
+    }
+
+    std::string name = gridPowerRowName(params, id);
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return name != "PG" && name != "PLASMA GRID";
+}
+
+std::vector<int> orderedGridPowerIds(const SimulationParameters& params, const Geometry* geometry) {
+    std::set<int> ids;
+    ids.insert(0);
+    for (int id = 1; id <= 6; ++id) {
+        ids.insert(id);
+    }
+    if (geometry != NULL) {
+        for (int id = 7; id <= static_cast<int>(geometry->number_of_solids()) + 6; ++id) {
+            ids.insert(id);
+        }
+    }
+    if (params.hasGeneratedGeometrySolids()) {
+        const std::vector<SimulationParameters::GeometrySolidDefinition>& solids =
+            params.getGeneratedGeometrySolids();
+        for (std::vector<SimulationParameters::GeometrySolidDefinition>::const_iterator it = solids.begin();
+             it != solids.end();
+             ++it) {
+            ids.insert(it->boundaryId);
+        }
+    }
+    const std::vector<SimulationParameters::DiagnosticGridRangeDefinition>& configured_rows =
+        params.getDiagnosticGridPowerRanges();
+    for (std::vector<SimulationParameters::DiagnosticGridRangeDefinition>::const_iterator it =
+             configured_rows.begin();
+         it != configured_rows.end();
+         ++it) {
+        ids.insert(it->id);
+    }
+    return std::vector<int>(ids.begin(), ids.end());
+}
+
+std::map<int, bool> configuredGridPowerIncludeMap(const SimulationParameters& params) {
+    std::map<int, bool> include_map;
+    const std::vector<SimulationParameters::DiagnosticGridRangeDefinition>& configured_rows =
+        params.getDiagnosticGridPowerRanges();
+    for (std::vector<SimulationParameters::DiagnosticGridRangeDefinition>::const_iterator it =
+             configured_rows.begin();
+         it != configured_rows.end();
+         ++it) {
+        include_map[it->id] = it->includeInTotal;
+    }
+    return include_map;
+}
+
+bool gridPowerIncludeInTotal(const SimulationParameters& params,
+                             const std::map<int, bool>& include_map,
+                             int id) {
+    std::map<int, bool>::const_iterator it = include_map.find(id);
+    if (it != include_map.end()) {
+        return it->second;
+    }
+    return defaultGridPowerIncludeInTotal(params, id);
+}
+
+int classifyGridPowerRowId(Particle3D& particle, const Geometry* geometry, double mesh_size) {
+    if (particle.get_status() != PARTICLE_COLL && particle.get_status() != PARTICLE_OUT) {
+        return 0;
+    }
+    if (geometry == NULL) {
+        return 0;
+    }
+
+    const Vec3D loc = particle.location();
+    const Vec3D vel = particle.velocity();
+    double probe_distance = mesh_size > 0.0 ? 0.25 * mesh_size : 0.25 * geometry->h();
+    if (!std::isfinite(probe_distance) || probe_distance <= 0.0) {
+        probe_distance = 1.0e-9;
+    }
+
+    const double speed_squared = vel.ssqr();
+    if (std::isfinite(speed_squared) && speed_squared > 0.0) {
+        const double inv_speed = 1.0 / std::sqrt(speed_squared);
+        const Vec3D probe(
+            loc[0] + vel[0] * inv_speed * probe_distance,
+            loc[1] + vel[1] * inv_speed * probe_distance,
+            loc[2] + vel[2] * inv_speed * probe_distance);
+        const uint32_t probe_id = geometry->inside(probe);
+        if (probe_id != 0U) {
+            return static_cast<int>(probe_id);
+        }
+    }
+
+    const uint32_t direct_id = geometry->inside(loc);
+    if (direct_id != 0U) {
+        return static_cast<int>(direct_id);
+    }
+
+    const Vec3D origo = geometry->origo();
+    const Vec3D maxpt = geometry->max();
+    if (loc[2] <= origo[2] + probe_distance) return 5;
+    if (loc[2] >= maxpt[2] - probe_distance) return 6;
+    if (loc[1] <= origo[1] + probe_distance) return 3;
+    if (loc[1] >= maxpt[1] - probe_distance) return 4;
+    if (loc[0] <= origo[0] + probe_distance) return 1;
+    if (loc[0] >= maxpt[0] - probe_distance) return 2;
+    return 0;
+}
+
+} // namespace
 
 void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, int iteration, 
                                                const string& outfile, bool append_at_end, 
@@ -74,7 +210,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
         
         if (debug) std::cerr << "DEBUG: About to enter try block" << std::endl << std::flush;
         try {
-            if (debug) std::cerr << "DEBUG: Inside try block, creating TransverseData" << std::endl << std::flush;
+            if (debug) std::cerr << "DEBUG: Inside try block, gathering plane diagnostics" << std::endl << std::flush;
             // Trajectory diagnostics at specific z location
             TrajectoryDiagnosticData tdata;
             vector<trajectory_diagnostic_e> diagnostics = {
@@ -206,7 +342,8 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
     generateDiagnosticData(diagzpos, iteration, outfile, false, particles);
 }
 
-void DiagnosticsManager::createPlots(int argc, char **argv, const Geometry* geometry,
+void DiagnosticsManager::createPlots(int argc, char **argv, const SimulationParameters& params,
+                                    const Geometry* geometry,
                                     const EpotField* potential, const MeshVectorField* magnetic,
                                     const EpotEfield* electric, const MeshScalarField* spacecharge,
                                     const ParticleDataBase3D* particles, const string& plot_folder,
@@ -237,8 +374,14 @@ void DiagnosticsManager::createPlots(int argc, char **argv, const Geometry* geom
     logfile << "zy plotted!" << endl << flush;
     
     // Additional plotting for meniscus region
-    if (potential) {
-        geomplotter.set_ranges(0, -0.01, 0.034, 0.01);
+    const SimulationParameters::DiagnosticMeniscusPlotDefinition& meniscus =
+        params.getDiagnosticMeniscusPlot();
+    if (potential && meniscus.enabled) {
+        geomplotter.set_ranges(
+            meniscus.zMinMeters,
+            meniscus.transverseMinMeters,
+            meniscus.zMaxMeters,
+            meniscus.transverseMaxMeters);
         geomplotter.set_view(VIEW_ZX, -1);
         geomplotter.plot_png(plot_folder + file_tag + "_MENISCUS_plot_zx.png");
         logfile << "Meniscus zx plotted!" << endl << flush;
@@ -251,7 +394,8 @@ void DiagnosticsManager::createPlots(int argc, char **argv, const Geometry* geom
     if (debug) logfile << "Done!" << endl << flush;
 }
 
-void DiagnosticsManager::createPlots(int argc, char **argv, const Geometry* geometry,
+void DiagnosticsManager::createPlots(int argc, char **argv, const SimulationParameters& params,
+                                    const Geometry* geometry,
                                     const EpotField* potential, const MeshVectorField* magnetic,
                                     const EpotEfield* electric, const MeshScalarField* spacecharge,
                                     const ParticleDataBase3D* particles,
@@ -267,7 +411,7 @@ void DiagnosticsManager::createPlots(int argc, char **argv, const Geometry* geom
     }
     
     // Create plots for specific particle species
-    createPlots(argc, argv, geometry, potential, magnetic, electric, spacecharge,
+    createPlots(argc, argv, params, geometry, potential, magnetic, electric, spacecharge,
                pdb, plot_folder, file_tag + "_" + get_particle_name(pk));
 }
 
@@ -279,6 +423,9 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
     if (!particles || !geometry) {
         throw Error(ERROR_LOCATION, "Missing required objects for analysis (particles or geometry)");
     }
+    if (!fileManager) {
+        throw Error(ERROR_LOCATION, "Missing FileManager for diagnostics output generation");
+    }
     
     if (debug) logfile << "\n" << flush;
     if (debug) logfile << "DEBUG: geometry->ORIGO: " << geometry->origo(0) << " " << geometry->origo(1) << " " << geometry->origo(2) << " " << endl << flush;
@@ -287,28 +434,24 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
     MeshScalarField tdens(*geometry);
     particles->build_trajectory_density_field(tdens);
     
-    // Get diagnostic file names using FileManager
-    string diagfile;
-    if (fileManager) {
-        diagfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_diagnostic_summary.txt";
-    } else {
-        diagfile = "TEST_MTF/TEST_MTF_1_diagnostic_summary.txt";  // Fallback
-    }
+    string diagfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_diagnostic_summary.txt";
     
-    // Create diagnostic z-locations using geometry (matching original implementation)
-    double z_start = geometry->origo(2);
-    Vec3D lastpt = geometry->max();
-    double z_end = lastpt[2] - params.getMeshSize();
-    size_t steps = 21;
-    double delta_z = (z_end - z_start) / steps;
     vector<double> zlocs;
-    
-    for (size_t ii = 0; ii < steps; ii++) {
-        zlocs.push_back(z_start + ii * delta_z);
+    if (params.hasDiagnosticSampleZPositions()) {
+        zlocs = params.getDiagnosticSampleZPositions();
+    } else {
+        double z_start = geometry->origo(2);
+        Vec3D lastpt = geometry->max();
+        double z_end = lastpt[2] - params.getMeshSize();
+        size_t steps = 21;
+        double delta_z = (z_end - z_start) / steps;
+        for (size_t ii = 0; ii < steps; ii++) {
+            zlocs.push_back(z_start + ii * delta_z);
+        }
     }
     
     logfile << "Diagnostic data for ALL particles in file " << diagfile << "\n" << flush;
-    logfile << "Save diagnostic data at " << steps << " points with field calculations...\n" << flush;
+    logfile << "Save diagnostic data at " << zlocs.size() << " points with field calculations...\n" << flush;
     
     // Call enhanced diagnostic generation WITH field objects
     generateDiagnosticData(zlocs, 0, diagfile, false, particles, geometry, potential, magnetic);
@@ -318,12 +461,6 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
     // Get grid locations from parameters if available, otherwise use default values
     
     try {
-        // Try to get grid positions from simulation parameters
-        // This would need to be implemented in SimulationParameters class
-        // For now, use hardcoded MTF grid positions as fallback
-        // zgrids = {0.009, 0.015, 0.032, 0.120, 0.137, 0.225, 0.242, 0.330, 0.347, 0.435, 0.452, 0.540, 0.557};
-        // zgrids = geometryManager->getZGrids();
-
         // Create subset excluding first element (matching original logic)
         vector<double> zg;
         if (zgrids.size() > 1) {
@@ -334,10 +471,7 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
             zg = {z_fallback};
         }
         
-        string gridfile = "statsatgrids.txt";
-        if (fileManager) {
-            gridfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_statsatgrids.txt";
-        }
+        string gridfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_statsatgrids.txt";
         
         if (debug) logfile << "DEBUG: Save diagnostic data at grids with field calculations\n" << flush;
         if (debug) cout << "DEBUG: Save diagnostic data at grids\n" << flush;
@@ -347,10 +481,7 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
         
     } catch (const std::exception& e) {
         if (debug) logfile << "DEBUG: Error processing grid data: " << e.what() << endl << flush;
-        // Continue with fallback grid analysis derived from geometry bounds
-        vector<double> fallback_zgrids = {0.009, geometry->max()[2] - params.getMeshSize()};
-        string gridfile = "particlesatgrids.txt";
-        generateDiagnosticData(fallback_zgrids, 0, gridfile, false, particles, geometry, potential, magnetic);
+        ibsimu.message(1) << "Warning: grid-position diagnostics were not generated: " << e.what() << endl;
     }
     
     if (debug) logfile << "DEBUG: analysis with field calculations ended" << endl << flush;
@@ -368,6 +499,9 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
     if (!particles || !geometry) {
         throw Error(ERROR_LOCATION, "Missing required objects for analysis (particles or geometry)");
     }
+    if (!fileManager) {
+        throw Error(ERROR_LOCATION, "Missing FileManager for diagnostics output generation");
+    }
     
     if (debug) logfile << "\n" << flush;
     if (debug) logfile << "DEBUG: geometry->ORIGO: " << geometry->origo(0) << " " << geometry->origo(1) << " " << geometry->origo(2) << " " << endl << flush;
@@ -376,28 +510,24 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
     MeshScalarField tdens(*geometry);
     particles->build_trajectory_density_field(tdens);
     
-    // Get diagnostic file names using FileManager
-    string diagfile;
-    if (fileManager) {
-        diagfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_diagnostic_summary.txt";
-    } else {
-        diagfile = "TEST_MTF/TEST_MTF_1_diagnostic_summary.txt";  // Fallback
-    }
+    string diagfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_diagnostic_summary.txt";
     
-    // Create diagnostic z-locations using geometry (matching original implementation)
-    double z_start = geometry->origo(2);
-    Vec3D lastpt = geometry->max();
-    double z_end = lastpt[2] - params.getMeshSize();
-    size_t steps = 21;
-    double delta_z = (z_end - z_start) / steps;
     vector<double> zlocs;
-    
-    for (size_t ii = 0; ii < steps; ii++) {
-        zlocs.push_back(z_start + ii * delta_z);
+    if (params.hasDiagnosticSampleZPositions()) {
+        zlocs = params.getDiagnosticSampleZPositions();
+    } else {
+        double z_start = geometry->origo(2);
+        Vec3D lastpt = geometry->max();
+        double z_end = lastpt[2] - params.getMeshSize();
+        size_t steps = 21;
+        double delta_z = (z_end - z_start) / steps;
+        for (size_t ii = 0; ii < steps; ii++) {
+            zlocs.push_back(z_start + ii * delta_z);
+        }
     }
     
     logfile << "Diagnostic data for ALL particles in file " << diagfile << "\n" << flush;
-    logfile << "Save diagnostic data at " << steps << " points with field calculations...\n" << flush;
+    logfile << "Save diagnostic data at " << zlocs.size() << " points with field calculations...\n" << flush;
     
     // Call enhanced diagnostic generation WITH field objects for all particles
     generateDiagnosticData(zlocs, 0, diagfile, false, particles, geometry, potential, magnetic);
@@ -405,24 +535,12 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
 
     vector<double> zlocsummary_vec = {zlocsummary};
 
-    // Species-specific analysis (matching original INCLUDE_STRIPPING==2 logic)
-    if (include_stripping && !particles_species.empty()) {
+    // Keep the single-plane negative-ion diagnostic table for downstream consumers.
+    if (include_stripping && !particles_species.empty() && params.getDiagnosticWriteNegativeIonSummary()) {
         for (size_t ii = 0; ii < particles_species.size(); ii++) {
             if (particles_species[ii] && particles_species[ii]->size() > 0) {
-                string species_diagfile;
-                string summary_diagfile;
-                if (fileManager) {
-                    species_diagfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_species_" + std::to_string(ii) + "_diagnostic_summary.txt";
-                    summary_diagfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_NEGIONBEAM_diagnostic_summary.txt";
-                } else {
-                    species_diagfile = "TEST_MTF/TEST_MTF_1_species_" + std::to_string(ii) + "_diagnostic_summary.txt";  // Fallback
-                }
-                
-                logfile << "Diagnostic data for particle_species " << ii << " in file " << species_diagfile << "\n" << flush;
-                logfile << "Save diagnostic data at " << steps << " points... " << flush;
-                
-                generateDiagnosticData(zlocs, 0, species_diagfile, false, particles_species[ii], geometry, potential, magnetic);
-                if ( ii==0 ) {// Corresponds to only negative ions
+                string summary_diagfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_NEGIONBEAM_diagnostic_summary.txt";
+                if (params.getDiagnosticWriteNegativeIonSummary() && ii == 0) {
                     generateDiagnosticData(zlocsummary_vec, 0, summary_diagfile, false, particles_species[ii], geometry, potential, magnetic);
                 }
                 logfile << "Done!\n" << flush;
@@ -430,45 +548,15 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
         }
     }
     
-    // Grid analysis with proper grid positions (using parameters if available)
-    try {
-        // vector<double> zgrids = {0.009, 0.015, 0.032, 0.120, 0.137, 0.225, 0.242, 0.330, 0.347, 0.435, 0.452, 0.540, 0.557};
-        
-        // Create subset excluding first element (matching original logic)
-        vector<double> zg;
-        if (zgrids.size() > 1) {
-            zg = vector<double>(zgrids.begin() + 1, zgrids.end());
-        } else {
-            cout << "Error: zgrids does not have enough elements to create zg." << endl;
-            // Fallback: use domain exit plane derived from geometry
-            double z_fallback = geometry->max()[2] - params.getMeshSize();
-            zg = {z_fallback};
-        }
-        
-        string gridfile = "TEST_MTF/TEST_MTF_1_particlesatgrids.txt";
-        if (fileManager) {
-            gridfile = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_particlesatgrids.txt";
-        }
-        
-        if (debug) logfile << "DEBUG: Save diagnostic data at grids with field calculations\n" << flush;
-        if (debug) cout << "DEBUG: Save diagnostic data at grids\n" << flush;
-        
-        generateDiagnosticData(zg, 0, gridfile, false, particles, geometry, potential, magnetic);
-        
-    } catch (const std::exception& e) {
-        if (debug) logfile << "DEBUG: Error processing grid data: " << e.what() << endl << flush;
-        cout << "Error: " << e.what() << endl;
-    }
-    
     // Grid power load analysis for ALL particles
     logfile << " Analyzing grid power loads for ALL particles\n" << flush;
     try {
         double mesh_size = params.getMeshSize();
         double ionmass = params.getMIons();
-        string output_folder = fileManager ? fileManager->getOutputSummaryFolder() : "TEST_MTF/";
-        string file_tag = fileManager ? fileManager->getFileTag() : "TEST_MTF_1";
+        string output_folder = fileManager->getOutputSummaryFolder();
+        string file_tag = fileManager->getFileTag();
         
-        vector<double> grid_powers_all = analyzeGridPowerLoads(particles, zgrids, mesh_size, 
+        vector<double> grid_powers_all = analyzeGridPowerLoads(particles, params, mesh_size, 
                                                                geometry, ionmass, output_folder, 
                                                                file_tag + "_ALL", PARTICLE_ALL);
         
@@ -479,32 +567,30 @@ void DiagnosticsManager::performAnalysis(const ParticleDataBase3D* particles, co
     }
     
     // Grid power load analysis for each particle species
-    if (include_stripping && !particles_species.empty()) {
-        const particle_kind species_kinds[] = {PARTICLE_HM, PARTICLE_H0, PARTICLE_HP, 
-                                               PARTICLE_H2P, PARTICLE_H20, PARTICLE_E};
-        const char* species_names[] = {"HM", "H0", "HP", "H2P", "H20", "E"};
-        
-        for (size_t ii = 0; ii < particles_species.size() && ii < 6; ii++) {
+    if (include_stripping && !particles_species.empty() && params.getDiagnosticWritePerSpeciesGridPower()) {
+        for (size_t ii = 0; ii < particles_species.size() && ii < particle_kind_count(); ii++) {
             if (particles_species[ii] && particles_species[ii]->size() > 0) {
-                logfile << "Analyzing grid power loads for species " << species_names[ii] << "\n" << flush;
+                particle_kind species_kind = int2kind(static_cast<int>(ii));
+                std::string species_name = get_particle_name(species_kind);
+                logfile << "Analyzing grid power loads for species " << species_name << "\n" << flush;
 
                 try {
                     double mesh_size = params.getMeshSize();
                     double ionmass = params.getMIons();
-                    string output_folder = fileManager ? fileManager->getOutputSummaryFolder() : "TEST_MTF/";
-                    string file_tag = fileManager ? fileManager->getFileTag() : "TEST_MTF_1";
+                    string output_folder = fileManager->getOutputSummaryFolder();
+                    string file_tag = fileManager->getFileTag();
                     
-                    vector<double> grid_powers_species = analyzeGridPowerLoads(particles_species[ii], zgrids, 
+                    vector<double> grid_powers_species = analyzeGridPowerLoads(particles_species[ii], params, 
                                                                                mesh_size, geometry, ionmass, 
                                                                                output_folder, 
-                                                                               file_tag + "_" + species_names[ii], 
-                                                                               species_kinds[ii]);
+                                                                               file_tag + "_" + species_name, 
+                                                                               species_kind);
                     
-                    logfile << "Grid power analysis for species " << species_names[ii] 
+                    logfile << "Grid power analysis for species " << species_name 
                             << " completed with " << grid_powers_species.size() << " power values\n" << flush;
                 } catch (const std::exception& e) {
                     logfile << "Error in grid power analysis for species " 
-                            << species_names[ii] << ": " << e.what() << endl << flush;
+                            << species_name << ": " << e.what() << endl << flush;
                 }
             }
         }
@@ -537,217 +623,6 @@ void DiagnosticsManager::printTrajectoryData(const string& filename, const Parti
     ibsimu.message(1) << "Trajectory data saved to: " << filename << endl;
 }
 
-void DiagnosticsManager::createSimulationSummary(double zlocsummary, const string& summary_file_tag, 
-                                                 bool append_at_end, const ParticleDataBase3D* particles,
-                                                 const string& outsummary_fold) {
-    
-    // Debug output to file
-    // ofstream debugfile("debug_summary_call.txt", ios::app);
-    // debugfile << "createSimulationSummary called with zlocsummary=" << zlocsummary << " tag=" << summary_file_tag << endl;
-    // debugfile.flush();
-    // debugfile.close();
-    
-    if (debug) logfile << "DEBUG: Creating simulation summary" << endl << flush;
-    
-    vector<double> zpos;
-    zpos.push_back(zlocsummary);
-    
-    string strbeamprops = outsummary_fold + summary_file_tag + "_beamprops.txt";
-    generateDiagnosticData(zpos, 0, strbeamprops, false, particles);
-    
-    // Add error handling for TransverseData construction
-    try {
-        TransverseData res(strbeamprops);
-        
-        if (debug) logfile << "DEBUG: zlocsummary: " << zlocsummary << endl << flush;
-        
-        // Summary calculations would go here
-        // This would involve power calculations, efficiency analysis, etc.
-        
-        ibsimu.message(1) << "Simulation summary created" << endl;
-    } catch (const std::exception& e) {
-        if (debug) logfile << "DEBUG: Error reading TransverseData from " << strbeamprops << ": " << e.what() << endl << flush;
-        ibsimu.message(1) << "Warning: Could not read beam properties from " << strbeamprops << ": " << e.what() << endl;
-        return; // Exit gracefully instead of crashing
-    }
-}
-
-void DiagnosticsManager::createSimulationSummary(double zlocsummary, const string& summary_file_tag, 
-                                                 bool /*append_at_end*/, 
-                                                 const vector<ParticleDataBase3D*>& particles_species,
-                                                 particle_kind pk, const string& outsummary_fold) {
-    
-    string strbeamprops = outsummary_fold + summary_file_tag + "_" + get_particle_name(pk) + "_beamprops.txt";
-    generateDiagnosticData({zlocsummary}, 0, strbeamprops, false, particles_species[get_particle_int(pk)]);
-    
-    // Add error handling for TransverseData construction
-    try {
-        TransverseData res(strbeamprops);
-        
-        // Species-specific summary calculations would go here
-        
-        ibsimu.message(1) << "Species-specific simulation summary created for " << get_particle_name(pk) << endl;
-    } catch (const std::exception& e) {
-        if (debug) logfile << "DEBUG: Error reading TransverseData from " << strbeamprops << ": " << e.what() << endl << flush;
-        ibsimu.message(1) << "Warning: Could not read beam properties from " << strbeamprops << ": " << e.what() << endl;
-        return; // Exit gracefully instead of crashing
-    }
-}
-
-void DiagnosticsManager::createSimulationSummary(double zlocsummary, const string& summary_file_tag, 
-                                                 bool append_at_end, const ParticleDataBase3D* particles,
-                                                 const string& outsummary_fold,
-                                                 const Geometry* geometry, const EpotField* potential, 
-                                                 const MeshVectorField* magnetic) {
-    double extracted_current_density = 0.0;
-
-    // Preserve legacy behavior for this overload: use the same z-plane current density
-    // as both accelerated and extracted current density.
-    try {
-        TrajectoryDiagnosticData tdata;
-        vector<trajectory_diagnostic_e> diagnostics = {
-            DIAG_X, DIAG_Y, DIAG_Z, DIAG_VX, DIAG_VY, DIAG_VZ,
-            DIAG_CURR, DIAG_MASS, DIAG_CHARGE, DIAG_NO
-        };
-        const_cast<ParticleDataBase3D*>(particles)->trajectories_at_plane(tdata, AXIS_Z, zlocsummary, diagnostics);
-        double net_current = 0.0;
-        for (size_t i = 0; i < tdata.traj_size(); i++) {
-            net_current += tdata(i, 6);
-        }
-        double pg_aperture_area = M_PI * 0.007 * 0.007;
-        extracted_current_density = (pg_aperture_area > 0.0) ? std::abs(net_current) / pg_aperture_area : 0.0;
-    } catch (...) {
-        extracted_current_density = 0.0;
-    }
-
-    createSimulationSummary(zlocsummary, summary_file_tag, append_at_end,
-                            particles, outsummary_fold, geometry, potential,
-                            magnetic, extracted_current_density);
-}
-
-void DiagnosticsManager::createSimulationSummary(double zlocsummary, const string& summary_file_tag, 
-                                                 bool append_at_end, const ParticleDataBase3D* particles,
-                                                 const string& outsummary_fold,
-                                                 const Geometry* geometry, const EpotField* potential, 
-                                                 const MeshVectorField* magnetic, double extracted_current_density) {
-    
-    // Debug output to file
-    ofstream debugfile("debug_summary_call.txt", ios::app);
-    debugfile << "createSimulationSummary called with FIELD CALCULATIONS and EXTRACTED CURRENT: zlocsummary=" 
-              << zlocsummary << " tag=" << summary_file_tag << " extJ=" << extracted_current_density << endl;
-    debugfile.flush();
-    debugfile.close();
-    
-    if (debug) logfile << "DEBUG: Creating simulation summary with field calculations and extracted current density" << endl << flush;
-    
-    vector<double> zpos;
-    zpos.push_back(zlocsummary);
-    
-    string strbeamprops = outsummary_fold + summary_file_tag + "_beamprops.txt";
-    // Use the enhanced version with field calculations
-    generateDiagnosticData(zpos, 0, strbeamprops, false, particles, geometry, potential, magnetic);
-    
-    // Add error handling for TransverseData construction - use proper try-catch with constructor
-    try {
-        TransverseData res(strbeamprops);
-        
-        if (debug) logfile << "DEBUG: zlocsummary: " << zlocsummary << endl << flush;
-        
-        // Perform grid power analysis if geometry information is available
-        if (geometry) {
-            // Get default grid positions for MTF (or use provided zgrids if available)
-            vector<double> default_zgrids = {0.0, 0.009, 0.015, 0.032, 0.120, 0.137, 0.225, 0.242, 0.330, 0.347, 0.435, 0.452, 0.540, 0.557};
-        
-        // Analyze grid power loads (using default ion mass of 1.0)
-        double mesh_size = 0.001; // Default mesh size 1mm
-        double ionmass = 1.0;     // Default hydrogen mass
-        
-        vector<double> grid_currents;
-        vector<double> grid_powers = analyzeGridPowerLoads(particles, default_zgrids, mesh_size, 
-                                  geometry, ionmass, outsummary_fold, 
-                                  summary_file_tag, PARTICLE_ALL,
-                                  &grid_currents);
-        
-        if (debug) logfile << "DEBUG: Grid power analysis completed with " << grid_powers.size() << " power values" << endl << flush;
-        
-        // Calculate total beam power on grids (excluding plasma grid #7)
-        double full_beam_power = 0.0;
-        for (size_t qq = 6; qq < grid_powers.size(); qq++) {
-            if (qq != 7) { // Exclude plasma grid
-                full_beam_power += grid_powers[qq];
-            }
-        }
-        
-        if (debug) logfile << "DEBUG: Total beam power on grids: " << full_beam_power << " W" << endl << flush;
-        
-        // Create detailed summary file with all data (similar to original implementation)
-        string summary_filename = outsummary_fold + summary_file_tag + ".txt";
-        ofstream summary_file;
-        
-        if (append_at_end) {
-            summary_file.open(summary_filename, ios_base::app);
-        } else {
-            summary_file.open(summary_filename);
-            // Write header
-            summary_file << "zloc(mm)\tUext(kV)\tUtot(kV)\taccJ(A/m2)\textJ(A/m2)\t"
-                        << "xave(mm)\txmax(mm)\txmin(mm)\t"
-                        << "yave(mm)\tymax(mm)\tymin(mm)\t"
-                        << "xpave(mrad)\typave(mrad)\tdivx(mrad)\tdivy(mrad)\t"
-                        << "epot(kV)\tBy(mT)\tfull_pow(W)\tout_pow(W)\t";
-            for (size_t ii = 7; ii < grid_powers.size(); ii++) {
-                summary_file << "pow_S" << ii << "(W)\t" << "curr_S" << ii << "(A)\t";
-            }
-            summary_file << "\n" << flush;
-        }
-        
-        if (summary_file.is_open()) {
-            // Calculate accelerated current density using PG aperture area (circle with 7mm radius)
-            double pg_aperture_area = M_PI * 0.007 * 0.007;  // π × (7mm)² = 1.539×10⁻⁴ m²
-            double current_A = res.get_current(0);  // Current in Amperes
-            double accelerated_current_density = abs(current_A) / pg_aperture_area;  // A/m²
-            
-            // Write summary data (using data from TransverseData)
-            summary_file << res.get_zloc(0)*1e3 << "\t"    // zloc in mm
-                        << "0.0" << "\t"                   // EG_VOLTAGE (placeholder)
-                        << "0.0" << "\t"                   // G5_VOLTAGE (placeholder)  
-                        << accelerated_current_density << "\t"  // Accelerated current density in A/m²
-                        << extracted_current_density << "\t"    // Extracted current density in A/m² (from ParticleManager)
-                        << res.get_xave(0)*1e3 << "\t"
-                        << res.get_xmax(0)*1e3 << "\t"
-                        << res.get_xmin(0)*1e3 << "\t"
-                        << res.get_yave(0)*1e3 << "\t"
-                        << res.get_ymax(0)*1e3 << "\t"
-                        << res.get_ymin(0)*1e3 << "\t"
-                        << res.get_xpave(0)*1e3 << "\t"
-                        << res.get_ypave(0)*1e3 << "\t"
-                        << res.get_divx(0)*1e3 << "\t"
-                        << res.get_divy(0)*1e3 << "\t"
-                        << res.get_epot(0)/1e3 << "\t"     // Potential in kV
-                        << res.get_Bfield(0)*1e3 << "\t"   // B-field in mT
-                        << full_beam_power << "\t"         // Total grid power
-                        << (grid_powers.size() > 6 ? grid_powers[6] : 0.0) << "\t"; // Exit power
-            
-            // Write individual grid powers (starting from grid index 7)
-            for (size_t ii = 7; ii < grid_powers.size(); ii++) {
-                double solid_current = (ii < grid_currents.size()) ? grid_currents[ii] : 0.0;
-                summary_file << grid_powers[ii] << "\t" << solid_current << "\t";
-            }
-            summary_file << "\n" << flush;
-            summary_file.close();
-            
-            ibsimu.message(1) << "Enhanced simulation summary with grid power analysis and extracted current density saved to: " << summary_filename << endl;
-        }
-    }
-    
-    ibsimu.message(1) << "Simulation summary created with field calculations and extracted current density" << endl;
-    
-    } catch (const std::exception& e) {
-        if (debug) logfile << "DEBUG: Error reading TransverseData from " << strbeamprops << ": " << e.what() << endl << flush;
-        ibsimu.message(1) << "Warning: Could not read beam properties from " << strbeamprops << ": " << e.what() << endl;
-        return; // Exit gracefully instead of crashing
-    }
-}
-
 void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, int iteration, 
                                                const string& outfile, bool append_at_end, 
                                                const ParticleDataBase3D* pdb,
@@ -757,7 +632,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
     if (debug) std::cerr << "DEBUG: generateDiagnosticData called with " << diagzpos.size() << " z-positions (with field calculations)" << std::endl << std::flush;
     
     if (debug) logfile << "DEBUG: Printing diagnostic data to " << outfile << " file\n" << flush;
-    
+
     vector<double> x[1];
     vector<double> y[1];
     vector<double> z[1];
@@ -769,14 +644,10 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
     vector<double> charge[1];
     vector<double> no_part[1];
 
-    // Load the same runtime-selected density profile used by stripping callbacks.
-    if (density_profile_filename_.empty()) {
-        throw Error(ERROR_LOCATION,
-                    "Diagnostics density profile is not configured");
-    }
-
     vector<double> pos, dens;
-    load_density_profile(density_profile_filename_, pos, dens);
+    if (!density_profile_filename_.empty()) {
+        load_density_profile(density_profile_filename_, pos, dens);
+    }
 
     ofstream pout5;
     if (append_at_end) {
@@ -799,7 +670,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
         
         if (debug) std::cerr << "DEBUG: About to enter try block" << std::endl << std::flush;
         try {
-            if (debug) std::cerr << "DEBUG: Inside try block, creating TransverseData" << std::endl << std::flush;
+            if (debug) std::cerr << "DEBUG: Inside try block, gathering plane diagnostics" << std::endl << std::flush;
             
             // Trajectory diagnostics at specific z location
             TrajectoryDiagnosticData tdata;
@@ -987,7 +858,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
 }
 
 std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleDataBase3D* particles,
-                                                             const std::vector<double>& zgrids,
+                                                             const SimulationParameters& params,
                                                              double mesh_size,
                                                              const Geometry* geometry,
                                                              double ionmass,
@@ -1002,104 +873,53 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
         return std::vector<double>();
     }
     
-    // Number of solids = geometry solids + 7 boundaries (as in original implementation)
-    size_t n_solids = geometry ? geometry->number_of_solids() : 0;
-    size_t total_categories = n_solids + 7; // +7 for domain boundaries as in original
+    std::vector<int> row_ids = orderedGridPowerIds(params, geometry);
+    std::map<int, bool> include_map = configuredGridPowerIncludeMap(params);
+    int max_row_id = row_ids.empty() ? 0 : row_ids.back();
+    size_t total_categories = static_cast<size_t>(max_row_id + 1);
     
-    if (debug) logfile << "DEBUG: N_SOLIDS: " << n_solids << ", total categories: " << total_categories << endl << flush;
+    if (debug) logfile << "DEBUG: Grid power rows: " << row_ids.size() << ", max row id: " << max_row_id << endl << flush;
     
     // Create collision vectors for each solid/boundary
     std::vector<std::vector<size_t>> colls(total_categories);
     
-    // Get domain boundaries
-    Vec3D origo = geometry->origo();
-    Vec3D maxpt = geometry->max();
-    double z_start = origo[2];
-    double z_end = maxpt[2];
-    double x_start = origo[0];
-    double x_end = maxpt[0];
-    double y_start = origo[1];
-    double y_end = maxpt[1];
-    
-    if (debug) logfile << "DEBUG: Domain boundaries: x[" << x_start << "," << x_end 
-                       << "] y[" << y_start << "," << y_end 
-                       << "] z[" << z_start << "," << z_end << "]" << endl << flush;
-    
     // Statistics counters
-    size_t particle_counts[6] = {0}; // HM, H0, HP, H2P, H20, E
+    std::vector<size_t> particle_counts(particle_kind_count(), 0); // family slots + electrons
     size_t generation_counts[6] = {0}; // gen 0,1,2,3,4,>4
     
     // Analyze each particle's end location
     for (size_t ii = 0; ii < particles->size(); ii++) {
         Particle3D& pp = const_cast<Particle3D&>(particles->particle(ii));
-        Vec3D loc = pp.location();
-        size_t isolid = 0;
+        const int row_id = classifyGridPowerRowId(pp, geometry, mesh_size);
         
         // Identify particle species
         particle_kind species = identify_particle_species(pp.m(), pp.q(), ionmass);
-        if (species >= 0 && species < 6) particle_counts[species]++;
+        if (species >= 0 && species < static_cast<particle_kind>(particle_counts.size())) {
+            particle_counts[species]++;
+        }
         
         // Track generations
         int gen = pp.gen() % 100;
         if (gen >= 0 && gen < 5) generation_counts[gen]++;
         else generation_counts[5]++; // gen > 4
         
-        // Determine collision solid/boundary
-        if (pp.get_status() == PARTICLE_COLL) {
-            // Check if particle hit a grid (based on z-coordinate)
-            bool hit_grid = false;
-            if (zgrids.size() >= 14) { // Need pairs of z positions for each grid
-                for (size_t grid_idx = 0; grid_idx < 7; grid_idx++) {
-                    size_t z_start_idx = grid_idx * 2;
-                    size_t z_end_idx = z_start_idx + 1;
-                    if (z_end_idx < zgrids.size()) {
-                        double grid_z_start = zgrids[z_start_idx];
-                        double grid_z_end = zgrids[z_end_idx];
-                        if ((loc[2] > grid_z_start - mesh_size) && (loc[2] < grid_z_end + mesh_size)) {
-                            isolid = 7 + grid_idx; // Grids start at solid index 7
-                            hit_grid = true;
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            if (!hit_grid) {
-                // Default to a grid category if no specific grid found
-                isolid = 0; // Default grid category
-            }
-        }
-        else if (pp.get_status() == PARTICLE_STRIP) {
-            isolid = 0; // Stripped particles
-        }
-        else {
-            // Determine boundary collision
-            if (loc[2] < z_start + mesh_size) isolid = 5; // z_min boundary
-            else if (loc[2] > z_end - mesh_size) isolid = 6; // z_max boundary (beam exit)
-            else if (loc[1] < y_start + mesh_size) isolid = 3; // y_min boundary
-            else if (loc[1] > y_end - mesh_size) isolid = 4; // y_max boundary
-            else if (loc[0] < x_start + mesh_size) isolid = 1; // x_min boundary
-            else if (loc[0] > x_end - mesh_size) isolid = 2; // x_max boundary
-            else isolid = 0; // Default (shouldn't happen)
-        }
-        
         // Record particle collision
-        if (isolid < total_categories) {
-            colls[isolid].push_back(ii);
+        if (row_id >= 0 && static_cast<size_t>(row_id) < total_categories) {
+            colls[row_id].push_back(ii);
         }
     }
     
     // Log particle statistics
     if (debug) {
         logfile << "DEBUG: Particle counts by collision solid:" << endl;
-        for (size_t ss = 0; ss < total_categories; ss++) {
-            logfile << "  solid " << ss << ": " << colls[ss].size() << " particles" << endl;
+        for (std::vector<int>::const_iterator id_it = row_ids.begin(); id_it != row_ids.end(); ++id_it) {
+            logfile << "  row " << *id_it << ": " << colls[*id_it].size() << " particles" << endl;
         }
         
-        const char* species_names[] = {"HM", "H0", "HP", "H2P", "H20", "E"};
         logfile << "DEBUG: Particle counts by species:" << endl;
-        for (int i = 0; i < 6; i++) {
-            logfile << "  " << species_names[i] << ": " << particle_counts[i] << endl;
+        for (size_t i = 0; i < particle_counts.size(); i++) {
+            logfile << "  " << get_particle_name(int2kind(static_cast<int>(i))) << ": "
+                    << particle_counts[i] << endl;
         }
         
         logfile << "DEBUG: Particle counts by generation:" << endl;
@@ -1110,10 +930,11 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
     }
     
     // Calculate power for each solid/grid
-    std::vector<double> power_per_solid;
-    std::vector<double> current_per_solid;
+    std::vector<double> power_per_solid(total_categories, 0.0);
+    std::vector<double> current_per_solid(total_categories, 0.0);
     
-    for (size_t ss = 0; ss < total_categories; ss++) {
+    for (std::vector<int>::const_iterator id_it = row_ids.begin(); id_it != row_ids.end(); ++id_it) {
+        const size_t ss = static_cast<size_t>(*id_it);
         PowerStruct pow;
         pow.ionmass = ionmass;
         pow.solid_idx = ss;
@@ -1131,9 +952,6 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
             // Calculate total power and current
             pow.calculate_total_power();
             
-            // Save detailed particle data for this solid
-            string solid_filename = output_folder + file_tag + "_parts_at_solid_" + std::to_string(ss) + ".dat";
-            pow.print(solid_filename);
         } else {
             pow.total_power = 0.0;
             pow.total_current = 0.0;
@@ -1141,25 +959,23 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
         
         // Store results based on particle kind
         if (pk == PARTICLE_ALL) {
-            power_per_solid.push_back(pow.total_power);
-            current_per_solid.push_back(pow.total_current);
+            power_per_solid[ss] = pow.total_power;
+            current_per_solid[ss] = pow.total_current;
         } else {
             int pk_index = get_particle_int(pk);
             if (pk_index >= 0 && pk_index < static_cast<int>(pow.total_power_perspecies.size())) {
-                power_per_solid.push_back(pow.total_power_perspecies[pk_index]);
-                current_per_solid.push_back(pow.total_current_perspecies[pk_index]);
-            } else {
-                power_per_solid.push_back(0.0);
-                current_per_solid.push_back(0.0);
+                power_per_solid[ss] = pow.total_power_perspecies[pk_index];
+                current_per_solid[ss] = pow.total_current_perspecies[pk_index];
             }
         }
     }
     
-    // Calculate total beam power (grids only, excluding plasma grid #7)
+    // Calculate total beam power using explicit row inclusion.
     double full_beam_power = 0.0;
-    for (size_t qq = 6; qq < power_per_solid.size(); qq++) {
-        if (qq != 7) { // Exclude plasma grid (solid index 7)
-            full_beam_power += power_per_solid[qq];
+    for (std::vector<int>::const_iterator id_it = row_ids.begin(); id_it != row_ids.end(); ++id_it) {
+        if (*id_it >= 0 && static_cast<size_t>(*id_it) < power_per_solid.size() &&
+            gridPowerIncludeInTotal(params, include_map, *id_it)) {
+            full_beam_power += power_per_solid[*id_it];
         }
     }
     
@@ -1170,23 +986,19 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
     ofstream summary_file(summary_filename);
     if (summary_file.is_open()) {
         summary_file << "# Grid Power Load Analysis" << endl;
-        summary_file << "# Solid_Index\tPower[W]\tCurrent[A]\tParticles\tDescription" << endl;
+        summary_file << "# ID\tPower[W]\tCurrent[A]\tParticles\tIncludeInTotal\tDescription" << endl;
         
-        const char* solid_descriptions[] = {
-            "Stripped", "X_min", "X_max", "Y_min", "Y_max", "Z_min", "Z_max_exit",
-            "Plasma_Grid", "Grid_1", "Grid_2", "Grid_3", "Grid_4", "Grid_5", "Grid_6"
-        };
-        
-        for (size_t ss = 0; ss < std::min(power_per_solid.size(), size_t(14)); ss++) {
-            const char* desc = (ss < 14) ? solid_descriptions[ss] : "Unknown";
-            summary_file << ss << "\t" 
-                        << power_per_solid[ss] << "\t"
-                        << current_per_solid[ss] << "\t"
-                        << colls[ss].size() << "\t"
-                        << desc << endl;
+        for (std::vector<int>::const_iterator id_it = row_ids.begin(); id_it != row_ids.end(); ++id_it) {
+            const int row_id = *id_it;
+            summary_file << row_id << "\t" 
+                        << power_per_solid[row_id] << "\t"
+                        << current_per_solid[row_id] << "\t"
+                        << colls[row_id].size() << "\t"
+                        << (gridPowerIncludeInTotal(params, include_map, row_id) ? "true" : "false") << "\t"
+                        << gridPowerRowName(params, row_id) << endl;
         }
         
-        summary_file << "# Total beam power (grids only): " << full_beam_power << " W" << endl;
+        summary_file << "# Total beam power (included rows only): " << full_beam_power << " W" << endl;
         summary_file.close();
         
         ibsimu.message(1) << "Grid power analysis saved to: " << summary_filename << endl;
@@ -1201,455 +1013,3 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
     return power_per_solid;
 }
 
-// New enhanced createSimulationSummary function with extracted current density
-void DiagnosticsManager::createSimulationSummary(double accelerated_current_density,
-                                                 double extracted_current_density,
-                                                 const std::string& filename, bool append_at_end,
-                                                 const ParticleDataBase3D* particles,
-                                                 const std::string& extra_info) {
-    
-    std::ofstream file;
-    if (append_at_end) {
-        file.open(filename, std::ios::app);
-    } else {
-        file.open(filename);
-    }
-    
-    if (!file.is_open()) {
-        std::cerr << "Error: Could not open summary file " << filename << std::endl;
-        return;
-    }
-
-    // Count particles at the exit (z > 0.04)
-    uint32_t particles_at_exit = 0;
-    uint32_t total_particles = 0;
-    
-    if (particles) {
-        total_particles = particles->size();
-        
-        for (uint32_t i = 0; i < total_particles; i++) {
-            Particle3D particle = particles->particle(i);
-            double z_pos = particle(3); // z position
-            
-            if (z_pos > 0.04) { // Particles that reached the exit
-                particles_at_exit++;
-            }
-        }
-    }
-    
-    // Calculate transmission efficiency
-    double transmission_efficiency = 0.0;
-    if (total_particles > 0) {
-        transmission_efficiency = (double(particles_at_exit) / double(total_particles)) * 100.0;
-    }
-    
-    // Get current timestamp
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    auto tm = *std::localtime(&time_t);
-    
-    file << "========================================" << std::endl;
-    file << "        SIMULATION SUMMARY" << std::endl;
-    file << "========================================" << std::endl;
-    file << "Timestamp: " << std::put_time(&tm, "%Y-%m-%d %H:%M:%S") << std::endl;
-    file << std::endl;
-    
-    file << "CURRENT DENSITY ANALYSIS:" << std::endl;
-    file << "  Accelerated Current Density: " << std::scientific << std::setprecision(6) 
-         << accelerated_current_density << " A/m²" << std::endl;
-    file << "  Extracted Current Density:   " << std::scientific << std::setprecision(6) 
-         << extracted_current_density << " A/m²" << std::endl;
-    file << std::endl;
-    
-    file << "PARTICLE STATISTICS:" << std::endl;
-    file << "  Total Particles Injected: " << total_particles << std::endl;
-    file << "  Particles at Exit (z>40mm): " << particles_at_exit << std::endl;
-    file << "  Transmission Efficiency: " << std::fixed << std::setprecision(1) 
-         << transmission_efficiency << "%" << std::endl;
-    file << std::endl;
-    
-    if (!extra_info.empty()) {
-        file << "ADDITIONAL INFORMATION:" << std::endl;
-        file << extra_info << std::endl;
-        file << std::endl;
-    }
-    
-    file << "========================================" << std::endl;
-    file << std::endl;
-    
-    file.close();
-    
-    std::cout << "Simulation summary saved to: " << filename << std::endl;
-    std::cout << "  Accelerated Current Density: " << std::scientific << std::setprecision(3) 
-              << accelerated_current_density << " A/m²" << std::endl;
-    std::cout << "  Extracted Current Density: " << std::scientific << std::setprecision(3) 
-              << extracted_current_density << " A/m²" << std::endl;
-    std::cout << "  Transmission Efficiency: " << std::fixed << std::setprecision(1) 
-              << transmission_efficiency << "%" << std::endl;
-}
-
-// Helper function to get particle species name
-std::string DiagnosticsManager::getParticleSpeciesName(particle_kind pk) const {
-    switch(pk) {
-        case PARTICLE_ALL: return "ALL";
-        case PARTICLE_HM: return "HM";
-        case PARTICLE_H0: return "H0";
-        case PARTICLE_HP: return "HP";
-        case PARTICLE_H2P: return "H2P";
-        case PARTICLE_H20: return "H20";
-        case PARTICLE_E: return "E";
-        default: return "UNKNOWN";
-    }
-}
-
-// Individual simulation summary (for single simulation in scan)
-void DiagnosticsManager::createIndividualSimulationSummary(int scan_index, double zlocsummary,
-                                      const ParticleDataBase3D* particles,
-                                      double extracted_current_density,
-                                      const FileManager* fileManager,
-                                      particle_kind pk) {
-    
-    if (!fileManager) {
-        logfile << "ERROR: FileManager is required for createIndividualSimulationSummary" << std::endl;
-        return;
-    }
-    
-    std::string species_suffix = (pk == PARTICLE_ALL) ? "" : ("_" + getParticleSpeciesName(pk));
-    std::string summary_filename = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + "_" + 
-                                  std::to_string(scan_index) + "_summary" + species_suffix + ".txt";
-    
-    logfile << "Creating individual simulation summary: " << summary_filename << std::endl;
-    
-    // Create the summary file
-    std::ofstream summary_file(summary_filename);
-    if (!summary_file.is_open()) {
-        logfile << "ERROR: Could not create summary file: " << summary_filename << std::endl;
-        return;
-    }
-    
-    // Write header
-    summary_file << "========================================" << std::endl;
-    summary_file << "    INDIVIDUAL SIMULATION SUMMARY" << std::endl;
-    summary_file << "========================================" << std::endl;
-    summary_file << "Simulation: " << fileManager->getFileTag() << std::endl;
-    summary_file << "Scan Index: " << scan_index << std::endl;
-    summary_file << "Species: " << getParticleSpeciesName(pk) << std::endl;
-    summary_file << "Analysis Z-location: " << zlocsummary*1000 << " mm" << std::endl;
-    summary_file << std::endl;
-    
-    // ===== BEAM PROPERTIES AT zlocsummary =====
-    summary_file << "========================================" << std::endl;
-    summary_file << "  BEAM PROPERTIES AT z=" << zlocsummary*1000 << " mm" << std::endl;
-    summary_file << "========================================" << std::endl;
-    
-    // Read beam properties from NEGIONBEAM diagnostic file generated by performAnalysis
-    std::string diagnostic_file = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + 
-                                  "_NEGIONBEAM_diagnostic_summary.txt";
-    std::ifstream diag_in(diagnostic_file);
-    
-    if (diag_in.is_open()) {
-        std::string line;
-        bool found = false;
-        
-        // Skip header
-        std::getline(diag_in, line);
-        
-        // Read the single data line (NEGIONBEAM file should contain only one line at zlocsummary)
-        if (std::getline(diag_in, line) && !line.empty() && line[0] != '#') {
-            std::istringstream iss(line);
-            int it;
-            double z_mm, current_mA, x_ave, x_max, x_min, y_ave, y_max, y_min;
-            double xp_ave, yp_ave, div_x, div_y, epot_kV, B_mT, rho, sigma;
-            
-            if (iss >> it >> z_mm >> current_mA >> x_ave >> x_max >> x_min >> y_ave >> y_max >> y_min 
-                    >> xp_ave >> yp_ave >> div_x >> div_y >> epot_kV >> B_mT >> rho >> sigma) {
-                found = true;
-                double current_A = current_mA / 1000.0;
-                double pg_aperture_area = M_PI * 0.007 * 0.007;
-                double beam_current_density = (pg_aperture_area > 0.0) ? std::abs(current_A) / pg_aperture_area : 0.0;
-                
-                summary_file << "Current: " << current_mA << " mA (" << current_A << " A)" << std::endl;
-                summary_file << "Beam Current Density: " << std::scientific << std::setprecision(4)
-                            << beam_current_density << " A/m²" << std::endl;
-                summary_file << "EG Exit Current Density: " << extracted_current_density << " A/m²" << std::endl;
-                summary_file << std::endl;
-                
-                summary_file << "Beam Center:" << std::endl;
-                summary_file << "  <x> = " << std::fixed << std::setprecision(3) << x_ave << " mm" << std::endl;
-                summary_file << "  <y> = " << y_ave << " mm" << std::endl;
-                summary_file << std::endl;
-                
-                summary_file << "Beam Extent:" << std::endl;
-                summary_file << "  x_max = " << x_max << " mm,  x_min = " << x_min << " mm" << std::endl;
-                summary_file << "  y_max = " << y_max << " mm,  y_min = " << y_min << " mm" << std::endl;
-                summary_file << std::endl;
-                
-                summary_file << "Beam Divergence:" << std::endl;
-                summary_file << "  <x'> = " << xp_ave << " mrad" << std::endl;
-                summary_file << "  <y'> = " << yp_ave << " mrad" << std::endl;
-                summary_file << "  Dx = " << div_x << " mrad" << std::endl;
-                summary_file << "  Dy = " << div_y << " mrad" << std::endl;
-                summary_file << std::endl;
-                
-                summary_file << "Fields:" << std::endl;
-                summary_file << "  Potential: " << epot_kV << " kV" << std::endl;
-                summary_file << "  Magnetic Field (By): " << B_mT << " mT" << std::endl;
-                summary_file << std::endl;
-                
-                summary_file << "Gas Properties:" << std::endl;
-                summary_file << "  Density: " << std::scientific << rho << " 1/m³" << std::endl;
-                summary_file << "  Stripping Cross Section: " << sigma << " m²" << std::endl;
-                summary_file << std::endl;
-            }
-        }
-        
-        if (!found) {
-            summary_file << "ERROR: Could not read beam properties data from file" << std::endl;
-            summary_file << std::endl;
-        }
-        
-        diag_in.close();
-    } else {
-        summary_file << "ERROR: Could not read diagnostic file: " << diagnostic_file << std::endl;
-        summary_file << std::endl;
-    }
-    
-    // ===== GRID POWER AND CURRENT LOADS =====
-    summary_file << "========================================" << std::endl;
-    summary_file << "  GRID POWER AND CURRENT LOADS" << std::endl;
-    summary_file << "========================================" << std::endl;
-    
-    // Read grid power analysis from file generated by performAnalysis
-    std::string grid_power_file = fileManager->getOutputSummaryFolder() + fileManager->getFileTag() + 
-                                  "_ALL_grid_power_summary.txt";
-    std::ifstream grid_in(grid_power_file);
-    
-    if (grid_in.is_open()) {
-        std::string line;
-        double total_power = 0.0;
-        double total_current = 0.0;
-        size_t total_particles = 0;
-        
-        // Skip header lines
-        while (std::getline(grid_in, line)) {
-            if (line.empty() || line[0] == '#') continue;
-            
-            std::istringstream iss(line);
-            int solid_idx;
-            double power_W, current_A;
-            size_t n_particles;
-            std::string description;
-            
-            if (iss >> solid_idx >> power_W >> current_A >> n_particles) {
-                // Read rest of line as description
-                std::getline(iss, description);
-                
-                // Accumulate totals (excluding boundaries 1-6)
-                if (solid_idx >= 7 && solid_idx != 7) {
-                    total_power += power_W;
-                    total_current += current_A;
-                }
-                total_particles += n_particles;
-                
-                // Print individual solid data
-                summary_file << "Solid " << std::setw(2) << solid_idx << ": "
-                            << std::setw(10) << std::fixed << std::setprecision(3) << power_W << " W, "
-                            << std::setw(8) << std::setprecision(6) << current_A << " A, "
-                            << std::setw(6) << n_particles << " particles"
-                            << description << std::endl;
-            }
-        }
-        
-        summary_file << std::endl;
-        summary_file << "TOTALS:" << std::endl;
-        summary_file << "  Total Grid Power (solids 8+): " << std::fixed << std::setprecision(3) 
-                    << total_power << " W" << std::endl;
-        summary_file << "  Total Grid Current: " << std::setprecision(6) << total_current << " A" << std::endl;
-        summary_file << "  Total Particles on All Solids: " << total_particles << std::endl;
-        summary_file << std::endl;
-        
-        grid_in.close();
-    } else {
-        summary_file << "ERROR: Could not read grid power file: " << grid_power_file << std::endl;
-        summary_file << "Please ensure performAnalysis was called before creating summary." << std::endl;
-        summary_file << std::endl;
-    }
-    
-    // ===== PARTICLE STATISTICS =====
-    summary_file << "========================================" << std::endl;
-    summary_file << "  PARTICLE STATISTICS" << std::endl;
-    summary_file << "========================================" << std::endl;
-    
-    if (particles) {
-        size_t total_particles = particles->size();
-        size_t indomain_particles = 0;
-        size_t collided_particles = 0;
-        size_t stripped_particles = 0;
-        size_t out_particles = 0;
-        
-        // Count particle fates
-        for (size_t i = 0; i < total_particles; i++) {
-            Particle3D& pp = const_cast<Particle3D&>(particles->particle(i));
-            particle_status_e status = pp.get_status();
-            
-            if (status == PARTICLE_OK) indomain_particles++;
-            else if (status == PARTICLE_COLL) collided_particles++;
-            else if (status == PARTICLE_STRIP) stripped_particles++;
-            else if (status == PARTICLE_OUT) out_particles++;
-        }
-        
-        summary_file << "Total Particles Simulated: " << total_particles << std::endl;
-        summary_file << "In domain: " << indomain_particles
-                    << " (" << std::fixed << std::setprecision(1)
-                    << (100.0 * indomain_particles / total_particles) << "%)" << std::endl;
-        summary_file << "Collided: " << collided_particles
-                    << " (" << (100.0 * collided_particles / total_particles) << "%)" << std::endl;
-        summary_file << "Stripped: " << stripped_particles 
-                    << " (" << (100.0 * stripped_particles / total_particles) << "%)" << std::endl;
-        summary_file << "Exited: " << out_particles
-                    << " (" << (100.0 * out_particles / total_particles) << "%)" << std::endl;
-        summary_file << std::endl;
-    }
-    
-    summary_file << "========================================" << std::endl;
-    summary_file << "      END OF SUMMARY" << std::endl;
-    summary_file << "========================================" << std::endl;
-    
-    summary_file.close();
-    
-    logfile << "Individual simulation summary created: " << summary_filename << std::endl;
-}
-
-// Add entry to scan-level beam properties summary
-void DiagnosticsManager::addToScanBeamPropertiesSummary(int scan_index, const std::string& simulation_tag,
-                                   const std::string& scan_folder, const std::string& scan_file_tag,
-                                   double zlocsummary, const ParticleDataBase3D* particles,
-                                   double extracted_current_density, const MeshVectorField* /*magnetic*/,
-                                   const EpotField* /*potential*/, particle_kind pk) {
-    
-    std::string species_suffix = (pk == PARTICLE_ALL) ? "" : ("_" + getParticleSpeciesName(pk));
-    std::string beamprops_filename = scan_folder + "/" + scan_file_tag + "_beamprops" + species_suffix + ".txt";
-    
-    bool file_exists = std::ifstream(beamprops_filename).good();
-    std::ofstream file(beamprops_filename, std::ios::app);
-    
-    if (!file_exists) {
-        // Write header for new file
-        file << "# Scan-level beam properties summary" << std::endl;
-        file << "# scan_idx sim_tag zloc[mm] accJ[A/m2] extJ[A/m2] n_particles transmission[%]" << std::endl;
-    }
-    
-    // Calculate beam properties at specified z location using IBSimu trajectory diagnostics
-    TrajectoryDiagnosticData tdata;
-    std::vector<trajectory_diagnostic_e> diagnostics = {
-        DIAG_X, DIAG_Y, DIAG_Z, DIAG_VX, DIAG_VY, DIAG_VZ,
-        DIAG_CURR, DIAG_MASS, DIAG_CHARGE, DIAG_NO
-    };
-    
-    // Get trajectories at the specified z plane with error handling
-    size_t n_particles = 0;
-    double accelerated_current_density = 0.0;
-    double pg_aperture_area = M_PI * 0.007 * 0.007; // 7mm radius in m²
-    
-    try {
-        if (debug) logfile << "DEBUG: About to call trajectories_at_plane for scan beam properties at z=" << zlocsummary << std::endl;
-        const_cast<ParticleDataBase3D*>(particles)->trajectories_at_plane(tdata, AXIS_Z, zlocsummary, diagnostics);
-        if (debug) logfile << "DEBUG: trajectories_at_plane call completed for scan beam properties" << std::endl;
-        n_particles = tdata.traj_size();
-        
-        if (n_particles > 0) {
-            // Calculate current from particle current contributions
-            double net_current = 0.0;
-            for (size_t i = 0; i < n_particles; i++) {
-                net_current += tdata(i, 6);  // DIAG_CURR is column 6
-            }
-            accelerated_current_density = std::abs(net_current) / pg_aperture_area;
-        }
-    } catch (const ErrorRange& e) {
-        if (debug) logfile << "DEBUG: ErrorRange exception in trajectories_at_plane for scan beam properties" << endl;
-        // Use fallback values - estimate from total particle count
-        n_particles = particles ? particles->size() : 0;
-        accelerated_current_density = extracted_current_density; // Use extracted as fallback
-    } catch (const std::exception& e) {
-        if (debug) logfile << "DEBUG: Error in trajectories_at_plane for scan beam properties: " << e.what() << endl;
-        // Use fallback values - estimate from total particle count
-        n_particles = particles ? particles->size() : 0;
-        accelerated_current_density = extracted_current_density; // Use extracted as fallback
-    }
-    
-    double transmission_efficiency = (n_particles > 0 && accelerated_current_density > 0) ? 
-                                   (accelerated_current_density / extracted_current_density) * 100.0 : 0.0;
-    
-    // Write data line
-    file << scan_index << " " << simulation_tag << " " 
-         << std::fixed << std::setprecision(3) << zlocsummary*1000 << " " 
-         << std::scientific << std::setprecision(6)
-         << accelerated_current_density << " " << extracted_current_density << " "
-         << n_particles << " " << std::fixed << std::setprecision(1) << transmission_efficiency
-         << std::endl;
-    
-    file.close();
-    logfile << "Added scan beam properties entry for " << simulation_tag << " (species: " 
-              << getParticleSpeciesName(pk) << ")" << std::endl;
-}
-
-// Add entry to scan-level grid power summary
-void DiagnosticsManager::addToScanGridPowerSummary(int scan_index, const std::string& simulation_tag,
-                              const std::string& scan_folder, const std::string& scan_file_tag,
-                              const ParticleDataBase3D* particles, const Geometry* /*geometry*/,
-                              particle_kind pk) {
-    
-    std::string species_suffix = (pk == PARTICLE_ALL) ? "" : ("_" + getParticleSpeciesName(pk));
-    std::string gridpower_filename = scan_folder + "/" + scan_file_tag + "_grid_power" + species_suffix + ".txt";
-    
-    bool file_exists = std::ifstream(gridpower_filename).good();
-    std::ofstream file(gridpower_filename, std::ios::app);
-    
-    if (!file_exists) {
-        // Write header for new file
-        file << "# Scan-level grid power summary" << std::endl;
-        file << "# scan_idx sim_tag total_particles total_grid_power_W total_grid_current_A" << std::endl;
-    }
-
-    size_t total_particles = particles ? particles->size() : 0;
-    double total_grid_power = 0.0;
-    double total_grid_current = 0.0;
-
-    std::string species_name = (pk == PARTICLE_ALL) ? "ALL" : getParticleSpeciesName(pk);
-    std::string source_grid_file = scan_folder + "/Summary/" + simulation_tag + "_" + species_name + "_grid_power_summary.txt";
-    std::ifstream grid_in(source_grid_file);
-
-    if (grid_in.is_open()) {
-        std::string line;
-        while (std::getline(grid_in, line)) {
-            if (line.empty() || line[0] == '#') {
-                continue;
-            }
-
-            std::istringstream iss(line);
-            int solid_idx;
-            double power_W, current_A;
-            size_t n_particles;
-            if (iss >> solid_idx >> power_W >> current_A >> n_particles) {
-                // Keep convention consistent with detailed summary: grids after plasma grid.
-                if (solid_idx >= 8) {
-                    total_grid_power += power_W;
-                    total_grid_current += current_A;
-                }
-            }
-        }
-        grid_in.close();
-    } else if (debug) {
-        logfile << "DEBUG: Could not open source grid power file for scan summary: " << source_grid_file << endl;
-    }
-
-    // Write data line
-    file << scan_index << " " << simulation_tag << " "
-         << total_particles << " "
-         << std::scientific << std::setprecision(6) << total_grid_power << " "
-         << total_grid_current << std::endl;
-    
-    file.close();
-    logfile << "Added scan grid power entry for " << simulation_tag << " (species: " 
-              << getParticleSpeciesName(pk) << ")" << std::endl;
-}

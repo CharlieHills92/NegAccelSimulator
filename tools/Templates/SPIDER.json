@@ -1,37 +1,84 @@
 {
   "name": "SPIDER",
-  "meshSizeMeters": 0.002,
+  "meshSizeMeters": 0.0005,
   "exportGeometryVtk": true,
   "domain": {
-    "xSizeMeters": 0.026,
-    "ySizeMeters": 0.028,
-    "zSizeMeters": 0.08,
+    "xSizeMeters": 0.03000000000000001,
+    "ySizeMeters": 0.03000000000000001,
+    "zSizeMeters": 0.09000000000000001,
     "zStartMeters": -0.003
   },
   "solids": [
     {
-      "name": "PG",
-      "kind": "solid",
+      "aperturePattern": {
+        "countX": 1,
+        "countY": 1,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.030000000000000006,
+        "pitchYMeters": 0.030000000000000006
+      },
       "boundaryId": 7,
-      "zProfileMeters": [0.0, 0.001],
-      "rProfileMeters": [0.01, 0.01],
-      "roundingRadiiMeters": [0.0, 0.0]
+      "kind": "solid",
+      "name": "PG",
+      "rProfileMeters": [
+        0.012,
+        0.007,
+        0.01
+      ],
+      "zProfileMeters": [
+        0.0,
+        0.006,
+        0.009
+      ]
     },
     {
-      "name": "EG",
-      "kind": "solid",
+      "aperturePattern": {
+        "countX": 1,
+        "countY": 1,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.030000000000000006,
+        "pitchYMeters": 0.030000000000000006
+      },
       "boundaryId": 8,
-      "zProfileMeters": [0.0, 0.001],
-      "rProfileMeters": [0.01, 0.01],
-      "roundingRadiiMeters": [0.0, 0.0]
+      "kind": "solid",
+      "name": "EG",
+      "rProfileMeters": [
+        0.0065,
+        0.0065,
+        0.0075
+      ],
+      "zProfileMeters": [
+        0.015,
+        0.023,
+        0.026
+      ]
     },
     {
-      "name": "GG",
-      "kind": "solid",
+      "aperturePattern": {
+        "countX": 1,
+        "countY": 1,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.03000000000000001,
+        "pitchYMeters": 0.030000000000000006
+      },
       "boundaryId": 9,
-      "zProfileMeters": [0.0, 0.001],
-      "rProfileMeters": [0.01, 0.01],
-      "roundingRadiiMeters": [0.0, 0.0]
+      "kind": "solid",
+      "name": "GG",
+      "rProfileMeters": [
+        0.008,
+        0.008,
+        0.0085,
+        0.009
+      ],
+      "zProfileMeters": [
+        0.061,
+        0.0695,
+        0.0695,
+        0.0735
+      ]
     }
   ]
 }

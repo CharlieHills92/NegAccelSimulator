@@ -74,11 +74,67 @@ void ParticleManager::defineParticleDatabase(const Geometry& geometry, const Sim
     bool pmirror[6] = {false, false, false, false, false, false};
     pdb->set_mirror(pmirror);
     pdb->set_surface_collision(true);
-    
-    // Beam definition - add rectangular beam with energy
+
     pdb->clear();
-    
-    // Get geometry boundaries for beam positioning
+
+    if (params.hasParticleSources()) {
+        const std::vector<SimulationParameters::ParticleSourceDefinition>& sources =
+            params.getParticleSources();
+        uint total_particles = 0U;
+        double total_current_density = 0.0;
+
+        for (std::vector<SimulationParameters::ParticleSourceDefinition>::const_iterator it = sources.begin();
+             it != sources.end();
+             ++it) {
+            const SimulationParameters::ParticleSourceDefinition& source = *it;
+
+            if (source.sourceModel != "uniform") {
+                throw Error(
+                    ERROR_LOCATION,
+                    "Only uniform particleSources are supported by the current C++ runtime");
+            }
+
+            Vec3D center(source.centerMeters[0], source.centerMeters[1], source.centerMeters[2]);
+            Vec3D main_direction(source.mainDirection[0], source.mainDirection[1], source.mainDirection[2]);
+            Vec3D reference_direction(
+                source.inPlaneReferenceDirection[0],
+                source.inPlaneReferenceDirection[1],
+                source.inPlaneReferenceDirection[2]);
+
+            Vec3D dir2 = cross(main_direction, reference_direction);
+            Vec3D dir1 = cross(dir2, main_direction);
+            if (main_direction.ssqr() == 0.0 || dir1.ssqr() == 0.0 || dir2.ssqr() == 0.0) {
+                throw Error(
+                    ERROR_LOCATION,
+                    "Particle source '" + source.id + "' has invalid mainDirection or inPlaneReferenceDirection");
+            }
+
+            pdb->add_rectangular_beam_with_energy(
+                source.particleCount,
+                source.currentDensityAm2,
+                source.chargeState,
+                source.massU,
+                source.axialEnergyEV,
+                source.parallelTemperatureEV,
+                source.perpendicularTemperatureEV,
+                center,
+                dir1,
+                dir2,
+                0.5 * source.widthMeters,
+                0.5 * source.heightMeters);
+
+            total_particles += source.particleCount;
+            total_current_density += source.currentDensityAm2;
+        }
+
+        particles = pdb;
+        ibsimu.message(1) << "Particle database created with " << total_particles
+                          << " particles from " << sources.size() << " configured source(s), total J="
+                          << total_current_density << " A/m²" << endl;
+        return;
+    }
+
+    // Legacy single-source fallback - beam center inferred from current geometry bounds.
     Vec3D ori = geometry.origo();
     Vec3D fin = geometry.max();
     double x_start = (ori[0] > -0.01) ? ori[0] : -0.01;
@@ -87,30 +143,23 @@ void ParticleManager::defineParticleDatabase(const Geometry& geometry, const Sim
     double x_end = (fin[0] < 0.01) ? fin[0] : 0.01;
     double y_end = (fin[1] < 0.01) ? fin[1] : 0.01;
 
-    // DEBUGGING: Uncomment to adjust beam width
-    // x_start = -0.002; x_end = 0.002; // Adjusted for beam width
-    // y_start = -0.002; y_end = 0.002; // Adjusted for beam width
-    
-    // Add rectangular beam with energy using parameters from scenario file
-	pdb->clear();
-    pdb->add_rectangular_beam_with_energy( 
-        params.getNParticles(),        // N_PARTICLES
-        params.getJIon(),             // J_ION [A/m^2]
-        params.getQIons(),            // Q_IONS [e]
-        params.getMIons(),            // M_IONS [amu]
-        params.getE0Z(),              // E0_Z [eV] - axial energy
-        params.getTPar(),             // TPAR [eV] - parallel temperature
-        params.getTPerp(),            // TPERP [eV] - perpendicular temperature
-        Vec3D(0.5*(x_start+x_end), 0.5*(y_start+y_end), z_start), // beam center
-        Vec3D(1,0,0),                 // x direction vector
-        Vec3D(0,1,0),                 // y direction vector
-        0.5*(x_end-x_start),          // beam width in x
-        0.5*(y_end-y_start)           // beam width in y
-    );
-    
+    pdb->add_rectangular_beam_with_energy(
+        params.getNParticles(),
+        params.getJIon(),
+        params.getQIons(),
+        params.getMIons(),
+        params.getE0Z(),
+        params.getTPar(),
+        params.getTPerp(),
+        Vec3D(0.5 * (x_start + x_end), 0.5 * (y_start + y_end), z_start),
+        Vec3D(1, 0, 0),
+        Vec3D(0, 1, 0),
+        0.5 * (x_end - x_start),
+        0.5 * (y_end - y_start));
+
     particles = pdb;
-    
-    ibsimu.message(1) << "Particle database created with " << params.getNParticles() 
+
+    ibsimu.message(1) << "Particle database created with " << params.getNParticles()
                       << " particles, J=" << params.getJIon() << " A/m²" << endl;
 }
 
@@ -143,11 +192,22 @@ void ParticleManager::defineParticleDatabase(const Geometry& geometry, const Sim
 void ParticleManager::fillParticleDatabases(const SimulationParameters& params) {
     // create pdb for each species
     if (params.getIncludeStripping() == 2) {
+        const particle_kind species_kinds[] = {
+            PARTICLE_NEGATIVE_ION,
+            PARTICLE_NEUTRAL_ATOM,
+            PARTICLE_POSITIVE_ION,
+            PARTICLE_MOLECULAR_POSITIVE_ION,
+            PARTICLE_MOLECULAR_NEUTRAL,
+            PARTICLE_TRIATOMIC_POSITIVE_ION,
+            PARTICLE_ELECTRON
+        };
+
         ParticleDataBase3D* pdbHm = new ParticleDataBase3D(*particles);
         ParticleDataBase3D* pdbH0 = new ParticleDataBase3D(*particles);
         ParticleDataBase3D* pdbHp = new ParticleDataBase3D(*particles);
         ParticleDataBase3D* pdbH2p = new ParticleDataBase3D(*particles);
         ParticleDataBase3D* pdbH20 = new ParticleDataBase3D(*particles);
+        ParticleDataBase3D* pdbH3p = new ParticleDataBase3D(*particles);
         ParticleDataBase3D* pdbe = new ParticleDataBase3D(*particles);
 
         *pdbHm = *particles;
@@ -155,12 +215,13 @@ void ParticleManager::fillParticleDatabases(const SimulationParameters& params) 
         *pdbHp = *particles;
         *pdbH2p = *particles;
         *pdbH20 = *particles;
+        *pdbH3p = *particles;
         *pdbe = *particles;
 
         if (debug) logfile << "\nDEBUG: SPECIES DATABASES CREATED. NOW CLEANING... \n" << flush;
         
         // Initialize counters for each species
-        size_t nHm = 0, nH0 = 0, nHp = 0, nH2p = 0, nH20 = 0, ne = 0;
+        size_t nHm = 0, nH0 = 0, nHp = 0, nH2p = 0, nH20 = 0, nH3p = 0, ne = 0;
         
         // Filter particles by species - iterate through all particles and identify species
         for (size_t id = 0; id < particles->size(); id++) {
@@ -170,55 +231,52 @@ void ParticleManager::fillParticleDatabases(const SimulationParameters& params) 
             particle_kind species = identify_particle_species(pp.m(), pp.q(), params.getMIons());
             
             // Reset trajectory for particles that don't belong to each species database
-            if (species != PARTICLE_HM) pdbHm->reset_trajectory(id);
+            if (species != PARTICLE_NEGATIVE_ION) pdbHm->reset_trajectory(id);
             else nHm++;
             
-            if (species != PARTICLE_H0) pdbH0->reset_trajectory(id);
+            if (species != PARTICLE_NEUTRAL_ATOM) pdbH0->reset_trajectory(id);
             else nH0++;
             
-            if (species != PARTICLE_HP) pdbHp->reset_trajectory(id);
+            if (species != PARTICLE_POSITIVE_ION) pdbHp->reset_trajectory(id);
             else nHp++;
             
-            if (species != PARTICLE_H2P) pdbH2p->reset_trajectory(id);
+            if (species != PARTICLE_MOLECULAR_POSITIVE_ION) pdbH2p->reset_trajectory(id);
             else nH2p++;
             
-            if (species != PARTICLE_H20) pdbH20->reset_trajectory(id);
+            if (species != PARTICLE_MOLECULAR_NEUTRAL) pdbH20->reset_trajectory(id);
             else nH20++;
+
+            if (species != PARTICLE_TRIATOMIC_POSITIVE_ION) pdbH3p->reset_trajectory(id);
+            else nH3p++;
             
-            if (species != PARTICLE_E) pdbe->reset_trajectory(id);
+            if (species != PARTICLE_ELECTRON) pdbe->reset_trajectory(id);
             else ne++;
         }
+
+        ParticleDataBase3D* species_databases[] = {pdbHm, pdbH0, pdbHp, pdbH2p, pdbH20, pdbH3p, pdbe};
+        size_t species_counts[] = {nHm, nH0, nHp, nH2p, nH20, nH3p, ne};
         
         // Store particle count for each species
-        part_number.push_back(nHm);
-        part_number.push_back(nH0);
-        part_number.push_back(nHp);
-        part_number.push_back(nH2p);
-        part_number.push_back(nH20);
-        part_number.push_back(ne);
-        
-        // Add species databases to collections
-        particles_species.push_back(pdbHm); particles_kinds.push_back(PARTICLE_HM);
-        particles_species.push_back(pdbH0); particles_kinds.push_back(PARTICLE_H0);
-        particles_species.push_back(pdbHp); particles_kinds.push_back(PARTICLE_HP);
-        particles_species.push_back(pdbH2p); particles_kinds.push_back(PARTICLE_H2P);
-        particles_species.push_back(pdbH20); particles_kinds.push_back(PARTICLE_H20);
-        particles_species.push_back(pdbe); particles_kinds.push_back(PARTICLE_E);
+        for (size_t index = 0; index < particle_kind_count(); ++index) {
+            part_number.push_back(species_counts[index]);
+            particles_species.push_back(species_databases[index]);
+            particles_kinds.push_back(species_kinds[index]);
+        }
         
         logfile << "\nSPECIES DATABASES CREATED! \n" << flush;
-        logfile << " #HM: " << nHm << endl << flush;
-        logfile << " #H0: " << nH0 << endl << flush;
-        logfile << " #HP: " << nHp << endl << flush;
-        logfile << " #H2P: " << nH2p << endl << flush;
-        logfile << " #H20: " << nH20 << endl << flush;
-        logfile << " #EL: " << ne << endl << flush;
-        logfile << " SUM: " << ne+nH20+nH2p+nHp+nH0+nHm << " \n\n" << flush;
+        size_t species_total = 0;
+        for (size_t index = 0; index < particle_kind_count(); ++index) {
+            logfile << " #" << get_particle_name(species_kinds[index]) << ": "
+                    << species_counts[index] << endl << flush;
+            species_total += species_counts[index];
+        }
+        logfile << " SUM: " << species_total << " \n\n" << flush;
     }
     else {
         ParticleDataBase3D* pdbHm = new ParticleDataBase3D(*particles);
         *pdbHm = *particles;
         particles_species.push_back(pdbHm); 
-        particles_kinds.push_back(PARTICLE_HM);
+        particles_kinds.push_back(PARTICLE_NEGATIVE_ION);
         size_t nHm = pdbHm->size();
         part_number.push_back(nHm);
     }
@@ -258,6 +316,25 @@ void ParticleManager::analyzeParticleEndLocations(const SimulationParameters& pa
         double total_initial_current = 0.0;
         double total_final_current = 0.0;
         double extracted_current = 0.0;
+        double extraction_plane_z = -1.0;
+        if (params.hasDiagnosticTransmissionPlaneZPosition()) {
+            extraction_plane_z = params.getDiagnosticTransmissionPlaneZPosition();
+        } else if (params.hasGeneratedGeometrySolids()) {
+            const std::vector<SimulationParameters::GeometrySolidDefinition>& solids =
+                params.getGeneratedGeometrySolids();
+            for (std::vector<SimulationParameters::GeometrySolidDefinition>::const_iterator solid_it = solids.begin();
+                 solid_it != solids.end();
+                 ++solid_it) {
+                if (solid_it->zProfileMeters.empty()) {
+                    continue;
+                }
+                const double solid_z_min = *std::min_element(solid_it->zProfileMeters.begin(),
+                                                             solid_it->zProfileMeters.end());
+                if (extraction_plane_z < 0.0 || solid_z_min < extraction_plane_z) {
+                    extraction_plane_z = solid_z_min;
+                }
+            }
+        }
         
         // Analyze each particle
         for (size_t i = 0; i < particles->size(); i++) {
@@ -309,14 +386,14 @@ void ParticleManager::analyzeParticleEndLocations(const SimulationParameters& pa
                 
                 // Get final position
                 double final_z = final_point(5);
-                
+
                 // Analyze particle fate based on status
                 switch (status) {
                     case PARTICLE_OK:
                         particles_ok++;
                         total_final_current += abs(current);
                         // Check if particle reached extraction plane
-                        if (final_z >= 0.009) {  // EG exit at z=9mm
+                        if (extraction_plane_z >= 0.0 && final_z >= extraction_plane_z) {
                             particles_extracted++;
                             extracted_current += abs(current);
                             extraction_z_positions.push_back(final_z);
@@ -517,11 +594,8 @@ string ParticleManager::saveEmitter(const string& emitname, double zloc, const s
 }
 
 bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, const SimulationParameters& params) {
-    // Implementation for checking extracted current density at EG (z=0.009m)
-    // Based on the check_EGext function in ManageSimulation.cpp
-    
     ParticleDataBase3D* extracted_particles = particles;
-    int hm_index = get_particle_int(PARTICLE_HM);
+    int hm_index = get_particle_int(PARTICLE_NEGATIVE_ION);
     if (hm_index >= 0 && hm_index < static_cast<int>(particles_species.size()) && particles_species[hm_index]) {
         extracted_particles = particles_species[hm_index];
     }
@@ -532,8 +606,30 @@ bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, cons
     }
     
     try {
-        // Calculate current at EG exit location (z = 0.009m)
-        double eg_exit_z = 0.009;  // EG exit location in meters
+        double eg_exit_z = -1.0;
+        if (params.hasDiagnosticTransmissionPlaneZPosition()) {
+            eg_exit_z = params.getDiagnosticTransmissionPlaneZPosition();
+        } else if (params.hasGeneratedGeometrySolids()) {
+            const std::vector<SimulationParameters::GeometrySolidDefinition>& solids =
+                params.getGeneratedGeometrySolids();
+            for (std::vector<SimulationParameters::GeometrySolidDefinition>::const_iterator solid_it = solids.begin();
+                 solid_it != solids.end();
+                 ++solid_it) {
+                if (solid_it->zProfileMeters.empty()) {
+                    continue;
+                }
+                const double solid_z_min = *std::min_element(solid_it->zProfileMeters.begin(),
+                                                             solid_it->zProfileMeters.end());
+                if (eg_exit_z < 0.0 || solid_z_min < eg_exit_z) {
+                    eg_exit_z = solid_z_min;
+                }
+            }
+        }
+        if (eg_exit_z < 0.0) {
+            extsimJ = 0.0;
+            if (debug) logfile << "DEBUG: EG extracted current calculation skipped because no transmission plane is configured" << endl;
+            return false;
+        }
         
         // Create trajectory diagnostic data at EG exit
         TrajectoryDiagnosticData tdata;
@@ -553,9 +649,8 @@ bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, cons
             total_current += tdata(i, 6); // DIAG_CURR is column 6
         }
         
-        // Calculate current density using PG aperture area (circle with 7mm radius)
-        // Area = π × (7mm)² = π × (7e-3)²
-        double pg_aperture_area = M_PI * 7e-3 * 7e-3;
+        double aperture_radius = params.getDiagnosticApertureRadiusMeters();
+        double pg_aperture_area = M_PI * aperture_radius * aperture_radius;
         double current_density = abs(total_current) / pg_aperture_area;
         
         extsimJ = current_density;
@@ -568,7 +663,7 @@ bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, cons
         if (debug) {
             logfile << "DEBUG: EG extracted current calculation:" << endl;
             logfile << "  Current source: "
-                    << ((extracted_particles == particles) ? "all-particle database (fallback)" : "negative-ion database")
+                    << ((extracted_particles == particles) ? "all-particle database (fallback)" : "family negative-ion database")
                     << endl;
             logfile << "  Particles at EG exit (z=" << eg_exit_z << "m): " << particle_count << endl;
             logfile << "  Total current: " << total_current << " A" << endl;
@@ -596,7 +691,7 @@ bool ParticleManager::checkEGExtractedCurrent(double oriJ, double& extsimJ, cons
     }
 }
 
-void ParticleManager::exportTrajectoriesToVTK(const string& filename) {
+void ParticleManager::exportTrajectoriesToVTK(const string& filename, double ion_mass_u) {
     if (!particles) {
         ibsimu.message(1) << "No particle database available for trajectories VTK export" << endl;
         return;
@@ -833,12 +928,23 @@ void ParticleManager::exportTrajectoriesToVTK(const string& filename) {
             int gen_be = swap_endian_int(particle.gen());
             file.write(reinterpret_cast<const char*>(&gen_be), sizeof(int));
         }
+
+        // Export particle species as family-neutral particle_kind ids
+        file << "\nSCALARS particle_kind int\n";
+        file << "LOOKUP_TABLE default\n";
+        for (size_t i = 0; i < particles->size(); i++) {
+            Particle3D &particle = particles->particle(i);
+            int kind_be = swap_endian_int(
+                static_cast<int>(identify_particle_species(particle.m(), particle.q(), ion_mass_u))
+            );
+            file.write(reinterpret_cast<const char*>(&kind_be), sizeof(int));
+        }
         
         file.close();
         ibsimu.message(1) << "Particle trajectories exported to binary VTK file: " << vtkfile << endl;
         ibsimu.message(1) << "  Format: Binary VTK with big-endian byte order" << endl;
         ibsimu.message(1) << "  Point data: velocity, time, kinetic energy" << endl;
-        ibsimu.message(1) << "  Cell data: particle ID, current, charge, mass, status, generation" << endl;
+        ibsimu.message(1) << "  Cell data: particle ID, current, charge, mass, status, generation, species" << endl;
         
     } catch (const Error& e) {
         ibsimu.message(1) << "Error exporting trajectories to VTK" << endl;
