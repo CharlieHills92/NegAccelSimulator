@@ -36,8 +36,10 @@ from .common import (
     runtime_path_parent_seed,
 )
 from .execution import ExecutionMixin
+from .parameter_flagging import ParameterFlagRegistry, ScanCaseDefinition, ScanProjectData
 from .results import ResultsMixin
 from .sections import FORM_SECTIONS
+from .scan_manager import ScanManagerWindow
 
 
 class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWindow):
@@ -75,6 +77,11 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
 
         self.widgets: dict[str, QWidget] = {}
         self.output_tabs: QTabWidget | None = None
+        self.scan_manager_window: ScanManagerWindow | None = None
+        self.parameter_flag_registry = ParameterFlagRegistry()
+        self.parameter_widgets_by_path: dict[str, QWidget] = {}
+        self.parameter_checkboxes_by_path: dict[str, QCheckBox] = {}
+        self.parameter_labels_by_path: dict[str, str] = {}
 
         self._build_ui(runtime_path)
         self._resize_to_available_screen()
@@ -248,6 +255,9 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         self.simulation_status_bar.setMinimumWidth(420)
         self.simulation_status_bar.setFormat("Ready")
         self.simulation_status_bar.setToolTip("Current simulation phase and coarse run progress.")
+        self.scan_manager_button = QPushButton("Scan Manager")
+        self.scan_manager_button.clicked.connect(self.open_scan_manager)
+        self.scan_manager_button.setToolTip("Open the parameter scan manager for batch simulations.")
 
         general_box = QGroupBox("General")
         general_form = QFormLayout(general_box)
@@ -272,6 +282,7 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         run_button_row.addWidget(self.run_button)
         run_button_row.addWidget(self.stop_button)
         run_button_row.addWidget(self.simulation_status_bar, 1)
+        run_button_row.addWidget(self.scan_manager_button)
         run_button_row.addStretch(1)
         run_button_wrapper = QWidget()
         run_button_wrapper.setLayout(run_button_row)
@@ -288,23 +299,29 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
     def _build_main_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
         for section in FORM_SECTIONS:
+            existing_widget_keys = set(self.widgets)
             if section.title == "Metadata":
-                tabs.addTab(self._build_metadata_tab(section), section.title)
+                tabs.addTab(self._build_metadata_tab(section, existing_widget_keys), section.title)
             elif section.build_workspace is not None:
                 tabs.addTab(section.build_workspace(self), section.title)
             else:
-                tabs.addTab(create_scrollable_form(section.build_form(self)), section.title)
+                form_layout = section.build_form(self)
+                self._decorate_new_numeric_rows(form_layout, existing_widget_keys)
+                tabs.addTab(create_scrollable_form(form_layout), section.title)
         tabs.addTab(self._build_run_log_tab(), "Run Log")
         tabs.addTab(self._build_visualization_tab(), "Visualization")
         self._connect_preview_updates()
         return tabs
 
-    def _build_metadata_tab(self, section) -> QWidget:
+    def _build_metadata_tab(self, section, existing_widget_keys: set[str]) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
 
+        form_layout = section.build_form(self)
+        self._decorate_new_numeric_rows(form_layout, existing_widget_keys)
+
         splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(create_scrollable_form(section.build_form(self)))
+        splitter.addWidget(create_scrollable_form(form_layout))
         splitter.addWidget(self._build_json_preview_panel())
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -312,6 +329,132 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
 
         layout.addWidget(splitter)
         return page
+
+    def open_scan_manager(self) -> None:
+        """Open or bring focus to the Scan Manager window."""
+        if self.scan_manager_window is None or not self.scan_manager_window.isVisible():
+            # Derive scan project path from authoring path
+            scan_project_path = None
+            if self.authoring_path is not None:
+                # Convention: scan-project-{authoring_stem}.json in same directory as authoring file
+                scan_project_path = self.authoring_path.parent / f"negaccel-scan-project-{self.authoring_path.stem}.json"
+            
+            self.scan_manager_window = ScanManagerWindow(
+                parent_window=self,
+                authoring_path=self.authoring_path,
+                scan_project_path=scan_project_path if scan_project_path and scan_project_path.exists() else None,
+            )
+            if self.scan_manager_window.scan_project is None:
+                self.scan_manager_window.seed_from_main_window()
+            self.scan_manager_window.show()
+        else:
+            self.scan_manager_window.raise_()
+            self.scan_manager_window.activateWindow()
+
+    def _decorate_new_numeric_rows(self, form_layout: QFormLayout, existing_widget_keys: set[str]) -> None:
+        path_by_widget_id: dict[int, str] = {}
+        for path in sorted(set(self.widgets) - existing_widget_keys):
+            widget = self.widgets.get(path)
+            if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
+                path_by_widget_id[id(widget)] = path
+
+        for row in range(form_layout.rowCount()):
+            label_item = form_layout.itemAt(row, QFormLayout.ItemRole.LabelRole)
+            field_item = form_layout.itemAt(row, QFormLayout.ItemRole.FieldRole)
+            if label_item is None or field_item is None:
+                continue
+
+            field_widget = field_item.widget()
+            label_widget = label_item.widget()
+            if field_widget is None or not isinstance(field_widget, (QSpinBox, QDoubleSpinBox)):
+                continue
+
+            path = path_by_widget_id.get(id(field_widget))
+            if not path:
+                continue
+
+            label_text = label_widget.text() if isinstance(label_widget, QLabel) else path
+            self.parameter_widgets_by_path[path] = field_widget
+            self.parameter_labels_by_path[path] = label_text
+            wrapped = self._build_parameterized_field(path, label_text, field_widget)
+            form_layout.setWidget(row, QFormLayout.ItemRole.FieldRole, wrapped)
+
+    def _build_parameterized_field(self, path: str, label_text: str, field_widget: QWidget) -> QWidget:
+        wrapper = QWidget()
+        row = QHBoxLayout(wrapper)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(field_widget, 1)
+
+        checkbox = self._build_parameter_checkbox(path, label_text, field_widget)
+        row.addWidget(checkbox, 0)
+        return wrapper
+
+    def _build_parameter_checkbox(self, path: str, label_text: str, widget: QWidget) -> QCheckBox:
+        self.parameter_widgets_by_path[path] = widget
+        self.parameter_labels_by_path[path] = label_text
+        checkbox = self.parameter_checkboxes_by_path.get(path)
+        if checkbox is None:
+            checkbox = QCheckBox("P")
+            checkbox.setMaximumWidth(28)
+            checkbox.toggled.connect(
+                lambda checked, p=path, l=label_text, w=widget: self._on_parameter_flag_toggled(p, l, w, checked)
+            )
+            self.parameter_checkboxes_by_path[path] = checkbox
+        checkbox.setToolTip(f"Include '{label_text}' in the Scan Manager parameter list")
+        checkbox.blockSignals(True)
+        checkbox.setChecked(self.parameter_flag_registry.is_marked(path))
+        checkbox.blockSignals(False)
+        return checkbox
+
+    def _on_parameter_flag_toggled(self, path: str, label_text: str, widget: QWidget, checked: bool) -> None:
+        if checked:
+            if isinstance(widget, QSpinBox):
+                self.parameter_flag_registry.mark_parameter(
+                    path,
+                    label_text,
+                    "integer",
+                    min_val=float(widget.minimum()),
+                    max_val=float(widget.maximum()),
+                    step=float(widget.singleStep()),
+                )
+            elif isinstance(widget, QDoubleSpinBox):
+                self.parameter_flag_registry.mark_parameter(
+                    path,
+                    label_text,
+                    "number",
+                    min_val=float(widget.minimum()),
+                    max_val=float(widget.maximum()),
+                    step=float(widget.singleStep()),
+                )
+        else:
+            self.parameter_flag_registry.unmark_parameter(path)
+
+    def build_scan_project_seed(self) -> ScanProjectData:
+        project = ScanProjectData()
+        case_tag = self.widgets["caseTag"].text().strip() or "negaccel_scan"
+        project.scanProjectTag = f"{case_tag}_scan"
+        project.authoringCasePath = str(self.authoring_path) if self.authoring_path is not None else None
+        project.parameters = self.parameter_flag_registry.get_flagged_parameters()
+
+        if project.parameters:
+            values = [self._current_parameter_value(parameter.path) for parameter in project.parameters]
+            project.cases = [
+                ScanCaseDefinition(
+                    caseIndex=0,
+                    caseLabel="Current GUI values",
+                    parameterValues=values,
+                )
+            ]
+        return project
+
+    def _current_parameter_value(self, path: str) -> Any:
+        widget = self.parameter_widgets_by_path.get(path)
+        if isinstance(widget, QSpinBox):
+            return int(widget.value())
+        if isinstance(widget, QDoubleSpinBox):
+            return float(widget.value())
+        return None
 
     def _double_spin(self, minimum: float, maximum: float, decimals: int, step: float) -> QDoubleSpinBox:
         spin = QDoubleSpinBox()

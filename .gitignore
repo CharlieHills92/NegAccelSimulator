@@ -33,9 +33,26 @@ Bfield_SPIDER/*.fld
 *.scn
 !MTF_J_SEC.scn
 
-# Simulation output directories
+# Simulation/runtime output directories
 MTF_J_*/
 SPIDER_J*/
+**/Data/
+**/Plots/
+**/Summary/
+**/VTK/
+negaccel-scan-project-*/
+
+# Previously generated case folders kept out of git
+/SPIDER/
+/SPIDER_100/
+/SPIDER_100Am2_5kV_52.5kV_shield/
+/SPIDER_120_5_52.5_nsimp/
+/SPIDER_120Am2_5kV_52.5kV_shield_0V/
+/SPIDER_250/
+/SPIDER_250_nsimp/
+/SPIDER_250_shield/
+/SPIDER_NSIMP_SCAN/
+/SPIDER_SHIELD_SCAN/
 
 # Debug/log files
 *.log

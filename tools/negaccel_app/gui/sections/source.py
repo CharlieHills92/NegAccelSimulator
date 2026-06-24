@@ -17,6 +17,7 @@ from negaccel_app.particles import (
 )
 
 from ..common import (
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -281,6 +282,8 @@ class _ParticleSourceDetailWidget(QWidget):
         self._cb = change_callback
         self._particle_type_lookup: dict[str, dict[str, object]] = {}
         self._editable_widgets = []
+        self._source_row = 0
+        self._parameter_bindings: list[tuple[QCheckBox, str, object, object]] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -328,22 +331,94 @@ class _ParticleSourceDetailWidget(QWidget):
         )
         root.addWidget(
             _build_inline_row(
-                ("Particle count", self._particle_count_spin, 1),
-                ("Current density [A/m^2]", self._current_density_spin, 1),
+                (
+                    "Particle count",
+                    self._particle_count_spin,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Particle count",
+                        self._particle_count_spin,
+                        lambda: self._source_parameter_path("particleCount"),
+                    ),
+                ),
+                (
+                    "Current density [A/m^2]",
+                    self._current_density_spin,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Current density [A/m^2]",
+                        self._current_density_spin,
+                        lambda: self._source_parameter_path("currentDensityAm2"),
+                    ),
+                ),
             )
         )
         root.addWidget(
             _build_inline_row(
-                ("Axial energy [eV]", self._axial_energy_spin, 1),
-                ("Perpendicular temperature [eV]", self._perp_spin, 1),
-                ("Parallel temperature [eV]", self._par_spin, 1),
+                (
+                    "Axial energy [eV]",
+                    self._axial_energy_spin,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Axial energy [eV]",
+                        self._axial_energy_spin,
+                        lambda: self._source_parameter_path("axialEnergyEV"),
+                    ),
+                ),
+                (
+                    "Perpendicular temperature [eV]",
+                    self._perp_spin,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Perpendicular temperature [eV]",
+                        self._perp_spin,
+                        lambda: self._source_parameter_path("perpendicularTemperatureEV"),
+                    ),
+                ),
+                (
+                    "Parallel temperature [eV]",
+                    self._par_spin,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Parallel temperature [eV]",
+                        self._par_spin,
+                        lambda: self._source_parameter_path("parallelTemperatureEV"),
+                    ),
+                ),
             )
         )
         root.addWidget(
             _build_inline_row(
-                ("Center X [m]", self._center_x, 1),
-                ("Center Y [m]", self._center_y, 1),
-                ("Center Z [m]", self._center_z, 1),
+                (
+                    "Center X [m]",
+                    self._center_x,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Center X [m]",
+                        self._center_x,
+                        lambda: self._source_parameter_path("uniform.centerMeters[0]"),
+                    ),
+                ),
+                (
+                    "Center Y [m]",
+                    self._center_y,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Center Y [m]",
+                        self._center_y,
+                        lambda: self._source_parameter_path("uniform.centerMeters[1]"),
+                    ),
+                ),
+                (
+                    "Center Z [m]",
+                    self._center_z,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Center Z [m]",
+                        self._center_z,
+                        lambda: self._source_parameter_path("uniform.centerMeters[2]"),
+                    ),
+                ),
             )
         )
         root.addWidget(
@@ -362,8 +437,26 @@ class _ParticleSourceDetailWidget(QWidget):
         )
         root.addWidget(
             _build_inline_row(
-                ("Width [m]", self._width_spin, 1),
-                ("Height [m]", self._height_spin, 1),
+                (
+                    "Width [m]",
+                    self._width_spin,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Width [m]",
+                        self._width_spin,
+                        lambda: self._source_parameter_path("uniform.widthMeters"),
+                    ),
+                ),
+                (
+                    "Height [m]",
+                    self._height_spin,
+                    1,
+                    self._make_parameter_checkbox(
+                        "Height [m]",
+                        self._height_spin,
+                        lambda: self._source_parameter_path("uniform.heightMeters"),
+                    ),
+                ),
             )
         )
         root.addStretch(1)
@@ -393,6 +486,38 @@ class _ParticleSourceDetailWidget(QWidget):
         for widget in self._editable_widgets:
             _connect_widget_change(widget, self._fire)
         self._particle_type_combo.currentIndexChanged.connect(self._on_particle_type_changed)
+
+    def _source_parameter_path(self, suffix: str) -> str:
+        row = self._source_row if self._source_row >= 0 else 0
+        return f"particles.sources[{row}].{suffix}"
+
+    def _make_parameter_checkbox(self, label_text: str, widget, path_provider) -> QCheckBox:
+        checkbox = QCheckBox("P")
+        checkbox.setMaximumWidth(28)
+        checkbox.toggled.connect(
+            lambda checked, l=label_text, w=widget, provider=path_provider: self._window._on_parameter_flag_toggled(
+                provider(),
+                l,
+                w,
+                checked,
+            )
+        )
+        self._parameter_bindings.append((checkbox, label_text, widget, path_provider))
+        return checkbox
+
+    def _refresh_parameter_checkboxes(self) -> None:
+        for checkbox, label_text, widget, path_provider in self._parameter_bindings:
+            path = path_provider()
+            self._window.parameter_widgets_by_path[path] = widget
+            self._window.parameter_labels_by_path[path] = label_text
+            checkbox.setToolTip(f"Include '{label_text}' in the Scan Manager parameter list")
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self._window.parameter_flag_registry.is_marked(path))
+            checkbox.blockSignals(False)
+
+    def set_source_row(self, row: int) -> None:
+        self._source_row = row if row >= 0 else 0
+        self._refresh_parameter_checkboxes()
 
     def _current_particle_type_id(self) -> str:
         current = self._particle_type_combo.currentData()
@@ -469,6 +594,7 @@ class _ParticleSourceDetailWidget(QWidget):
         _set_combo_current_data(self._particle_type_combo, particle_type_id)
         _set_signal_blocked(self._editable_widgets + [self._particle_type_combo], False)
         self._refresh_particle_summary(particle_type_id)
+        self._refresh_parameter_checkboxes()
 
     def get_source(self) -> dict[str, object]:
         particle_type_id = self._current_particle_type_id() or next(
@@ -564,6 +690,7 @@ class _ParticleSourcesEditorWidget(QWidget):
 
     def _load_current(self) -> None:
         row = self._list.currentRow()
+        self._detail.set_source_row(row)
         if row < 0:
             self._detail.set_source(_build_default_source(self._default_family()))
             return
@@ -691,7 +818,16 @@ class _ParticlesWorkspaceWidget(QWidget):
         plasma_layout.addWidget(
             _build_inline_row(
                 ("Model", self._plasma_model, 0),
-                ("Initial plasma max z [m]", self._initial_plasma_max_z, 1),
+                (
+                    "Initial plasma max z [m]",
+                    self._initial_plasma_max_z,
+                    1,
+                    self._make_plasma_parameter_checkbox(
+                        "Initial plasma max z [m]",
+                        self._initial_plasma_max_z,
+                        "particles.plasma.initialPlasmaMaxZMeters",
+                    ),
+                ),
             )
         )
 
@@ -700,12 +836,44 @@ class _ParticlesWorkspaceWidget(QWidget):
         self._tanh_width = self._window._double_spin(0.0, 1.0e4, 4, 0.1)
         self._meniscus_voltage = self._window._double_spin(-1.0e6, 1.0e6, 4, 1.0)
         self._nsimp_fields = _build_form_panel(
-            ("Positive ion temperature [eV]", self._positive_ion_temp),
-            ("Plasma potential [V]", self._plasma_potential),
+            (
+                "Positive ion temperature [eV]",
+                self._positive_ion_temp,
+                self._make_plasma_parameter_checkbox(
+                    "Positive ion temperature [eV]",
+                    self._positive_ion_temp,
+                    "particles.plasma.positiveIonTemperatureEV",
+                ),
+            ),
+            (
+                "Plasma potential [V]",
+                self._plasma_potential,
+                self._make_plasma_parameter_checkbox(
+                    "Plasma potential [V]",
+                    self._plasma_potential,
+                    "particles.plasma.plasmaPotentialVolts",
+                ),
+            ),
         )
         self._shield_fields = _build_form_panel(
-            ("Tanh width [eV]", self._tanh_width),
-            ("Meniscus voltage [V]", self._meniscus_voltage),
+            (
+                "Tanh width [eV]",
+                self._tanh_width,
+                self._make_plasma_parameter_checkbox(
+                    "Tanh width [eV]",
+                    self._tanh_width,
+                    "particles.plasma.tanhWidthEV",
+                ),
+            ),
+            (
+                "Meniscus voltage [V]",
+                self._meniscus_voltage,
+                self._make_plasma_parameter_checkbox(
+                    "Meniscus voltage [V]",
+                    self._meniscus_voltage,
+                    "particles.plasma.meniscusVoltageVolts",
+                ),
+            ),
         )
         plasma_layout.addWidget(self._nsimp_fields)
         plasma_layout.addWidget(self._shield_fields)
@@ -731,6 +899,18 @@ class _ParticlesWorkspaceWidget(QWidget):
 
     def _notify_change(self) -> None:
         self._window.schedule_preview_refresh()
+
+    def _make_plasma_parameter_checkbox(self, label_text: str, widget, path: str) -> QCheckBox:
+        checkbox = QCheckBox("P")
+        checkbox.setMaximumWidth(28)
+        checkbox.setToolTip(f"Include '{label_text}' in the Scan Manager parameter list")
+        checkbox.setChecked(self._window.parameter_flag_registry.is_marked(path))
+        checkbox.toggled.connect(
+            lambda checked, p=path, l=label_text, w=widget: self._window._on_parameter_flag_toggled(p, l, w, checked)
+        )
+        self._window.parameter_widgets_by_path[path] = widget
+        self._window.parameter_labels_by_path[path] = label_text
+        return checkbox
 
     def _on_particle_family_changed(self) -> None:
         new_family = self._types_editor.get_particle_family()
@@ -820,14 +1000,25 @@ def _set_combo_current_data(combo: QComboBox, value: str) -> None:
         combo.setCurrentIndex(0)
 
 
-def _build_inline_control(label_text: str, control, stretch: int = 0) -> tuple[QWidget, int]:
+def _build_inline_control(label_text: str, control, stretch: int = 0, extra_widget=None) -> tuple[QWidget, int]:
     container = QWidget()
     layout = QVBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(2)
-    caption = QLabel(label_text)
-    caption.setWordWrap(True)
-    layout.addWidget(caption)
+    if extra_widget is None:
+        caption = QLabel(label_text)
+        caption.setWordWrap(True)
+        layout.addWidget(caption)
+    else:
+        caption_row = QWidget()
+        caption_layout = QHBoxLayout(caption_row)
+        caption_layout.setContentsMargins(0, 0, 0, 0)
+        caption_layout.setSpacing(4)
+        caption = QLabel(label_text)
+        caption.setWordWrap(True)
+        caption_layout.addWidget(caption, 1)
+        caption_layout.addWidget(extra_widget, 0)
+        layout.addWidget(caption_row)
     layout.addWidget(control)
     return container, stretch
 
@@ -837,8 +1028,13 @@ def _build_inline_row(*items) -> QWidget:
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(8)
-    for label_text, control, stretch in items:
-        container, container_stretch = _build_inline_control(label_text, control, stretch)
+    for item in items:
+        if len(item) == 3:
+            label_text, control, stretch = item
+            extra_widget = None
+        else:
+            label_text, control, stretch, extra_widget = item
+        container, container_stretch = _build_inline_control(label_text, control, stretch, extra_widget)
         layout.addWidget(container, container_stretch)
     return row
 
@@ -848,8 +1044,22 @@ def _build_form_panel(*rows) -> QWidget:
     layout = QFormLayout(panel)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(6)
-    for label_text, control in rows:
-        layout.addRow(label_text, control)
+    for row in rows:
+        if len(row) == 2:
+            label_text, control = row
+            extra_widget = None
+        else:
+            label_text, control, extra_widget = row
+        if extra_widget is None:
+            layout.addRow(label_text, control)
+            continue
+        wrapper = QWidget()
+        wrapper_layout = QHBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.setSpacing(6)
+        wrapper_layout.addWidget(control, 1)
+        wrapper_layout.addWidget(extra_widget, 0)
+        layout.addRow(label_text, wrapper)
     return panel
 
 

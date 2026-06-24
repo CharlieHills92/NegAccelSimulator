@@ -1,0 +1,532 @@
+{
+  "$schema": "./negaccel-authoring.schema.json",
+  "metadata": {
+    "schemaVersion": "1.0.0",
+    "caseTag": "SPIDER",
+    "title": "SPIDER test",
+    "description": "SPIDER geometry from Agostinetti et al. 2011, doi:10.1088/0029-5515/51/6/063004",
+    "author": "C. Poggi"
+  },
+  "geometry": {
+    "path": "tools/Templates/SPIDER.json"
+  },
+  "boundaryConditions": {
+    "boundaries": [
+      {
+        "boundaryId": 1,
+        "name": "x-min",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 2,
+        "name": "x-max",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 3,
+        "name": "y-min",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 4,
+        "name": "y-max",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 5,
+        "name": "z-min",
+        "conditionType": "dirichlet",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 6,
+        "name": "z-max",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 7,
+        "name": "PG",
+        "conditionType": "dirichlet",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 8,
+        "name": "EG",
+        "conditionType": "dirichlet",
+        "value": 7200.0
+      },
+      {
+        "boundaryId": 9,
+        "name": "GG",
+        "conditionType": "dirichlet",
+        "value": "10.5 * EG"
+      }
+    ]
+  },
+  "particles": {
+    "types": [
+      {
+        "id": "hminus",
+        "name": "H-",
+        "kind": "H-"
+      },
+      {
+        "id": "h0",
+        "name": "H0",
+        "kind": "H0"
+      },
+      {
+        "id": "hplus",
+        "name": "H+",
+        "kind": "H+"
+      },
+      {
+        "id": "h2plus",
+        "name": "H2+",
+        "kind": "H2+"
+      },
+      {
+        "id": "h20",
+        "name": "H20",
+        "kind": "H20"
+      },
+      {
+        "id": "h3plus",
+        "name": "H3+",
+        "kind": "H3+"
+      },
+      {
+        "id": "electrons",
+        "name": "Electrons",
+        "kind": "e-"
+      }
+    ],
+    "sources": [
+      {
+        "axialEnergyEV": 3.0,
+        "currentDensityAm2": 270.0,
+        "id": "source-1",
+        "name": "Main extraction source",
+        "parallelTemperatureEV": 0.0,
+        "particleCount": 50000,
+        "particleTypeId": "hminus",
+        "perpendicularTemperatureEV": 0.0,
+        "sourceModel": "uniform",
+        "uniform": {
+          "centerMeters": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "heightMeters": 0.02,
+          "inPlaneReferenceDirection": [
+            1.0,
+            0.0,
+            0.0
+          ],
+          "mainDirection": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "widthMeters": 0.02
+        }
+      }
+    ],
+    "plasma": {
+      "model": "nsimp",
+      "positiveIonTemperatureEV": 0.8,
+      "plasmaPotentialVolts": 0.0
+    }
+  },
+  "magneticField": {
+    "enabled": true,
+    "fields": [
+      {
+        "name": "external",
+        "sourceType": "file",
+        "scale": 1.0,
+        "filePath": "EXTfield.fld"
+      }
+    ],
+    "plotProfile": {
+      "components": [
+        "Bx",
+        "By",
+        "Bz"
+      ],
+      "startPoint": "0, 0, 0",
+      "direction": "0, 0, 1",
+      "points": 300,
+      "step": 0.001
+    }
+  },
+  "gasInteractions": {
+    "densityProfile": {
+      "name": "mtf-background",
+      "species": "H2",
+      "path": "densprofiles/MTF_dens.dens"
+    },
+    "stripping": {
+      "enabled": true,
+      "generateSecondaries": true,
+      "minimumZMeters": 0.009
+    },
+    "reactions": [
+      {
+        "processId": "hm_single_strip",
+        "name": "H- single stripping",
+        "projectileKind": "H-",
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H0",
+            "count": 1,
+            "speedClass": "fast"
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "fast"
+          }
+        ],
+        "sourcePath": "Cross-sections/negative_ion_single_stripping.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          -0.0012999999972695677,
+          0.03129999994414412,
+          -0.29119999957173487,
+          1.2931999984597313,
+          -2.8822999972746466,
+          3.275999997580597,
+          -20.891999999001698
+        ],
+        "scaleEnergyByIonMass": true,
+        "minimumEnergyEV": 2.4
+      },
+      {
+        "processId": "hm_double_strip",
+        "name": "H- double stripping",
+        "projectileKind": "H-",
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H+",
+            "count": 1,
+            "speedClass": "fast"
+          },
+          {
+            "particleKind": "e-",
+            "count": 2,
+            "speedClass": "fast"
+          }
+        ],
+        "sourcePath": "Cross-sections/negative_ion_double_stripping.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          -0.010114000052505486,
+          0.3035230016419677,
+          -3.7116950210347843,
+          23.6746071411723,
+          -83.40612152309616,
+          154.86711201387308,
+          -139.733509802499
+        ],
+        "scaleEnergyByIonMass": true,
+        "minimumEnergyEV": 1000.0
+      },
+      {
+        "processId": "hm_background_ionization",
+        "name": "H- background gas ionization",
+        "projectileKind": "H-",
+        "projectileFate": "survive",
+        "products": [
+          {
+            "particleKind": "H2+",
+            "count": 1,
+            "speedClass": "slow"
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "slow"
+          }
+        ],
+        "sourcePath": "Cross-sections/background_gas_ionization.cross",
+        "fitDegree": 4,
+        "coefficients": [
+          0.003644000031691769,
+          -0.05939000052609923,
+          -0.10019999693997146,
+          3.347999992726043,
+          -28.99999999417133
+        ],
+        "scaleEnergyByIonMass": true,
+        "minimumEnergyEV": 10.0,
+        "maximumEnergyEV": 10000000.0
+      },
+      {
+        "processId": "hm_background_extra",
+        "name": "H- extra background branch",
+        "projectileKind": "H-",
+        "projectileFate": "survive",
+        "products": [
+          {
+            "particleKind": "H2+",
+            "count": 1,
+            "speedClass": "slow"
+          },
+          {
+            "particleKind": "e-",
+            "count": 2,
+            "speedClass": "slow"
+          }
+        ],
+        "sourcePath": "Cross-sections/background_gas_ionization.cross",
+        "fitDegree": 4,
+        "coefficients": [
+          0.003644000031691769,
+          -0.05939000052609923,
+          -0.10019999693997146,
+          3.347999992726043,
+          -28.99999999417133
+        ],
+        "scaleEnergyByIonMass": true,
+        "minimumEnergyEV": 5000.0,
+        "maximumEnergyEV": 10000000.0
+      },
+      {
+        "processId": "h0_background_ionization",
+        "name": "H0 background gas ionization",
+        "projectileKind": "H0",
+        "projectileFate": "survive",
+        "products": [
+          {
+            "particleKind": "H2+",
+            "count": 1,
+            "speedClass": "slow"
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "slow"
+          }
+        ],
+        "sourcePath": "Cross-sections/background_gas_ionization.cross",
+        "fitDegree": 4,
+        "coefficients": [
+          0.003644000031691769,
+          -0.05939000052609923,
+          -0.10019999693997146,
+          3.347999992726043,
+          -28.99999999417133
+        ],
+        "scaleEnergyByIonMass": true,
+        "minimumEnergyEV": 10.0,
+        "maximumEnergyEV": 10000000.0
+      },
+      {
+        "processId": "h0_projectile_ionization",
+        "name": "H0 projectile ionization",
+        "projectileKind": "H0",
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H+",
+            "count": 1,
+            "speedClass": "fast"
+          },
+          {
+            "particleKind": "e-",
+            "count": 1,
+            "speedClass": "fast"
+          }
+        ],
+        "sourcePath": "Cross-sections/neutral_projectile_ionization.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          0.00018600000864367139,
+          -0.0004000001849757334,
+          -0.05520799848157141,
+          0.7340799939916685,
+          -4.288930988170697,
+          12.812773989304423,
+          -35.75243699668655
+        ],
+        "scaleEnergyByIonMass": true
+      },
+      {
+        "processId": "hp_charge_exchange",
+        "name": "H+ charge exchange",
+        "projectileKind": "H+",
+        "projectileFate": "consume",
+        "products": [
+          {
+            "particleKind": "H2+",
+            "count": 1,
+            "speedClass": "slow"
+          },
+          {
+            "particleKind": "H0",
+            "count": 1,
+            "speedClass": "fast"
+          }
+        ],
+        "sourcePath": "Cross-sections/positive_ion_charge_exchange.cross",
+        "fitDegree": 6,
+        "coefficients": [
+          0.012630699993772537,
+          -0.2576709998556906,
+          2.049409998693898,
+          -8.16386999423829,
+          16.749299987445394,
+          -14.759399988029225,
+          -18.033900003439705
+        ],
+        "scaleEnergyByIonMass": true
+      }
+    ]
+  },
+  "surfaceInteractions": {
+    "enabled": false,
+    "model": "EAMCC",
+    "minimumImpactZMeters": 0.007,
+    "maximumSecondaryElectrons": 26,
+    "secondaryElectronEnergyEV": 10.0,
+    "debug": false
+  },
+  "run": {
+    "iterations": 4,
+    "solver": {
+      "type": "bicgstab"
+    },
+    "spaceCharge": {
+      "alphaCoeff": 0.5
+    },
+    "convergence": {
+      "currentDensityTolerance": 1.0
+    },
+    "domainDecomposition": {
+      "splitDomain": false
+    }
+  },
+  "diagnostics": {
+    "planes": {
+      "sampleZPositionsMeters": [
+        0.0,
+        0.009,
+        0.015,
+        0.032,
+        0.12,
+        0.137,
+        0.225,
+        0.242,
+        0.33,
+        0.347,
+        0.435,
+        0.452,
+        0.54,
+        0.557,
+        0.565
+      ],
+      "summaryZPositionMeters": 0.565,
+      "emitterExportZPositionMeters": 0.565
+    },
+    "species": {
+      "writePerSpeciesDiagnostics": true,
+      "writePerSpeciesGridPower": true,
+      "writePerSpeciesPlots": true,
+      "writeNegativeIonSummary": true
+    },
+    "gridPower": {
+      "ranges": [
+        {
+          "id": 0,
+          "includeInTotal": false
+        },
+        {
+          "id": 1,
+          "includeInTotal": false
+        },
+        {
+          "id": 2,
+          "includeInTotal": false
+        },
+        {
+          "id": 3,
+          "includeInTotal": false
+        },
+        {
+          "id": 4,
+          "includeInTotal": false
+        },
+        {
+          "id": 5,
+          "includeInTotal": false
+        },
+        {
+          "id": 6,
+          "includeInTotal": false
+        },
+        {
+          "id": 7,
+          "includeInTotal": false
+        },
+        {
+          "id": 8,
+          "includeInTotal": true
+        },
+        {
+          "id": 9,
+          "includeInTotal": true
+        }
+      ]
+    },
+    "summary": {
+      "apertureRadiusMeters": 0.007,
+      "transmissionPlaneZPositionMeters": 0.565
+    },
+    "plots": {
+      "meniscus": {
+        "enabled": true,
+        "zMinMeters": 0.0,
+        "zMaxMeters": 0.034,
+        "transverseMinMeters": -0.01,
+        "transverseMaxMeters": 0.01
+      }
+    }
+  },
+  "outputs": {
+    "summary": {
+      "enabled": true,
+      "directory": "Summary"
+    },
+    "plots": {
+      "enabled": true,
+      "directory": "Plots"
+    },
+    "data": {
+      "enabled": true,
+      "directory": "Data"
+    },
+    "vtk": {
+      "enabled": true,
+      "directory": "VTK",
+      "exportGeometry": true,
+      "exportSimulationState": true,
+      "exportTracedParticles": true
+    },
+    "logging": {
+      "consoleLevel": "info",
+      "fileLevel": "debug",
+      "captureStdout": true,
+      "writeDebugArtifacts": false,
+      "structuredLogFile": "run.log"
+    }
+  }
+}
