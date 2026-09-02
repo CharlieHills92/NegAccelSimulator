@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "scanProjectTag": "SPIDER_120_5_52.5_nsimp_scan",
+    "authoringCasePath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/SPIDER_120_5_52.5_nsimp.json",
+    "lastModified": "2026-06-24T19:06:36.741101Z"
+  },
+  "parameters": [
+    {
+      "path": "particles.sources[0].currentDensityAm2",
+      "label": "Current density [A/m^2]",
+      "parameterType": "number",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0,
+      "unit": null
+    }
+  ],
+  "scanTable": {
+    "cases": [
+      {
+        "caseIndex": 0,
+        "parameterValues": [
+          120.0
+        ],
+        "caseLabel": "Current GUI values",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_001/case_001.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_001",
+        "completedAt": "2026-06-24T17:04:27.806607Z"
+      },
+      {
+        "caseIndex": 1,
+        "parameterValues": [
+          100.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_002/case_002.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_002",
+        "completedAt": "2026-06-24T17:02:48.526529Z"
+      },
+      {
+        "caseIndex": 2,
+        "parameterValues": [
+          80.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_003/case_003.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_003",
+        "completedAt": "2026-06-24T17:02:59.519392Z"
+      },
+      {
+        "caseIndex": 3,
+        "parameterValues": [
+          60.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_004/case_004.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_004",
+        "completedAt": "2026-06-24T17:02:15.760741Z"
+      },
+      {
+        "caseIndex": 4,
+        "parameterValues": [
+          140.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_005/case_005.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_005",
+        "completedAt": "2026-06-24T17:06:15.923417Z"
+      },
+      {
+        "caseIndex": 5,
+        "parameterValues": [
+          160.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_006/case_006.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120_5_52.5_nsimp/case_006",
+        "completedAt": "2026-06-24T17:06:36.739499Z"
+      }
+    ],
+    "executionHistory": []
+  },
+  "visualization": {
+    "defaultXMetric": null,
+    "defaultYMetric": null,
+    "favoriteMetrics": []
+  }
+}
