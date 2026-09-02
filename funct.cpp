@@ -133,6 +133,13 @@ bool particle_kind_is_positive_ion(particle_kind kind) {
 	return kind == PARTICLE_HP || kind == PARTICLE_H2P || kind == PARTICLE_H3P;
 }
 
+bool is_unextracted_primary_negative_ion(double mass, double charge, double vz, int gen,
+                                         double ION_MASS) {
+	if (gen != 0) return false;              // stripping / surface secondary: a real load
+	if (vz >= 0.0) return false;             // still heading downstream
+	return identify_particle_species(mass, charge, ION_MASS) == PARTICLE_NEGATIVE_ION;
+}
+
 string get_particle_name(particle_kind pk) {
 	string name;
 	const char* family_prefix = particle_family_prefix(active_particle_family);

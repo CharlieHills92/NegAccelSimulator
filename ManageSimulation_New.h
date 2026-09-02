@@ -8,9 +8,11 @@
 #ifndef MANAGESIMULATION_NEW_H_
 #define MANAGESIMULATION_NEW_H_
 
-#include <string>
-#include <vector>
+#include <map>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 // Project includes
 #include "funct.h"
@@ -22,6 +24,34 @@
 #include "FieldManager.h"
 #include "ParticleManager.h"
 #include "DiagnosticsManager.h"
+#include "SurfaceEventLedger.h"
+
+// Surface-collision (EAMCC) trajectory-end callback. Only the definition in
+// ManageSimulation_New.cpp needs the complete type, so a forward declaration
+// keeps THCallback_surf_EAMCC.h out of every translation unit that includes us.
+class THCallback_surf_EAMCC;
+
+/**
+ * @brief One (species, generation) cell of a surface's power/current breakdown.
+ */
+struct PowerBreakdownEntry {
+    double power;                ///< W, always >= 0 (arrival side)
+    double current;              ///< A, signed; exactly 0 for neutral species
+    double equivalent_current;   ///< A, unsigned "if singly charged" flux; never a current total
+    size_t count;                ///< macroparticles
+
+    PowerBreakdownEntry()
+        : power(0.0), current(0.0), equivalent_current(0.0), count(0) {}
+};
+
+/// Breakdown key: (particle_kind as int, RAW generation).
+///
+/// The generation is deliberately kept raw rather than reduced modulo 100: surface
+/// secondaries carry gen >= SURFACE_GENERATION_OFFSET (101) and volume secondaries 1-4, and
+/// telling those apart is the whole point of the breakdown. PARTICLE_WRONG (-1) is a valid
+/// key and becomes the "unclassified" row, so that the per-species sums reconcile with the
+/// row total instead of quietly falling short.
+typedef std::pair<int, int> PowerBreakdownKey;
 
 // PowerStruct (keeping for compatibility)
 struct PowerStruct {
@@ -29,10 +59,16 @@ struct PowerStruct {
     size_t solid_idx;
     double total_power;
     double total_current;
+    // Unsigned "if singly charged" flux current. Kept separate from total_current so that
+    // neutral flux is reportable without ever entering an electrical current total.
+    double total_equivalent_current;
     std::vector<double> total_power_perspecies;
     std::vector<double> total_current_perspecies;
-    std::vector<double> total_power_pergen;
-    std::vector<double> total_current_pergen;
+    std::vector<double> total_equivalent_current_perspecies;
+    // Replaces the former total_power_pergen / total_current_pergen fixed 6-element
+    // vectors. Those were written but never read anywhere, and indexing them by the raw
+    // generation overflowed the heap once surface secondaries (gen >= 101) existed.
+    std::map<PowerBreakdownKey, PowerBreakdownEntry> breakdown;
     std::vector<double> xdata;
     std::vector<double> ydata;
     std::vector<double> zdata;
@@ -40,6 +76,7 @@ struct PowerStruct {
     std::vector<double> vydata;
     std::vector<double> vzdata;
     std::vector<double> curdata;
+    std::vector<double> eqcurdata;
     std::vector<double> mdata;
     std::vector<double> wdata;
     std::vector<double> qdata;
@@ -72,6 +109,18 @@ private:
     std::unique_ptr<FieldManager> fieldManager;
     std::unique_ptr<ParticleManager> particleManager;
     std::unique_ptr<DiagnosticsManager> diagnosticsManager;
+
+    // Surface-collision callback. It caches a Geometry& and a ParticleDataBase3D*,
+    // both of which are destroyed and recreated by every create_geometry()/define_pdb()
+    // pass (the JEXT current-matching loop calls run_simulation up to 5 times). Owning
+    // it here and rebuilding it per run_simulation() call keeps those references valid.
+    std::unique_ptr<THCallback_surf_EAMCC> surfaceCollisionCallback;
+
+    // Signed surface energy/charge balance filled by the callback above during the final
+    // tracking pass, then read by DiagnosticsManager to form the net power and current.
+    // Owned here because it must survive iterate_trajectories() and be readable during
+    // the analysis that follows, but must not survive into the next run_simulation() pass.
+    SurfaceEventLedger surfaceEventLedger;
 
     // Helper methods
     void initializeIbsimu();

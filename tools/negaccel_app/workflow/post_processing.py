@@ -192,6 +192,8 @@ def _classify_output_artifact(path: Path, artifact_type: str) -> dict[str, Any]:
         kind = "diagnostic-summary"
     elif lowered.endswith("_grid_power_summary.txt"):
         kind = "grid-power-summary"
+    elif lowered.endswith("_grid_power_breakdown.txt"):
+        kind = "grid-power-breakdown"
     elif lowered.endswith("final_map_outside.txt"):
         kind = "emitter-map"
 
@@ -530,6 +532,16 @@ def parse_grid_power_summary_txt(filepath: Path) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     total_included_beam_power_watts: float | None = None
     columns = ["ID", "Power[W]", "Current[A]", "Particles", "IncludeInTotal", "Description"]
+    # Un-extracted primary negative ions, reported by the simulator as comment lines so the
+    # tab-delimited data rows keep their 5/6-field contract. Absent in older files.
+    excluded_rows: dict[int, dict[str, Any]] = {}
+    total_excluded: dict[str, Any] | None = None
+    # Net accounting -- energy and charge the secondaries carried back off each surface.
+    # Also comment lines, for the same 5/6-field reason. Power[W] and Current[A] in the
+    # data rows keep their GROSS meaning; these are merged into the matching row dicts
+    # below so consumers see them as ordinary per-row values.
+    net_rows: dict[int, dict[str, Any]] = {}
+    total_net: dict[str, Any] | None = None
 
     for line_number, raw_line in enumerate(filepath.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw_line.strip()
@@ -541,6 +553,38 @@ def parse_grid_power_summary_txt(filepath: Path) -> dict[str, Any]:
             if summary_line.startswith("Total beam power"):
                 numeric_token = summary_line.rsplit(":", 1)[1].strip().split()[0]
                 total_included_beam_power_watts = float(numeric_token)
+            elif summary_line.startswith("ExcludedRow"):
+                fields = [part.strip() for part in summary_line.split("\t")]
+                if len(fields) == 4:
+                    excluded_rows[int(fields[1])] = {
+                        "Particles": int(fields[2]),
+                        "Current[A]": float(fields[3]),
+                    }
+            elif summary_line.startswith("TotalExcluded"):
+                fields = [part.strip() for part in summary_line.split("\t")]
+                if len(fields) == 3:
+                    total_excluded = {
+                        "Particles": int(fields[1]),
+                        "Current[A]": float(fields[2]),
+                    }
+            elif summary_line.startswith("NetRow"):
+                fields = [part.strip() for part in summary_line.split("\t")]
+                if len(fields) == 6:
+                    net_rows[int(fields[1])] = {
+                        "EmittedPower[W]": float(fields[2]),
+                        "NetPower[W]": float(fields[3]),
+                        "EmittedCurrent[A]": float(fields[4]),
+                        "NetCurrent[A]": float(fields[5]),
+                    }
+            elif summary_line.startswith("TotalNet"):
+                fields = [part.strip() for part in summary_line.split("\t")]
+                if len(fields) == 5:
+                    total_net = {
+                        "EmittedPower[W]": float(fields[1]),
+                        "NetPower[W]": float(fields[2]),
+                        "EmittedCurrent[A]": float(fields[3]),
+                        "NetCurrent[A]": float(fields[4]),
+                    }
             continue
 
         parts = [part.strip() for part in raw_line.rstrip("\n").split("\t")]
@@ -574,21 +618,132 @@ def parse_grid_power_summary_txt(filepath: Path) -> dict[str, Any]:
             f"Grid power row length mismatch in {filepath} at line {line_number}: expected 5 or 6 tab-delimited fields"
         )
 
+    # Merge the comment-line data into the matching row dicts by ID. This is what keeps the
+    # file's 5/6-field data-row contract intact while still giving consumers first-class
+    # per-row net values -- the bar-chart plotter and the scan metric extraction can read
+    # them like any other column, with no format change on the C++ side.
+    #
+    # Rows with no matching comment line get explicit defaults rather than being left
+    # without the keys, so a plotter can select a net metric without every call site having
+    # to guard for absence. With no ledger (surface collisions off) emitted is genuinely
+    # zero and net is genuinely equal to gross, so the defaults are correct, not a stand-in.
+    net_columns = ["EmittedPower[W]", "NetPower[W]", "EmittedCurrent[A]", "NetCurrent[A]"]
+    for row in rows:
+        row_id = row["ID"]
+        net = net_rows.get(row_id)
+        if net is not None:
+            row.update(net)
+        else:
+            row["EmittedPower[W]"] = 0.0
+            row["NetPower[W]"] = row["Power[W]"]
+            row["EmittedCurrent[A]"] = 0.0
+            row["NetCurrent[A]"] = row["Current[A]"]
+
+        excluded = excluded_rows.get(row_id)
+        row["ExcludedParticles"] = int(excluded["Particles"]) if excluded else 0
+        row["ExcludedCurrent[A]"] = float(excluded["Current[A]"]) if excluded else 0.0
+
     return {
         "path": filepath.as_posix(),
-        "columns": columns,
+        "columns": columns + net_columns + ["ExcludedParticles", "ExcludedCurrent[A]"],
         "rows": rows,
         "totalIncludedBeamPowerWatts": total_included_beam_power_watts,
+        "excludedUnextractedRows": excluded_rows,
+        "totalExcludedUnextracted": total_excluded,
+        "netRows": net_rows,
+        "totalNet": total_net,
     }
 
+_GRID_POWER_BREAKDOWN_COLUMNS = [
+    "RowID",
+    "Species",
+    "Gen",
+    "Origin",
+    "GrossPower[W]",
+    "EmittedPower[W]",
+    "NetPower[W]",
+    "GrossCurrent[A]",
+    "EmittedCurrent[A]",
+    "NetCurrent[A]",
+    "EquivalentCurrent[A]",
+    "Particles",
+    "IncludeInTotal",
+    "Description",
+]
+
+_GRID_POWER_BREAKDOWN_INT_COLUMNS = {"RowID", "Gen", "Particles"}
+_GRID_POWER_BREAKDOWN_STR_COLUMNS = {"Species", "Origin", "Description"}
+
+
+def parse_grid_power_breakdown_txt(filepath: Path) -> dict[str, Any]:
+    """Parse ``<tag>_grid_power_breakdown.txt``.
+
+    Unlike the grid power summary, this is a new file with its own format, so it uses real
+    named columns rather than smuggling data through ``#`` comment lines. The column order
+    is fixed by the writer in ``DiagnosticsManager::writeGridPowerBreakdown``.
+
+    Note that ``EquivalentCurrent[A]`` is an unsigned "if singly charged" flux current,
+    reported for neutral species too. It is deliberately NOT a current: never sum it into
+    ``NetCurrent[A]`` or compare it against the summary file's ``Current[A]``.
+    """
+    if not filepath.is_file():
+        raise WorkflowError(f"Grid power breakdown not found: {filepath}")
+
+    rows: list[dict[str, Any]] = []
+    expected = len(_GRID_POWER_BREAKDOWN_COLUMNS)
+
+    for line_number, raw_line in enumerate(filepath.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+
+        parts = [part.strip() for part in raw_line.rstrip("\n").split("\t")]
+        if len(parts) != expected:
+            raise WorkflowError(
+                f"Grid power breakdown row length mismatch in {filepath} at line "
+                f"{line_number}: expected {expected} tab-delimited fields, got {len(parts)}"
+            )
+
+        row: dict[str, Any] = {}
+        for column, value in zip(_GRID_POWER_BREAKDOWN_COLUMNS, parts):
+            if column in _GRID_POWER_BREAKDOWN_INT_COLUMNS:
+                row[column] = int(value)
+            elif column in _GRID_POWER_BREAKDOWN_STR_COLUMNS:
+                row[column] = value
+            elif column == "IncludeInTotal":
+                row[column] = value.lower() == "true"
+            else:
+                row[column] = float(value)
+        rows.append(row)
+
+    return {
+        "path": filepath.as_posix(),
+        "columns": list(_GRID_POWER_BREAKDOWN_COLUMNS),
+        "rows": rows,
+    }
+
+
+def _resolve_summary_prefix(summary_directory: Path, preferred_case_tag: str, config_stem: str) -> str:
+    preferred_diag = summary_directory / f"{preferred_case_tag}_diagnostic_summary.txt"
+    if preferred_diag.is_file():
+        return preferred_case_tag
+
+    fallback_diag = summary_directory / f"{config_stem}_diagnostic_summary.txt"
+    if fallback_diag.is_file():
+        return config_stem
+
+    # Keep old behavior for error reporting path if neither exists.
+    return preferred_case_tag
 
 def aggregate_case_diagnostics(case_source: Path) -> dict[str, Any]:
     context = _resolve_case_context(case_source)
     case_tag = context["caseTag"]
     summary_directory = context["summaryDirectory"]
 
-    diagnostic_summary_path = summary_directory / f"{case_tag}_diagnostic_summary.txt"
-    negative_ion_summary_path = summary_directory / f"{case_tag}_NEGIONBEAM_diagnostic_summary.txt"
+    summary_prefix = _resolve_summary_prefix(summary_directory, case_tag, context["configPath"].stem)
+
+    diagnostic_summary_path = summary_directory / f"{summary_prefix}_diagnostic_summary.txt"
+    negative_ion_summary_path = summary_directory / f"{summary_prefix}_NEGIONBEAM_diagnostic_summary.txt"
     grid_power_suffix = "_grid_power_summary.txt"
 
     diagnostic_summary = parse_diagnostic_summary_txt(diagnostic_summary_path)
@@ -599,20 +754,27 @@ def aggregate_case_diagnostics(case_source: Path) -> dict[str, Any]:
     )
 
     grid_power_summaries: dict[str, dict[str, Any]] = {}
-    for filepath in sorted(summary_directory.glob(f"{case_tag}_*{grid_power_suffix}")):
-        species_tag = filepath.name[len(case_tag) + 1 : -len(grid_power_suffix)]
+    for filepath in sorted(summary_directory.glob(f"{summary_prefix}_*{grid_power_suffix}")):
+        species_tag = filepath.name[len(summary_prefix) + 1 : -len(grid_power_suffix)]
         grid_power_summaries[species_tag] = parse_grid_power_summary_txt(filepath)
+
+    grid_power_breakdown_suffix = "_grid_power_breakdown.txt"
+    grid_power_breakdowns: dict[str, dict[str, Any]] = {}
+    for filepath in sorted(summary_directory.glob(f"{summary_prefix}_*{grid_power_breakdown_suffix}")):
+        species_tag = filepath.name[len(summary_prefix) + 1 : -len(grid_power_breakdown_suffix)]
+        grid_power_breakdowns[species_tag] = parse_grid_power_breakdown_txt(filepath)
 
     return {
         "caseTag": case_tag,
+        "summaryPrefixUsed": summary_prefix,
         "configPath": context["configPath"].as_posix(),
         "rootDirectory": context["rootDirectory"].as_posix(),
         "summaryDirectory": summary_directory.as_posix(),
         "diagnosticSummary": diagnostic_summary,
         "negativeIonSummary": negative_ion_summary,
         "gridPowerSummaries": grid_power_summaries,
+        "gridPowerBreakdowns": grid_power_breakdowns,
     }
-
 
 def write_case_diagnostics_aggregation(case_source: Path, output_path: Path | None = None) -> Path:
     payload = aggregate_case_diagnostics(case_source)

@@ -140,7 +140,7 @@
     ],
     "plasma": {
       "model": "shield",
-      "initialPlasmaMaxZMeters": 0.007,
+      "initialPlasmaMaxZMeters": 0.005,
       "tanhWidthEV": 0.01,
       "meniscusVoltageVolts": 0.0
     }

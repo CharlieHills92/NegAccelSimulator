@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..common import REPO_ROOT, WorkflowError, nested_get, parse_number_list
+from ..common import ParameterizedEditor, REPO_ROOT, WorkflowError, nested_get, parse_number_list
 from ..visualization import configure_matplotlib_canvas, configure_matplotlib_toolbar
 
 
@@ -154,6 +154,24 @@ class _MagneticWorkspaceWidget(QWidget):
         self._field_cache: dict[str, dict[str, Any]] = {}
         self._build_ui()
 
+    def _row_for_widget(self, widget: QWidget, column: int) -> int:
+        for row in range(self._table.rowCount()):
+            cell_widget = self._table.cellWidget(row, column)
+            if cell_widget is widget:
+                return row
+            if isinstance(cell_widget, ParameterizedEditor) and cell_widget.editor_widget() is widget:
+                return row
+        return 0
+
+    def _unwrap_editor(self, widget: QWidget | None, expected_type):
+        if isinstance(widget, expected_type):
+            return widget
+        if isinstance(widget, ParameterizedEditor):
+            editor = widget.editor_widget()
+            if isinstance(editor, expected_type):
+                return editor
+        return None
+
     def _build_ui(self) -> None:
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -225,8 +243,22 @@ class _MagneticWorkspaceWidget(QWidget):
         controls.addRow("Components", components_widget)
         controls.addRow("Start point x,y,z", self._start)
         controls.addRow("Direction dirx,diry,dirz", self._direction)
-        controls.addRow("Number of points", self._points)
-        controls.addRow("Step [m]", self._step)
+        controls.addRow(
+            "Number of points",
+            self._window._build_parameterized_editor(
+                lambda: "magneticField.plotProfile.points",
+                "Number of points",
+                self._points,
+            ),
+        )
+        controls.addRow(
+            "Step [m]",
+            self._window._build_parameterized_editor(
+                lambda: "magneticField.plotProfile.step",
+                "Step [m]",
+                self._step,
+            ),
+        )
         plot_layout.addLayout(controls)
 
         self._plot_error = QLabel("")
@@ -286,11 +318,15 @@ class _MagneticWorkspaceWidget(QWidget):
         widget.setCurrentText(normalized)
         return widget
 
-    def _field_scale_widget(self, value: float = 1.0) -> QDoubleSpinBox:
+    def _field_scale_widget(self, value: float = 1.0) -> ParameterizedEditor:
         widget = _double_spin(0.0, 1.0e9, 6, 0.05)
         widget.setValue(value)
         widget.valueChanged.connect(self._on_changed)
-        return widget
+        return self._window._build_parameterized_editor(
+            lambda w=widget: f"magneticField.fields[{self._row_for_widget(w, 2)}].scale",
+            "Field scale",
+            widget,
+        )
 
     def _field_payload_widget(self, source_type: str, value: str = "") -> _FieldPayloadWidget:
         return _FieldPayloadWidget(
@@ -351,6 +387,7 @@ class _MagneticWorkspaceWidget(QWidget):
                 continue
             if not isinstance(type_widget, QComboBox):
                 continue
+            scale_widget = self._unwrap_editor(scale_widget, QDoubleSpinBox)
             if not isinstance(scale_widget, QDoubleSpinBox):
                 continue
             if not isinstance(payload_widget, _FieldPayloadWidget):

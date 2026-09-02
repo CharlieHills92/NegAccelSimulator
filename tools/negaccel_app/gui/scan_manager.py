@@ -288,6 +288,13 @@ class ScanManagerWindow(QMainWindow):
                         total_power = grid_summary.get("totalIncludedBeamPowerWatts")
                         if total_power is not None:
                             row[f"gridPower:{species_tag}:totalIncludedBeamPowerWatts"] = total_power
+                        # Net totals, present only when surface collisions produced an
+                        # emission ledger. Exposed as scan metric columns so a scan can be
+                        # plotted against net load, not just gross.
+                        total_net = grid_summary.get("totalNet")
+                        if isinstance(total_net, dict):
+                            for key, value in total_net.items():
+                                row[f"gridPower:{species_tag}:net:{key}"] = value
                 except Exception as exc:
                     row["aggregationError"] = str(exc)
 

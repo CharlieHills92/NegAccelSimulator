@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from negaccel_app.particles import build_family_particle_types, map_particle_kind_to_family
 
-from ..common import REPO_ROOT, WorkflowError, nested_get
+from ..common import ParameterBindingToggle, REPO_ROOT, WorkflowError, nested_get
 from ..visualization import configure_matplotlib_canvas, configure_matplotlib_toolbar
 
 
@@ -131,7 +131,7 @@ def _double_spin(minimum: float, maximum: float, decimals: int, step: float) -> 
     return spin
 
 
-def _optional_energy_widget() -> tuple[QWidget, QCheckBox, QDoubleSpinBox]:
+def _optional_energy_widget(window=None, path_provider=None, label_text: str = "") -> tuple[QWidget, QCheckBox, QDoubleSpinBox, ParameterBindingToggle | None]:
     container = QWidget()
     layout = QHBoxLayout(container)
     layout.setContentsMargins(0, 0, 0, 0)
@@ -143,8 +143,12 @@ def _optional_energy_widget() -> tuple[QWidget, QCheckBox, QDoubleSpinBox]:
     enabled.toggled.connect(spin.setEnabled)
 
     layout.addWidget(enabled)
+    if window is not None and path_provider is not None and label_text:
+        wrapped = window._build_parameterized_editor(path_provider, label_text, spin)
+        layout.addWidget(wrapped, 1)
+        return container, enabled, spin, wrapped.parameter_toggle()
     layout.addWidget(spin, 1)
-    return container, enabled, spin
+    return container, enabled, spin, None
 
 
 class _PathSelector(QWidget):
@@ -314,7 +318,25 @@ class _InteractionsWorkspaceWidget(QWidget):
         self._fallback_species = "H2"
         self._updating_ui = False
         self._mapped_particle_family = self._active_particle_family()
+        self._parameter_toggles: list[ParameterBindingToggle] = []
         self._build_ui()
+
+    def _current_reaction_entry_index(self) -> int:
+        entry = self._current_reaction_entry()
+        if entry is None:
+            return 0
+        process_id = str(entry.get("processId") or "")
+        for index, candidate in enumerate(self._reaction_entries):
+            if str(candidate.get("processId") or "") == process_id:
+                return index
+        return 0
+
+    def _reaction_parameter_path(self, suffix: str) -> str:
+        return f"gasInteractions.reactions[{self._current_reaction_entry_index()}].{suffix}"
+
+    def _refresh_parameter_toggles(self) -> None:
+        for toggle in self._parameter_toggles:
+            toggle.refresh_binding_state()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -358,7 +380,14 @@ class _InteractionsWorkspaceWidget(QWidget):
         self._stripping_minimum_z = _double_spin(0.0, 10.0, 6, 0.001)
         stripping_layout.addRow(self._stripping_enabled)
         stripping_layout.addRow(self._generate_secondaries)
-        stripping_layout.addRow("Minimum z [m]", self._stripping_minimum_z)
+        stripping_layout.addRow(
+            "Minimum z [m]",
+            self._window._build_parameterized_editor(
+                lambda: "gasInteractions.stripping.minimumZMeters",
+                "Minimum z [m]",
+                self._stripping_minimum_z,
+            ),
+        )
 
         projectiles_box = QGroupBox("Projectiles")
         projectiles_layout = QVBoxLayout(projectiles_box)
@@ -415,16 +444,34 @@ class _InteractionsWorkspaceWidget(QWidget):
         self._reaction_projectile_fate = QComboBox()
         self._reaction_projectile_fate.addItem("Consume projectile", "consume")
         self._reaction_projectile_fate.addItem("Projectile survives", "survive")
-        self._reaction_minimum_energy_row, self._reaction_minimum_enabled, self._reaction_minimum_energy = (
-            _optional_energy_widget()
+        self._reaction_minimum_energy_row, self._reaction_minimum_enabled, self._reaction_minimum_energy, minimum_toggle = (
+            _optional_energy_widget(
+                self._window,
+                lambda: self._reaction_parameter_path("minimumEnergyEV"),
+                "Minimum energy [eV]",
+            )
         )
-        self._reaction_maximum_energy_row, self._reaction_maximum_enabled, self._reaction_maximum_energy = (
-            _optional_energy_widget()
+        self._reaction_maximum_energy_row, self._reaction_maximum_enabled, self._reaction_maximum_energy, maximum_toggle = (
+            _optional_energy_widget(
+                self._window,
+                lambda: self._reaction_parameter_path("maximumEnergyEV"),
+                "Maximum energy [eV]",
+            )
         )
+        if minimum_toggle is not None:
+            self._parameter_toggles.append(minimum_toggle)
+        if maximum_toggle is not None:
+            self._parameter_toggles.append(maximum_toggle)
+        fit_degree_editor = self._window._build_parameterized_editor(
+            lambda: self._reaction_parameter_path("fitDegree"),
+            "Fit degree",
+            self._reaction_fit_degree,
+        )
+        self._parameter_toggles.append(fit_degree_editor.parameter_toggle())
         detail_form.addRow("Reaction type", self._reaction_title)
         detail_form.addRow("Name", self._reaction_name)
         detail_form.addRow("Source file", self._reaction_source_path)
-        detail_form.addRow("Fit degree", self._reaction_fit_degree)
+        detail_form.addRow("Fit degree", fit_degree_editor)
         detail_form.addRow("Projectile fate", self._reaction_projectile_fate)
         detail_form.addRow("", self._reaction_scale_by_mass)
         detail_form.addRow("Minimum energy [eV]", self._reaction_minimum_energy_row)
@@ -1164,6 +1211,7 @@ class _InteractionsWorkspaceWidget(QWidget):
                 self._reaction_products.setPlainText(self._format_products(entry.get("products", [])))
         finally:
             self._updating_ui = False
+        self._refresh_parameter_toggles()
         self._refresh_current_reaction_plot()
 
     def _sync_gas_species(self) -> str:

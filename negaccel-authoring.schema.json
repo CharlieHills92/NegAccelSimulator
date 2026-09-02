@@ -971,6 +971,10 @@
         "ranges"
       ],
       "properties": {
+        "writePowerDensityMap": {
+          "type": "boolean",
+          "description": "Write a per-triangle net power density map (W/cm2) over the boundary triangulation, as <tag>_power_density.vtk plus a text summary. Optional; defaults to false because it costs an extra pass over every impact and is only meaningful when the impact statistics support it."
+        },
         "ranges": {
           "type": "array",
           "minItems": 1,

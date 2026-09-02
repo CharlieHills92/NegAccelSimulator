@@ -93,6 +93,7 @@ void ManageSimulation::initializeComponents(const std::string& scan_name, const 
         }
     }
     diagnosticsManager->setDensityProfileFilename(parameters->getStrippingDensityProfile());
+    diagnosticsManager->setVTKFolder(fileManager->getVTKFolder());
 }
 
 void ManageSimulation::initializeIbsimu() {
@@ -104,6 +105,10 @@ void ManageSimulation::initializeIbsimu() {
 }
 
 void ManageSimulation::ResetSimulation() {
+    // Release before the geometry and particle database it references.
+    surfaceCollisionCallback.reset();
+    surfaceEventLedger.clear();
+    if (diagnosticsManager) diagnosticsManager->setSurfaceEventLedger(NULL);
     if (geometryManager) geometryManager->resetGeometry();
     if (fieldManager) fieldManager->resetFields();
     if (particleManager) particleManager->resetParticles();
@@ -155,7 +160,14 @@ void ManageSimulation::run_simulation() {
 
 void ManageSimulation::run_simulation(bool pdbincycle) {
     if (debug) logfile << "DEBUG: Building geometrical surfaces... " << flush;
-    
+
+    // Discard any callback left over from a previous run_simulation() call: the JEXT
+    // current-matching loop in main() recreates the geometry and the particle database
+    // between passes, so a retained callback would hold references to freed objects.
+    surfaceCollisionCallback.reset();
+    surfaceEventLedger.clear();
+    if (diagnosticsManager) diagnosticsManager->setSurfaceEventLedger(NULL);
+
     Geometry* geometry = geometryManager->getGeometry();
     if (!geometry) {
         throw Error(ERROR_LOCATION, "No geometry available for simulation");
@@ -411,28 +423,34 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
             }
         }
         
-        // Initialize surface collision callback (EAMCC) - only on last iteration
-        static THCallback_surf_EAMCC* thc_surf_static = nullptr;
+        // Initialize surface collision callback (EAMCC) - only on last iteration.
+        // The callback caches Geometry& and ParticleDataBase3D*, so it must be rebuilt
+        // whenever either has been recreated; surfaceCollisionCallback was cleared at
+        // the top of this run_simulation() call for exactly that reason.
         if (parameters->getIncludeSurfaceCollisions() > 0) {
             if (i == n_iterations - 1) {
                 // Last iteration: enable surface collisions
-                if (thc_surf_static == nullptr) {
+                if (!surfaceCollisionCallback) {
                     double mass = parameters->getMIons();
                     bool debug_surf = debugprint || parameters->getSurfaceCollisionsDebug();
                     Geometry* geom = geometryManager->getGeometry();
                     if (geom) {
-                        thc_surf_static = new THCallback_surf_EAMCC(
+                        surfaceCollisionCallback.reset(new THCallback_surf_EAMCC(
                             *geom,
                             pdb,
                             mass,
                             debug_surf,
-                            parameters->getSurfaceCollisionsMinimumZ());
-                        pdb->set_trajectory_end_callback(thc_surf_static);
-                        if (debug) logfile << "DEBUG: Surface collision callback (EAMCC) enabled on last iteration" << endl;
+                            parameters->getSurfaceCollisionsMinimumZ()));
                     }
-                } else {
-                    // Reuse existing callback
-                    pdb->set_trajectory_end_callback(thc_surf_static);
+                }
+                if (surfaceCollisionCallback) {
+                    // Start the net-accounting ledger empty for this tracking pass. Cleared
+                    // here rather than in the callback constructor so that a re-entered
+                    // final iteration cannot accumulate emissions twice.
+                    surfaceEventLedger.clear();
+                    surfaceCollisionCallback->setEventLedger(&surfaceEventLedger);
+                    diagnosticsManager->setSurfaceEventLedger(&surfaceEventLedger);
+                    pdb->set_trajectory_end_callback(surfaceCollisionCallback.get());
                     if (debug) logfile << "DEBUG: Surface collision callback (EAMCC) enabled on last iteration" << endl;
                 }
             } else {
@@ -1061,8 +1079,12 @@ void PowerStruct::add(const Particle3D &pp) {
     Vec3D x = pp.location();
     Vec3D vel = pp.velocity();
     size_t ps = identify_particle_species(pp.m(), pp.q(), ionmass);
-    bool addpart = true;
-    if (ps == PARTICLE_NEGATIVE_ION && vel[2] < 0) addpart = false;
+    // Exclude only un-extracted PRIMARY negative ions returning to the source: those are an
+    // artifact of the plasma/meniscus model, not a beam load. The previous test omitted the
+    // generation check and so also discarded stripped and surface-backscattered negative
+    // ions travelling upstream, which are a genuine load. Callers that need the excluded
+    // tally use the same predicate (see DiagnosticsManager::analyzeGridPowerLoads).
+    bool addpart = !is_unextracted_primary_negative_ion(pp.m(), pp.q(), vel[2], pp.gen(), ionmass);
 
     if (addpart) {
         xdata.push_back(x[0]);
@@ -1073,13 +1095,51 @@ void PowerStruct::add(const Particle3D &pp) {
         vxdata.push_back(vel[0]);
         vydata.push_back(vel[1]);
         vzdata.push_back(vel[2]);
-        curdata.push_back(pp.IQ());
         mdata.push_back(pp.m());
-        double charge = pp.q();
-        if (charge == 0) charge = CHARGE_E;
-        double V = 0.5 * pp.m() * vel.ssqr() / charge;
-        wdata.push_back(pp.IQ() * V);
-        qdata.push_back(pp.q());
+        // Relativistic kinetic energy, in JOULES. The non-relativistic 0.5*m*v^2
+        // underestimates badly for electrons -- 13.5% at 52.5 keV, 23% at 100 keV, 77% at
+        // 1 MeV -- and electrons carry the large majority of the grid power load. Heavy
+        // species are unaffected (<0.1%). This is the same expression already used in
+        // THCallback.h:322, where the non-relativistic form was abandoned (it is still
+        // there, commented out, at :321). velocity() returns true v, not gamma*v: the
+        // iterator guards v2 >= SPEED_C2 and forms 1 - v2/SPEED_C2 directly
+        // (particles.cpp:264-267).
+        double v2 = vel.ssqr();
+        double Ekin;
+        if (std::isfinite(v2) && v2 > 0.0 && v2 < SPEED_C2) {
+            Ekin = pp.m() * SPEED_C2 * (1.0 / sqrt(1.0 - v2 / SPEED_C2) - 1.0);
+        } else {
+            Ekin = 0.5 * pp.m() * v2;   // v = 0, or non-finite: fall back
+        }
+
+        // Derive power and current from ONE particle rate, rather than from a voltage.
+        // The old form was power = IQ * (Ekin/q), which had two defects:
+        //
+        //  * Power inherited the sign of IQ/q. For a neutral, q == 0 was replaced by
+        //    +CHARGE_E while IQ stays negative (child_particle_current keeps IQ negative
+        //    for neutral and negative species), so every neutral deposited NEGATIVE power
+        //    and silently cancelled real load. Energy deposition is unsigned: an atom does
+        //    not cool a grid.
+        //  * For a neutral, IQ is a particle-number-rate proxy, not a current, so its
+        //    contribution to a current total is meaningless -- yet it was summed in.
+        //    Observed in MTF_J_SEC_0_H0_grid_power_summary.txt: 0.002484 A of "current"
+        //    at Z_max_exit from 1150 neutral H0 macroparticles.
+        //
+        // rate [1/s] * Ekin [J] = W is unconditionally positive, and the current is formed
+        // from the *signed physical charge*, which is exactly zero for a neutral. For any
+        // charged species rate*q == |IQ|*sign(q) == IQ, so no charged current changes.
+        double q_raw   = pp.q();                              // signed [C]; 0 for neutrals
+        double q_scale = (q_raw == 0.0) ? CHARGE_E : fabs(q_raw);
+        double rate    = fabs(pp.IQ()) / q_scale;             // macroparticles per second
+
+        wdata.push_back(rate * Ekin);                         // W, always >= 0
+        curdata.push_back(q_raw == 0.0 ? 0.0 : rate * q_raw); // A, signed; 0 for neutrals
+        // Equivalent current: the current this flux would carry if singly charged. Unsigned,
+        // populated for every species including neutrals, and never summed into a current
+        // total -- it exists so neutral flux stays visible (the NBI convention, e.g. "17 A
+        // equivalent of neutral deuterium").
+        eqcurdata.push_back(rate * CHARGE_E);
+        qdata.push_back(q_raw);
         gendata.push_back(pp.gen());
     }
 }
@@ -1087,27 +1147,34 @@ void PowerStruct::add(const Particle3D &pp) {
 void PowerStruct::calculate_total_power() {
     total_power = 0.;
     total_current = 0.;
+    total_equivalent_current = 0.;
 
     total_power_perspecies.assign(particle_kind_count(), 0.0);
     total_current_perspecies.assign(particle_kind_count(), 0.0);
+    total_equivalent_current_perspecies.assign(particle_kind_count(), 0.0);
 
-    total_power_pergen.assign(6, 0.0);
-    total_current_pergen.assign(6, 0.0);
+    breakdown.clear();
 
     for (size_t ii = 0; ii < wdata.size(); ii++) {
         total_power += wdata[ii];
         total_current += curdata[ii];
+        total_equivalent_current += eqcurdata[ii];
         if (kinddata[ii] >= 0 && kinddata[ii] < static_cast<int>(total_power_perspecies.size())) {
             total_power_perspecies[kinddata[ii]] += wdata[ii];
             total_current_perspecies[kinddata[ii]] += curdata[ii];
+            total_equivalent_current_perspecies[kinddata[ii]] += eqcurdata[ii];
         }
-        if (abs(gendata[ii] % 100) < 5) {
-            total_power_pergen[gendata[ii]] += wdata[ii];
-            total_current_pergen[gendata[ii]] += curdata[ii];
-        } else {
-            total_power_pergen[5] += wdata[ii];
-            total_current_pergen[5] += curdata[ii];
-        }
+
+        // Species x generation cell. Keyed on the RAW generation and on the raw kind, so
+        // PARTICLE_WRONG (-1) gets its own cell rather than being dropped -- the
+        // per-species slots above skip it, which is why Sum(per-species) did not previously
+        // reconcile with total_power. A std::map replaces the former fixed 6-element
+        // pergen vectors, which a raw gen >= 101 indexed straight past the end of.
+        PowerBreakdownEntry& cell = breakdown[PowerBreakdownKey(kinddata[ii], gendata[ii])];
+        cell.power += wdata[ii];
+        cell.current += curdata[ii];
+        cell.equivalent_current += eqcurdata[ii];
+        cell.count += 1;
     }
 }
 
@@ -1118,7 +1185,7 @@ void PowerStruct::print(const std::string &filename) {
         return;
     }
     
-    ostr << "x\ty\tz\tvx\tvy\tvz\tm\tpower\tcurr\tcharge\tgen\tkind\n";
+    ostr << "x\ty\tz\tvx\tvy\tvz\tm\tpower\tcurr\teqcurr\tcharge\tgen\tkind\n";
     for (size_t i = 0; i < xdata.size(); i++) {
         ostr << setw(12) << xdata[i] << "\t"
              << setw(12) << ydata[i] << "\t"
@@ -1129,6 +1196,7 @@ void PowerStruct::print(const std::string &filename) {
              << setw(12) << mdata[i] << "\t"
              << setw(12) << wdata[i] << "\t"
              << setw(12) << curdata[i] << "\t"
+             << setw(12) << eqcurdata[i] << "\t"
              << setw(12) << qdata[i] << "\t"
              << setw(12) << gendata[i] << "\t"
              << setw(12) << kinddata[i] << "\n";

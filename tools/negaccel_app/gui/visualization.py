@@ -2702,17 +2702,30 @@ class OutputCanvas(FigureCanvasQTAgg):
         if metric == "current":
             values = np.asarray([float(row["Current[A]"]) for row in rows], dtype=float)
             ylabel = "Current [A]"
-            title = "Grid Current Summary"
+            title = "Grid Current Summary (gross, arriving)"
             color = "#2f6f7e"
         elif metric == "particles":
             values = np.asarray([float(row["Particles"]) for row in rows], dtype=float)
             ylabel = "Particles"
             title = "Grid Particle Counts"
             color = "#8d6a9f"
+        elif metric == "net_power":
+            # Gross minus what the surface emitted back. parse_grid_power_summary_txt
+            # merges these in from the file's "# NetRow" lines and falls back to gross
+            # where no emission ledger exists, so the key is always present.
+            values = np.asarray([float(row["NetPower[W]"]) for row in rows], dtype=float)
+            ylabel = "Net power [W]"
+            title = "Grid Power Summary (net of emitted secondaries)"
+            color = "#a8452a"
+        elif metric == "net_current":
+            values = np.asarray([float(row["NetCurrent[A]"]) for row in rows], dtype=float)
+            ylabel = "Net current [A]"
+            title = "Grid Current Summary (net drain)"
+            color = "#25525d"
         else:
             values = np.asarray([float(row["Power[W]"]) for row in rows], dtype=float)
             ylabel = "Power [W]"
-            title = "Grid Power Summary"
+            title = "Grid Power Summary (gross, arriving)"
             color = "#c24d2c"
 
         positions = np.arange(len(descriptions), dtype=float)

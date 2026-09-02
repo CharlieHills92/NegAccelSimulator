@@ -48,7 +48,7 @@ SOURCES = main.cpp ManageSimulation_New.cpp \
 		  SimulationParameters.cpp FileManager.cpp GeometryManager.cpp \
           FieldManager.cpp ParticleManager.cpp DiagnosticsManager.cpp \
 		  my_diagnostics.cpp globals.cpp funct.cpp \
-		  cross_sections.cpp THCallback.cpp
+		  cross_sections.cpp THCallback.cpp SurfaceEventLedger.cpp
 
 # Object files  
 OBJECTS = $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)

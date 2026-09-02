@@ -32,6 +32,8 @@ from .common import (
     EXAMPLE_AUTHORING_PATH,
     build_runtime_path,
     create_scrollable_form,
+    ParameterBindingToggle,
+    ParameterizedEditor,
     install_qt_message_filter,
     runtime_path_parent_seed,
 )
@@ -82,6 +84,7 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         self.parameter_widgets_by_path: dict[str, QWidget] = {}
         self.parameter_checkboxes_by_path: dict[str, QCheckBox] = {}
         self.parameter_labels_by_path: dict[str, str] = {}
+        self.parameter_value_readers_by_path: dict[str, Any] = {}
 
         self._build_ui(runtime_path)
         self._resize_to_available_screen()
@@ -374,41 +377,57 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
                 continue
 
             label_text = label_widget.text() if isinstance(label_widget, QLabel) else path
-            self.parameter_widgets_by_path[path] = field_widget
-            self.parameter_labels_by_path[path] = label_text
-            wrapped = self._build_parameterized_field(path, label_text, field_widget)
+            wrapped = self._build_parameterized_editor(lambda p=path: p, label_text, field_widget)
             form_layout.setWidget(row, QFormLayout.ItemRole.FieldRole, wrapped)
 
-    def _build_parameterized_field(self, path: str, label_text: str, field_widget: QWidget) -> QWidget:
-        wrapper = QWidget()
-        row = QHBoxLayout(wrapper)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        row.addWidget(field_widget, 1)
-
-        checkbox = self._build_parameter_checkbox(path, label_text, field_widget)
-        row.addWidget(checkbox, 0)
-        return wrapper
-
-    def _build_parameter_checkbox(self, path: str, label_text: str, widget: QWidget) -> QCheckBox:
+    def _register_parameter_binding(self, path: str, label_text: str, widget: QWidget, value_reader) -> None:
         self.parameter_widgets_by_path[path] = widget
         self.parameter_labels_by_path[path] = label_text
-        checkbox = self.parameter_checkboxes_by_path.get(path)
-        if checkbox is None:
-            checkbox = QCheckBox("P")
-            checkbox.setMaximumWidth(28)
-            checkbox.toggled.connect(
-                lambda checked, p=path, l=label_text, w=widget: self._on_parameter_flag_toggled(p, l, w, checked)
-            )
-            self.parameter_checkboxes_by_path[path] = checkbox
-        checkbox.setToolTip(f"Include '{label_text}' in the Scan Manager parameter list")
-        checkbox.blockSignals(True)
-        checkbox.setChecked(self.parameter_flag_registry.is_marked(path))
-        checkbox.blockSignals(False)
-        return checkbox
+        self.parameter_value_readers_by_path[path] = value_reader
 
-    def _on_parameter_flag_toggled(self, path: str, label_text: str, widget: QWidget, checked: bool) -> None:
+    def _build_parameter_toggle(
+        self,
+        path_provider,
+        label_text: str,
+        widget: QWidget,
+        parameter_type: str | None = None,
+        value_reader=None,
+    ) -> ParameterBindingToggle:
+        return ParameterBindingToggle(
+            label_text=label_text,
+            widget=widget,
+            path_provider=path_provider,
+            is_marked=self.parameter_flag_registry.is_marked,
+            on_toggle=self._on_parameter_flag_toggled,
+            on_binding_refreshed=self._register_parameter_binding,
+            parameter_type=parameter_type,
+            value_reader=value_reader,
+        )
+
+    def _build_parameterized_editor(
+        self,
+        path_provider,
+        label_text: str,
+        widget: QWidget,
+        parameter_type: str | None = None,
+        value_reader=None,
+    ) -> ParameterizedEditor:
+        toggle = self._build_parameter_toggle(path_provider, label_text, widget, parameter_type, value_reader)
+        self.parameter_checkboxes_by_path[toggle.current_path()] = toggle
+        return ParameterizedEditor(widget, toggle)
+
+    def _on_parameter_flag_toggled(
+        self,
+        path: str,
+        label_text: str,
+        widget: QWidget,
+        checked: bool,
+        parameter_type: str | None = None,
+    ) -> None:
         if checked:
+            if parameter_type is not None:
+                self.parameter_flag_registry.mark_parameter(path, label_text, parameter_type)
+                return
             if isinstance(widget, QSpinBox):
                 self.parameter_flag_registry.mark_parameter(
                     path,
@@ -449,6 +468,9 @@ class NegAccelMainWindow(AuthoringMixin, ExecutionMixin, ResultsMixin, QMainWind
         return project
 
     def _current_parameter_value(self, path: str) -> Any:
+        value_reader = self.parameter_value_readers_by_path.get(path)
+        if callable(value_reader):
+            return value_reader()
         widget = self.parameter_widgets_by_path.get(path)
         if isinstance(widget, QSpinBox):
             return int(widget.value())

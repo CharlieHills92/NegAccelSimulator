@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..common import QCheckBox, WorkflowError, nested_get
+from ..common import ParameterizedEditor, QCheckBox, WorkflowError, nested_get
 from ...workflow.domains.boundary import resolve_boundary_value_expressions
 
 
@@ -84,6 +84,16 @@ class _BoundaryEditorWidget(QWidget):
         except ValueError:
             return value
 
+    def _expression_widget(self, row: int) -> QLineEdit | None:
+        widget = self._table.cellWidget(row, 3)
+        if isinstance(widget, QLineEdit):
+            return widget
+        if isinstance(widget, ParameterizedEditor):
+            editor = widget.editor_widget()
+            if isinstance(editor, QLineEdit):
+                return editor
+        return None
+
     def _set_resolved_value(self, row: int, text: str, tooltip: str | None = None) -> None:
         item = self._table.item(row, 4)
         if item is None:
@@ -100,7 +110,7 @@ class _BoundaryEditorWidget(QWidget):
             boundary_id_item = self._table.item(row, 0)
             name_item = self._table.item(row, 1)
             condition_widget = self._table.cellWidget(row, 2)
-            expression_widget = self._table.cellWidget(row, 3)
+            expression_widget = self._expression_widget(row)
             if boundary_id_item is None or name_item is None:
                 continue
             if not isinstance(condition_widget, QComboBox) or not isinstance(expression_widget, QLineEdit):
@@ -162,7 +172,7 @@ class _BoundaryEditorWidget(QWidget):
             boundary_id_item = self._table.item(row, 0)
             name_item = self._table.item(row, 1)
             condition_widget = self._table.cellWidget(row, 2)
-            value_widget = self._table.cellWidget(row, 3)
+            value_widget = self._expression_widget(row)
             if boundary_id_item is None or name_item is None:
                 continue
             if not isinstance(condition_widget, QComboBox) or not isinstance(value_widget, QLineEdit):
@@ -220,7 +230,14 @@ class _BoundaryEditorWidget(QWidget):
             value_widget.setPlaceholderText("e.g. 7000 or 5 * EG")
             value_widget.textChanged.connect(self._window.schedule_preview_refresh)
             value_widget.textChanged.connect(self._refresh_value_hints)
-            self._table.setCellWidget(row, 3, value_widget)
+            parameterized_value_widget = self._window._build_parameterized_editor(
+                lambda row_index=row: f"boundaryConditions.boundaries[{row_index}].value",
+                f"Boundary {boundary['boundaryId']} ({boundary['name']}) expression",
+                value_widget,
+                parameter_type="string",
+                value_reader=lambda widget=value_widget: widget.text().strip(),
+            )
+            self._table.setCellWidget(row, 3, parameterized_value_widget)
 
             self._set_resolved_value(row, self._format_boundary_value(boundary["value"]))
 

@@ -796,9 +796,16 @@ SimulationParameters::SimulationParameters()
     DIAGNOSTIC_TRANSMISSION_PLANE_Z_POSITION(-1.0),
     DIAGNOSTIC_APERTURE_RADIUS(7.0e-3),
     DIAGNOSTIC_WRITE_PER_SPECIES_DIAGNOSTICS(1U),
-    DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER(1U),
+    // Off by default: the per-species grid-power passes cost 7 extra full analyses of the
+    // particle database, and the <tag>_grid_power_breakdown.txt file now resolves species
+    // and generation from the single PARTICLE_ALL pass. Kept as an opt-in cross-check.
+    DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER(0U),
     DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS(1U),
     DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY(1U),
+    // Off by default: writing a per-triangle map costs an extra pass over every impact
+    // plus a VTK file, and is only meaningful once the impact statistics support it (a few
+    // hundred macroparticles on a grid is Poisson noise, not a density map).
+    DIAGNOSTIC_WRITE_POWER_DENSITY_MAP(0U),
     DIAGNOSTIC_GRID_POWER_RANGES(),
     DIAGNOSTIC_MENISCUS_PLOT() {
 }
@@ -1411,6 +1418,10 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
 
         if (hasObject(diagnostics, "gridPower")) {
             const json& grid_power = diagnostics.at("gridPower");
+            if (grid_power.contains("writePowerDensityMap")) {
+                DIAGNOSTIC_WRITE_POWER_DENSITY_MAP =
+                    grid_power.at("writePowerDensityMap").get<bool>() ? 1U : 0U;
+            }
             if (grid_power.contains("ranges")) {
                 if (!grid_power.at("ranges").is_array()) {
                     throw Error(ERROR_LOCATION, "diagnostics.gridPower.ranges must be an array");
@@ -1736,9 +1747,10 @@ void SimulationParameters::setDefaultValues() {
     DIAGNOSTIC_TRANSMISSION_PLANE_Z_POSITION = -1.0;
     DIAGNOSTIC_APERTURE_RADIUS = 7.0e-3;
     DIAGNOSTIC_WRITE_PER_SPECIES_DIAGNOSTICS = 1U;
-    DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER = 1U;
+    DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER = 0U;   // see the constructor for why
     DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS = 1U;
     DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY = 1U;
+    DIAGNOSTIC_WRITE_POWER_DENSITY_MAP = 0U;
     DIAGNOSTIC_GRID_POWER_RANGES.clear();
     DIAGNOSTIC_MENISCUS_PLOT = DiagnosticMeniscusPlotDefinition();
     N_SOLIDS = 0U;

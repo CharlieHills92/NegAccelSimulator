@@ -104,6 +104,13 @@ def build_diagnostics(authoring_diagnostics: dict[str, Any], geometry: dict[str,
     )
 
     grid_power = _require_object(diagnostics.get("gridPower"), "diagnostics.gridPower")
+    # Optional, so authoring files written before it existed keep validating. Normalized to
+    # an explicit boolean here so the runtime case always carries it and the C++ parser
+    # never has to distinguish "absent" from "false".
+    grid_power["writePowerDensityMap"] = _require_boolean(
+        grid_power.get("writePowerDensityMap", False),
+        "diagnostics.gridPower.writePowerDensityMap",
+    )
     raw_ranges = grid_power.get("ranges")
     if not isinstance(raw_ranges, list) or not raw_ranges:
         raise WorkflowError("diagnostics.gridPower.ranges must be a non-empty array")

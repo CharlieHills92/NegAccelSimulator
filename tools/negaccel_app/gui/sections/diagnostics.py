@@ -311,6 +311,16 @@ def build_form(window) -> QFormLayout:
     window.widgets["diagnostics.writePerSpeciesGridPower"] = QCheckBox("Write per-species grid power summaries")
     window.widgets["diagnostics.writePerSpeciesPlots"] = QCheckBox("Render per-species plots")
     window.widgets["diagnostics.writeNegativeIonSummary"] = QCheckBox("Write dedicated negative-ion summary")
+    window.widgets["diagnostics.writePowerDensityMap"] = QCheckBox(
+        "Write surface power density map (W/cm2)"
+    )
+    window.widgets["diagnostics.writePowerDensityMap"].setToolTip(
+        "Bins each impact onto the boundary triangulation and writes <tag>_power_density.vtk "
+        "plus a text summary of max/mean density per electrode. Off by default: it costs an "
+        "extra pass over every impact, and with only a few hundred macroparticles on a grid "
+        "the per-triangle values are Poisson noise rather than a resolved density. The VTK "
+        "file carries a per-triangle impact count so that is visible."
+    )
 
     restore_plane_defaults_button = QPushButton("Restore to defaults")
     restore_plane_defaults_button.clicked.connect(lambda: _restore_derived_planes(window))
@@ -336,6 +346,7 @@ def build_form(window) -> QFormLayout:
     layout.addRow(window.widgets["diagnostics.writePerSpeciesGridPower"])
     layout.addRow(window.widgets["diagnostics.writePerSpeciesPlots"])
     layout.addRow(window.widgets["diagnostics.writeNegativeIonSummary"])
+    layout.addRow(window.widgets["diagnostics.writePowerDensityMap"])
     layout.addRow("Grid-power ranges", window.widgets["diagnostics.gridRanges"])
     return layout
 
@@ -356,6 +367,10 @@ def populate(window, spec: dict[str, object]) -> None:
     )
     window.widgets["diagnostics.writeNegativeIonSummary"].setChecked(
         bool(nested_get(spec, "diagnostics", "species", "writeNegativeIonSummary", default=True))
+    )
+
+    window.widgets["diagnostics.writePowerDensityMap"].setChecked(
+        bool(nested_get(spec, "diagnostics", "gridPower", "writePowerDensityMap", default=False))
     )
 
     window.widgets["diagnostics.gridRanges"].sync_from_geometry(
@@ -417,6 +432,9 @@ def collect(window, spec: dict[str, object]) -> None:
     ].isChecked()
 
     grid_power = diagnostics.setdefault("gridPower", {})
+    grid_power["writePowerDensityMap"] = window.widgets[
+        "diagnostics.writePowerDensityMap"
+    ].isChecked()
     grid_power["ranges"] = window.widgets["diagnostics.gridRanges"].get_ranges()
     if not grid_power["ranges"]:
         raise WorkflowError("diagnostics.gridPower.ranges must contain at least one row")

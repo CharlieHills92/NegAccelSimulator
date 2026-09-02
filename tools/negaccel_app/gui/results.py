@@ -85,9 +85,14 @@ _BEAM_SUMMARY_QUANTITIES = [
 _GRID_POWER_QUANTITIES = [
     "Grid power",
     "Grid current",
+    "Grid net power",
+    "Grid net current",
     "Grid particles",
     "Raw text preview",
 ]
+# The breakdown file has no dedicated plotter yet, so it is offered as raw text; the
+# quantity list is separate so a stacked species/origin plot can be added here later.
+_GRID_POWER_BREAKDOWN_QUANTITIES = ["Raw text preview"]
 _EMITTER_QUANTITIES = ["Emitter footprint", "Raw text preview"]
 _RAW_TEXT_QUANTITIES = ["Raw text preview"]
 
@@ -104,6 +109,8 @@ TEXT_QUANTITY_MAP = {
     "Convergence": "convergence",
     "Grid power": "power",
     "Grid current": "current",
+    "Grid net power": "net_power",
+    "Grid net current": "net_current",
     "Grid particles": "particles",
     "Emitter footprint": "emitter",
     "Raw text preview": "raw",
@@ -1128,6 +1135,8 @@ class ResultsMixin:
             return list(_BEAM_SUMMARY_QUANTITIES)
         if kind == "grid-power-summary":
             return list(_GRID_POWER_QUANTITIES)
+        if kind == "grid-power-breakdown":
+            return list(_GRID_POWER_BREAKDOWN_QUANTITIES)
         if kind == "emitter-map":
             return list(_EMITTER_QUANTITIES)
         return list(_RAW_TEXT_QUANTITIES)

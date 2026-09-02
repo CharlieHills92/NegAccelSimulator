@@ -285,6 +285,7 @@ private:
     uint DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER;
     uint DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS;
     uint DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY;
+    uint DIAGNOSTIC_WRITE_POWER_DENSITY_MAP;
     std::vector<DiagnosticGridRangeDefinition> DIAGNOSTIC_GRID_POWER_RANGES;
     DiagnosticMeniscusPlotDefinition DIAGNOSTIC_MENISCUS_PLOT;
 
@@ -430,6 +431,7 @@ public:
     bool getDiagnosticWritePerSpeciesGridPower() const { return DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER != 0U; }
     bool getDiagnosticWritePerSpeciesPlots() const { return DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS != 0U; }
     bool getDiagnosticWriteNegativeIonSummary() const { return DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY != 0U; }
+    bool getDiagnosticWritePowerDensityMap() const { return DIAGNOSTIC_WRITE_POWER_DENSITY_MAP != 0U; }
     bool hasDiagnosticGridPowerRanges() const { return !DIAGNOSTIC_GRID_POWER_RANGES.empty(); }
     const std::vector<DiagnosticGridRangeDefinition>& getDiagnosticGridPowerRanges() const {
         return DIAGNOSTIC_GRID_POWER_RANGES;

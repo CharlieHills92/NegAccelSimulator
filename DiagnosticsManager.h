@@ -22,6 +22,7 @@ class EpotEfield;
 class MeshScalarField;
 class SimulationParameters;
 class FileManager;
+class SurfaceEventLedger;
 struct PowerStruct;
 
 // IBSIMU includes
@@ -43,6 +44,16 @@ class DiagnosticsManager {
 private:
     std::string density_profile_filename_;
 
+    // Signed surface energy/charge balance for the tracking pass being analysed, or null
+    // when surface collisions were disabled (in which case there is nothing to net out and
+    // the gross columns are already correct). Not owned -- ManageSimulation owns it.
+    const SurfaceEventLedger* surface_event_ledger_ = nullptr;
+
+    // Destination folder for the power-density VTK map, injected rather than threaded
+    // through analyzeGridPowerLoads (which already takes nine parameters). Empty means the
+    // map falls back to the summary folder.
+    std::string vtk_folder_;
+
 public:
     /**
      * @brief Constructor
@@ -56,6 +67,21 @@ public:
 
     void setDensityProfileFilename(const std::string& density_profile_filename) {
         density_profile_filename_ = density_profile_filename;
+    }
+
+    /**
+     * @brief Attach the signed surface energy/charge ledger for net power/current output.
+     *
+     * Injected the same way as density_profile_filename_ so that analyzeGridPowerLoads and
+     * performAnalysis keep their (already long) signatures. Pass nullptr to detach.
+     */
+    void setSurfaceEventLedger(const SurfaceEventLedger* ledger) {
+        surface_event_ledger_ = ledger;
+    }
+
+    /// Where to write the power-density VTK map. Empty falls back to the summary folder.
+    void setVTKFolder(const std::string& vtk_folder) {
+        vtk_folder_ = vtk_folder;
     }
 
     /**

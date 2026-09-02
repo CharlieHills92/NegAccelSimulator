@@ -613,7 +613,7 @@
     ],
     "plasma": {
       "model": "nsimp",
-      "initialPlasmaMaxZMeters": 0.007,
+      "initialPlasmaMaxZMeters": 0.005,
       "positiveIonTemperatureEV": 0.8,
       "plasmaPotentialVolts": 3.0
     }

@@ -456,6 +456,7 @@
       "writeNegativeIonSummary": true
     },
     "gridPower": {
+      "writePowerDensityMap": false,
       "ranges": [
         {
           "id": 0,

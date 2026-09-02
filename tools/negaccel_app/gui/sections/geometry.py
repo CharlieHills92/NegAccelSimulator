@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..common import WorkflowError, nested_get, serialize_geometry_file_path
+from ..common import ParameterBindingToggle, WorkflowError, nested_get, serialize_geometry_file_path
 from ..visualization import GeometryCanvas, NavigationToolbar2QT, configure_matplotlib_toolbar
 from ...workflow import TEMPLATES_DIR, load_geometry_file, load_geometry_reference, write_geometry_file
 
@@ -181,10 +181,36 @@ def _validate_solids(solids: list[dict]) -> None:
 class _ProfileEditorWidget(QWidget):
     """Edits one solid profile: z/r/rounding table plus optional aperture pattern."""
 
-    def __init__(self, change_callback=None, parent=None):
+    def __init__(self, window=None, solid_row_provider=None, change_callback=None, parent=None):
         super().__init__(parent)
+        self._window = window
+        self._solid_row_provider = solid_row_provider
+        self._parameter_toggles: list[ParameterBindingToggle] = []
         self._cb = change_callback
         self._build_ui()
+
+    def _solid_row(self) -> int:
+        if callable(self._solid_row_provider):
+            try:
+                row = int(self._solid_row_provider())
+            except Exception:
+                row = 0
+            return row if row >= 0 else 0
+        return 0
+
+    def _solid_path(self, suffix: str) -> str:
+        return f"geometry.solids[{self._solid_row()}].{suffix}"
+
+    def _parameterized_ap_widget(self, label_text: str, widget: QWidget, suffix: str) -> QWidget:
+        if self._window is None:
+            return widget
+        wrapped = self._window._build_parameterized_editor(lambda s=suffix: self._solid_path(s), label_text, widget)
+        self._parameter_toggles.append(wrapped.parameter_toggle())
+        return wrapped
+
+    def refresh_parameter_toggles(self) -> None:
+        for toggle in self._parameter_toggles:
+            toggle.refresh_binding_state()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -252,14 +278,14 @@ class _ProfileEditorWidget(QWidget):
             w.valueChanged.connect(self._fire)
         self._ap_outside.toggled.connect(self._fire)
         af.addRow("Layout", self._ap_layout_cb)
-        af.addRow("Count X", self._ap_cx)
-        af.addRow("Count Y", self._ap_cy)
-        af.addRow("Pitch X [m]", self._ap_px)
-        af.addRow("Pitch Y [m]", self._ap_py)
-        af.addRow("Margin [m]", self._ap_margin)
-        af.addRow("X offset [m]", self._ap_xoff)
-        af.addRow("Y offset [m]", self._ap_yoff)
-        af.addRow(self._ap_row_shift_lbl, self._ap_row_shift)
+        af.addRow("Count X", self._parameterized_ap_widget("Count X", self._ap_cx, "aperturePattern.countX"))
+        af.addRow("Count Y", self._parameterized_ap_widget("Count Y", self._ap_cy, "aperturePattern.countY"))
+        af.addRow("Pitch X [m]", self._parameterized_ap_widget("Pitch X [m]", self._ap_px, "aperturePattern.pitchXMeters"))
+        af.addRow("Pitch Y [m]", self._parameterized_ap_widget("Pitch Y [m]", self._ap_py, "aperturePattern.pitchYMeters"))
+        af.addRow("Margin [m]", self._parameterized_ap_widget("Margin [m]", self._ap_margin, "aperturePattern.marginMeters"))
+        af.addRow("X offset [m]", self._parameterized_ap_widget("X offset [m]", self._ap_xoff, "aperturePattern.xOffsetMeters"))
+        af.addRow("Y offset [m]", self._parameterized_ap_widget("Y offset [m]", self._ap_yoff, "aperturePattern.yOffsetMeters"))
+        af.addRow(self._ap_row_shift_lbl, self._parameterized_ap_widget("Row shift X [m]", self._ap_row_shift, "aperturePattern.rowShiftXMeters"))
         af.addRow("", self._ap_outside)
         ap_outer = QVBoxLayout(self._ap_box)
         ap_outer.setContentsMargins(4, 4, 4, 4)
@@ -389,11 +415,23 @@ class _SolidDetailWidget(QWidget):
 
     _KINDS = ["solid", "diagnosticPlane"]
 
-    def __init__(self, change_callback=None, parent=None):
+    def __init__(self, window, change_callback=None, parent=None):
         super().__init__(parent)
+        self._window = window
         self._cb = change_callback
         self._list_item = None
+        self._solid_row = 0
+        self._parameter_toggles: list[ParameterBindingToggle] = []
         self._build_ui()
+
+    def _solid_path(self, suffix: str) -> str:
+        row = self._solid_row if self._solid_row >= 0 else 0
+        return f"geometry.solids[{row}].{suffix}"
+
+    def _refresh_parameter_toggles(self) -> None:
+        for toggle in self._parameter_toggles:
+            toggle.refresh_binding_state()
+        self._profile.refresh_parameter_toggles()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -415,11 +453,17 @@ class _SolidDetailWidget(QWidget):
         self._boundary_en.toggled.connect(self._boundary_val.setEnabled)
         self._boundary_en.toggled.connect(self._fire)
         self._boundary_val.valueChanged.connect(self._fire)
+        boundary_value_widget = self._window._build_parameterized_editor(
+            lambda: self._solid_path("boundaryId"),
+            "Boundary ID",
+            self._boundary_val,
+        )
+        self._parameter_toggles.append(boundary_value_widget.parameter_toggle())
         boundary_w = QWidget()
         bl = QHBoxLayout(boundary_w)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.addWidget(self._boundary_en)
-        bl.addWidget(self._boundary_val)
+        bl.addWidget(boundary_value_widget)
         bl.addStretch()
         mf.addRow("Name", self._name)
         mf.addRow("Kind", self._kind)
@@ -429,7 +473,7 @@ class _SolidDetailWidget(QWidget):
         # Profile
         sec_box = QGroupBox("Profile")
         sl = QVBoxLayout(sec_box)
-        self._profile = _ProfileEditorWidget(change_callback=self._cb)
+        self._profile = _ProfileEditorWidget(self._window, lambda: self._solid_row, change_callback=self._cb)
         sl.addWidget(self._profile)
         root.addWidget(sec_box)
 
@@ -442,9 +486,10 @@ class _SolidDetailWidget(QWidget):
             self._list_item.setText(text.strip() or "unnamed")
         self._fire()
 
-    def set_solid(self, solid: dict, list_item=None) -> None:
+    def set_solid(self, solid: dict, list_item=None, row_index: int = 0) -> None:
         solid = _normalize_solid(solid)
         self._list_item = list_item
+        self._solid_row = row_index
         self._name.blockSignals(True)
         self._name.setText(solid.get("name", ""))
         self._name.blockSignals(False)
@@ -454,6 +499,7 @@ class _SolidDetailWidget(QWidget):
         self._boundary_en.setChecked(has_boundary_id)
         self._boundary_val.setValue(boundary_id if has_boundary_id else 7)
         self._profile.set_profile(solid)
+        self._refresh_parameter_toggles()
 
     def get_solid(self) -> dict:
         solid: dict = {
@@ -738,11 +784,11 @@ class _GeometryWorkspaceWidget(QWidget):
         inputs_form.addRow("Geometry file", self._geometry_path_edit)
         inputs_form.addRow("", button_wrapper)
         inputs_form.addRow("Name", self._geometry_name_edit)
-        inputs_form.addRow("Mesh size [m]", self._mesh_size)
-        inputs_form.addRow("Domain x [m]", self._domain_x)
-        inputs_form.addRow("Domain y [m]", self._domain_y)
-        inputs_form.addRow("Domain z [m]", self._domain_z)
-        inputs_form.addRow("Domain z start [m]", self._domain_z_start)
+        inputs_form.addRow("Mesh size [m]", self._window._build_parameterized_editor(lambda: "geometry.meshSizeMeters", "Mesh size [m]", self._mesh_size))
+        inputs_form.addRow("Domain x [m]", self._window._build_parameterized_editor(lambda: "geometry.domain.xSizeMeters", "Domain x [m]", self._domain_x))
+        inputs_form.addRow("Domain y [m]", self._window._build_parameterized_editor(lambda: "geometry.domain.ySizeMeters", "Domain y [m]", self._domain_y))
+        inputs_form.addRow("Domain z [m]", self._window._build_parameterized_editor(lambda: "geometry.domain.zSizeMeters", "Domain z [m]", self._domain_z))
+        inputs_form.addRow("Domain z start [m]", self._window._build_parameterized_editor(lambda: "geometry.domain.zStartMeters", "Domain z start [m]", self._domain_z_start))
         inputs_form.addRow(self._export_vtk)
         left_layout.addWidget(inputs_box)
 
@@ -762,7 +808,7 @@ class _GeometryWorkspaceWidget(QWidget):
         solids_layout.addWidget(self._list, 1)
         left_layout.addWidget(self._solids_box, 1)
 
-        self._detail = _SolidDetailWidget(change_callback=self._on_detail_changed)
+        self._detail = _SolidDetailWidget(self._window, change_callback=self._on_detail_changed)
         self._detail_scroll = QScrollArea()
         self._detail_scroll.setWidget(self._detail)
         self._detail_scroll.setWidgetResizable(True)
@@ -941,7 +987,7 @@ class _GeometryWorkspaceWidget(QWidget):
         item = self._list.item(row)
         self._detail.setEnabled(True)
         self._detail_scroll.setEnabled(True)
-        self._detail.set_solid(item.data(Qt.ItemDataRole.UserRole) or {}, item)
+        self._detail.set_solid(item.data(Qt.ItemDataRole.UserRole) or {}, item, row)
         self._refresh_preview()
 
     def _on_detail_changed(self, *_args) -> None:

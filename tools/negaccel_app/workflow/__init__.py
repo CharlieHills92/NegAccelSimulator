@@ -32,6 +32,7 @@ from .domains.geometry_validation import derive_diagnostic_planes
 from .post_processing import (
     aggregate_case_diagnostics,
     parse_diagnostic_summary_txt,
+    parse_grid_power_breakdown_txt,
     parse_grid_power_summary_txt,
     synthesize_scan_results,
     write_case_diagnostics_aggregation,
@@ -62,6 +63,7 @@ __all__ = [
     "materialize_case",
     "merge_objects",
     "parse_diagnostic_summary_txt",
+    "parse_grid_power_breakdown_txt",
     "parse_grid_power_summary_txt",
     "parse_path",
     "parse_value",

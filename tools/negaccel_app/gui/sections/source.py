@@ -17,7 +17,7 @@ from negaccel_app.particles import (
 )
 
 from ..common import (
-    QCheckBox,
+    ParameterBindingToggle,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -283,7 +283,7 @@ class _ParticleSourceDetailWidget(QWidget):
         self._particle_type_lookup: dict[str, dict[str, object]] = {}
         self._editable_widgets = []
         self._source_row = 0
-        self._parameter_bindings: list[tuple[QCheckBox, str, object, object]] = []
+        self._parameter_bindings: list[ParameterBindingToggle] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -491,29 +491,46 @@ class _ParticleSourceDetailWidget(QWidget):
         row = self._source_row if self._source_row >= 0 else 0
         return f"particles.sources[{row}].{suffix}"
 
-    def _make_parameter_checkbox(self, label_text: str, widget, path_provider) -> QCheckBox:
-        checkbox = QCheckBox("P")
-        checkbox.setMaximumWidth(28)
-        checkbox.toggled.connect(
-            lambda checked, l=label_text, w=widget, provider=path_provider: self._window._on_parameter_flag_toggled(
-                provider(),
-                l,
-                w,
-                checked,
-            )
+    def _source_value_reader(self, suffix: str):
+        def _reader() -> Any:
+            particles_editor = self._window.widgets.get("particles.editor")
+            sources = particles_editor.get_sources() if hasattr(particles_editor, "get_sources") else None
+            if not isinstance(sources, list) or self._source_row >= len(sources):
+                return None
+            source = sources[self._source_row]
+            current: Any = source
+            normalized = suffix.replace("[", ".").replace("]", "")
+            for token in normalized.split("."):
+                if not token:
+                    continue
+                if isinstance(current, list):
+                    try:
+                        current = current[int(token)]
+                    except (ValueError, IndexError):
+                        return None
+                elif isinstance(current, dict):
+                    current = current.get(token)
+                else:
+                    return None
+            return current
+
+        return _reader
+
+    def _make_parameter_checkbox(self, label_text: str, widget, path_provider) -> ParameterBindingToggle:
+        raw_path = path_provider()
+        suffix = raw_path.split("].", 1)[1] if "]." in raw_path else raw_path
+        checkbox = self._window._build_parameter_toggle(
+            path_provider,
+            label_text,
+            widget,
+            value_reader=self._source_value_reader(suffix),
         )
-        self._parameter_bindings.append((checkbox, label_text, widget, path_provider))
+        self._parameter_bindings.append(checkbox)
         return checkbox
 
     def _refresh_parameter_checkboxes(self) -> None:
-        for checkbox, label_text, widget, path_provider in self._parameter_bindings:
-            path = path_provider()
-            self._window.parameter_widgets_by_path[path] = widget
-            self._window.parameter_labels_by_path[path] = label_text
-            checkbox.setToolTip(f"Include '{label_text}' in the Scan Manager parameter list")
-            checkbox.blockSignals(True)
-            checkbox.setChecked(self._window.parameter_flag_registry.is_marked(path))
-            checkbox.blockSignals(False)
+        for checkbox in self._parameter_bindings:
+            checkbox.refresh_binding_state()
 
     def set_source_row(self, row: int) -> None:
         self._source_row = row if row >= 0 else 0
@@ -900,17 +917,8 @@ class _ParticlesWorkspaceWidget(QWidget):
     def _notify_change(self) -> None:
         self._window.schedule_preview_refresh()
 
-    def _make_plasma_parameter_checkbox(self, label_text: str, widget, path: str) -> QCheckBox:
-        checkbox = QCheckBox("P")
-        checkbox.setMaximumWidth(28)
-        checkbox.setToolTip(f"Include '{label_text}' in the Scan Manager parameter list")
-        checkbox.setChecked(self._window.parameter_flag_registry.is_marked(path))
-        checkbox.toggled.connect(
-            lambda checked, p=path, l=label_text, w=widget: self._window._on_parameter_flag_toggled(p, l, w, checked)
-        )
-        self._window.parameter_widgets_by_path[path] = widget
-        self._window.parameter_labels_by_path[path] = label_text
-        return checkbox
+    def _make_plasma_parameter_checkbox(self, label_text: str, widget, path: str) -> ParameterBindingToggle:
+        return self._window._build_parameter_toggle(lambda p=path: p, label_text, widget)
 
     def _on_particle_family_changed(self) -> None:
         new_family = self._types_editor.get_particle_family()
