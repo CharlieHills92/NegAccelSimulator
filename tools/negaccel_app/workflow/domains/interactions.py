@@ -285,6 +285,8 @@ def build_gas_density(authoring: dict[str, Any]) -> tuple[dict[str, Any], dict[s
     }
     if "minimumZMeters" in stripping:
         stripping_runtime["minimumZMeters"] = float(stripping["minimumZMeters"])
+    if "skipSlowNeutralProducts" in stripping:
+        stripping_runtime["skipSlowNeutralProducts"] = bool(stripping["skipSlowNeutralProducts"])
     if enabled:
         stripping_runtime["densityProfile"] = profile_name
 
@@ -313,6 +315,8 @@ def build_surface_interactions(authoring: dict[str, Any] | None) -> dict[str, An
         runtime_surface["maximumSecondaryElectrons"] = int(authoring["maximumSecondaryElectrons"])
     if "secondaryElectronEnergyEV" in authoring:
         runtime_surface["secondaryElectronEnergyEV"] = float(authoring["secondaryElectronEnergyEV"])
+    if "secondaryElectronBundle" in authoring:
+        runtime_surface["secondaryElectronBundle"] = int(authoring["secondaryElectronBundle"])
     if "debug" in authoring:
         runtime_surface["debug"] = bool(authoring["debug"])
     return runtime_surface

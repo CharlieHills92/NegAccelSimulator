@@ -70,6 +70,7 @@ def build_simulation(
     particle_count: int | None = None,
     plasma: dict[str, Any] | None = None,
     runtime_geometry: dict[str, Any] | None = None,
+    beamlet_count: int = 1,
 ) -> dict[str, Any]:
     domain_decomposition = run.get("domainDecomposition", {})
     if not isinstance(domain_decomposition, dict):
@@ -95,6 +96,8 @@ def build_simulation(
             "currentDensityTolerance": float(run.get("convergence", {}).get("currentDensityTolerance", 1.0)),
         },
     }
+    if "threadCount" in run:
+        simulation["threadCount"] = int(require_number(run, "threadCount", "run"))
     if plasma is None:
         simulation["solver"]["shieldModel"] = solver.get("shieldModel", "nsimp")
     else:
@@ -123,4 +126,8 @@ def build_simulation(
 
     if "domainIndex" in domain_decomposition:
         simulation["domainDecomposition"]["domainIndex"] = int(domain_decomposition["domainIndex"])
+    # Written only for a real lattice, so a single-beamlet case is unchanged. The runtime
+    # needs it to undo IBSimu's per-source accumulation of the plasma reference density.
+    if beamlet_count > 1:
+        simulation["beamletCount"] = int(beamlet_count)
     return simulation

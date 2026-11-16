@@ -54,6 +54,8 @@ TRAJECTORY_COLOR_MODE_SINGLE = "Single color"
 TRAJECTORY_COLOR_MODE_SPECIES = "Particle species"
 TRAJECTORY_COLOR_MODE_ENERGY = "Particle energy"
 TRAJECTORY_COLOR_MODE_STATUS = "Particle status"
+TRAJECTORY_COLLISIONS_3D_MODE = "Collided particles + aperture"
+TRAJECTORY_POWER_SURFACE_3D_MODE = "Impact power surface by mesh"
 
 
 @dataclass(frozen=True)
@@ -602,15 +604,20 @@ class GeometryCanvas(FigureCanvasQTAgg):
             return np.asarray([[x_offset, y_offset]], dtype=float)
 
         row_shift = float(aperture_pattern.get("rowShiftXMeters", 0.0)) if layout == "staggered-grid" else 0.0
-        x_extent = count_x // 2
-        y_extent = count_y // 2
+        # Exactly `count` nodes per axis, floor-centred for an even count: the same lattice
+        # rule as axis_node_indices() and as the patterned region in
+        # evaluateGeneratedSolidProfile. This preview used to span -count//2 .. +count//2,
+        # which drew count + 1 apertures for an even count -- one more than the geometry
+        # has.
+        x_start = -(count_x // 2)
+        y_start = -(count_y // 2)
         centers: list[tuple[float, float]] = []
-        for row_index in range(-y_extent, y_extent + 1):
+        for row_index in range(y_start, y_start + count_y):
             row_y = y_offset + row_index * pitch_y
             row_x_offset = 0.0
             if layout == "staggered-grid":
                 row_x_offset = -row_shift if row_index % 2 == 0 else row_shift
-            for column_index in range(-x_extent, x_extent + 1):
+            for column_index in range(x_start, x_start + count_x):
                 centers.append((x_offset + row_x_offset + column_index * pitch_x, row_y))
 
         return np.asarray(centers, dtype=float)
@@ -671,7 +678,12 @@ class GeometryCanvas(FigureCanvasQTAgg):
         elif layout != "single":
             half_x = 0.5 * float(pattern["count_x"]) * float(pattern["pitch_x"])
             margin = float(pattern["margin"])
-            x_offset = float(pattern["x_offset"])
+            # The patterned region centres on the group, which for an even count sits half
+            # a pitch below the pattern origin (see evaluateGeneratedSolidProfile).
+            center_x = (
+                -0.5 * float(pattern["pitch_x"]) if int(pattern["count_x"]) % 2 == 0 else 0.0
+            )
+            x_offset = float(pattern["x_offset"]) + center_x
             row_shift = abs(float(pattern["row_shift"])) if layout == "staggered-grid" else 0.0
             x_limits = (x_offset - half_x - margin - row_shift, x_offset + half_x + margin + row_shift)
             if domain_x_limits is not None:
@@ -688,7 +700,10 @@ class GeometryCanvas(FigureCanvasQTAgg):
         elif layout != "single":
             half_y = 0.5 * float(pattern["count_y"]) * float(pattern["pitch_y"])
             margin = float(pattern["margin"])
-            y_offset = float(pattern["y_offset"])
+            center_y = (
+                -0.5 * float(pattern["pitch_y"]) if int(pattern["count_y"]) % 2 == 0 else 0.0
+            )
+            y_offset = float(pattern["y_offset"]) + center_y
             y_limits = (y_offset - half_y - margin, y_offset + half_y + margin)
             if domain_y_limits is not None:
                 y_limits = (max(y_limits[0], domain_y_limits[0]), min(y_limits[1], domain_y_limits[1]))
@@ -1124,7 +1139,8 @@ class GeometryCanvas(FigureCanvasQTAgg):
         axis.set_ylabel("x / radial envelope [mm]")
         axis.grid(alpha=0.25)
         _set_equal_spatial_aspect(axis)
-        axis.legend(loc="upper left", fontsize=8)
+        axis.legend(loc="upper left", bbox_to_anchor=(-0.02, 1.0), fontsize=8)
+        self.figure.tight_layout(rect=(0.12, 0.02, 0.86, 0.98))
         self._redraw()
         if source_count == 0:
             return f"Displayed section view for {len(solids)} solids; explicit source markers are unavailable"
@@ -1135,9 +1151,16 @@ class GeometryCanvas(FigureCanvasQTAgg):
             return []
         return [source for source in sources if isinstance(source, dict)]
 
+    # Above this many sources the case is a beamlet lattice rather than a handful of named
+    # sources, and a label on every one buries the geometry it is drawn over. The markers
+    # stay -- only the text is dropped, and the caption still reports the count.
+    _MAX_LABELLED_SOURCES = 6
+
     def _plot_source_overlays_3d(self, axis: Any, sources: Any) -> int:
         source_count = 0
-        for source_index, source in enumerate(self._runtime_sources(sources), start=1):
+        runtime_sources = list(self._runtime_sources(sources))
+        label_sources = len(runtime_sources) <= self._MAX_LABELLED_SOURCES
+        for source_index, source in enumerate(runtime_sources, start=1):
             uniform = source.get("uniform") if isinstance(source.get("uniform"), dict) else {}
             center = uniform.get("centerMeters")
             direction = uniform.get("mainDirection")
@@ -1166,19 +1189,22 @@ class GeometryCanvas(FigureCanvasQTAgg):
                         linewidth=1.0,
                         arrow_length_ratio=0.25,
                     )
-            axis.text(
-                center_mm[0],
-                center_mm[1],
-                center_mm[2],
-                str(source.get("name") or source.get("id") or f"Source {source_index}"),
-                fontsize=8,
-            )
+            if label_sources:
+                axis.text(
+                    center_mm[0],
+                    center_mm[1],
+                    center_mm[2],
+                    str(source.get("name") or source.get("id") or f"Source {source_index}"),
+                    fontsize=8,
+                )
             source_count += 1
         return source_count
 
     def _plot_source_overlays_section(self, axis: Any, sources: Any) -> int:
         source_count = 0
-        for source_index, source in enumerate(self._runtime_sources(sources), start=1):
+        runtime_sources = list(self._runtime_sources(sources))
+        label_sources = len(runtime_sources) <= self._MAX_LABELLED_SOURCES
+        for source_index, source in enumerate(runtime_sources, start=1):
             uniform = source.get("uniform") if isinstance(source.get("uniform"), dict) else {}
             center = uniform.get("centerMeters")
             if not isinstance(center, list) or len(center) != 3:
@@ -1186,13 +1212,14 @@ class GeometryCanvas(FigureCanvasQTAgg):
             center_x = float(center[0]) * 1000.0
             center_z = float(center[2]) * 1000.0
             axis.scatter(center_z, center_x, color="#c24d2c", s=42, marker="x")
-            axis.text(
-                center_z,
-                center_x,
-                f" {source.get('name') or source.get('id') or f'Source {source_index}'}",
-                fontsize=8,
-                va="bottom",
-            )
+            if label_sources:
+                axis.text(
+                    center_z,
+                    center_x,
+                    f" {source.get('name') or source.get('id') or f'Source {source_index}'}",
+                    fontsize=8,
+                    va="bottom",
+                )
             source_count += 1
         return source_count
 
@@ -1279,6 +1306,7 @@ class GeometryCanvas(FigureCanvasQTAgg):
         self._redraw()
         return True
 
+    def _apply_3d_view(self, axis: Any, view_direction: str | None) -> None:
         view_angles = {
             "+x": (0.0, 0.0),
             "-x": (0.0, 180.0),
@@ -1763,6 +1791,214 @@ class TrajectoryCanvas(FigureCanvasQTAgg):
         self.draw_idle()
         return f"Plotted {visible_trajectory_count} trajectories in 3D"
 
+    def plot_collisions_3d(
+        self,
+        vtk_path: Path,
+        runtime_case: dict[str, Any],
+        max_collisions: int,
+    ) -> str:
+        points, lines, point_data, cell_data = self._read_vtk(vtk_path)
+        statuses = np.asarray(cell_data.get("particle_status", []))
+        if statuses.size < len(lines):
+            self.plot_placeholder("The selected VTK file has no particle status data.")
+            return "Collision status data unavailable"
+
+        energy_values = np.asarray(point_data.get("kinetic_energy_eV", []), dtype=float)
+        current_values = np.asarray(cell_data.get("current_A", []), dtype=float)
+        charge_values = np.asarray(cell_data.get("charge_e", []), dtype=float)
+        collision_records = [
+            (
+                np.asarray(points[line_indices[-1]], dtype=float),
+                float(energy_values[line_indices[-1]]) if energy_values.size > line_indices[-1] else np.nan,
+                float(current_values[index]) if current_values.size > index else np.nan,
+                float(charge_values[index]) if charge_values.size > index else np.nan,
+            )
+            for index, line_indices in enumerate(lines)
+            if len(line_indices) > 0 and int(statuses[index]) == 2
+        ]
+        if max_collisions > 0:
+            collision_records = collision_records[:max_collisions]
+
+        geometry = runtime_case.get("geometry") if isinstance(runtime_case.get("geometry"), dict) else {}
+        domain = geometry.get("domain") if isinstance(geometry.get("domain"), dict) else None
+        solids = geometry.get("solids") if isinstance(geometry.get("solids"), list) else []
+        sources = runtime_case.get("particleSources")
+        geometry_canvas = GeometryCanvas.__new__(GeometryCanvas)
+        geometry_canvas.figure = self.figure
+        geometry_canvas._redraw = self.draw_idle
+        self.figure.set_dpi(160)
+        if solids:
+            geometry_canvas.plot_geometry_sources_3d(solids, sources, domain=domain, show_solid=True)
+        else:
+            self.figure.clear()
+            axis = self.figure.add_subplot(111, projection="3d")
+            axis.set_proj_type("ortho")
+        axis = self.figure.axes[0]
+
+        if collision_records:
+            collision_points_mm = np.asarray([record[0] for record in collision_records]) * 1000.0
+            energies = np.asarray([record[1] for record in collision_records], dtype=float)
+            currents = np.asarray([record[2] for record in collision_records], dtype=float)
+            charges = np.asarray([record[3] for record in collision_records], dtype=float)
+            charged_power = np.divide(
+                np.abs(currents) * energies,
+                np.abs(charges),
+                out=np.full_like(energies, np.nan),
+                where=np.abs(charges) > 1.0e-12,
+            )
+            power_values = np.where(np.isfinite(charged_power), charged_power, np.abs(currents) * energies)
+            power_values = np.nan_to_num(power_values, nan=0.0, posinf=0.0, neginf=0.0)
+            power_norm = _build_normalize(float(power_values.min()), float(power_values.max()))
+            axis.scatter(
+                collision_points_mm[:, 0],
+                collision_points_mm[:, 1],
+                collision_points_mm[:, 2],
+                c=power_values,
+                cmap="viridis",
+                norm=power_norm,
+                edgecolors="#ffffff",
+                linewidths=0.35,
+                s=34,
+                marker="o",
+                depthshade=False,
+                label="Grid collisions",
+            )
+            power_mappable = cm.ScalarMappable(norm=power_norm, cmap="viridis")
+            power_mappable.set_array(power_values)
+            self.figure.colorbar(power_mappable, ax=axis, label="Impact power [W]")
+            if not solids:
+                _set_adaptive_3d_bounds(axis, collision_points_mm, scale=1.0)
+
+        axis.set_title(f"Grid collision locations ({len(collision_records)} shown)")
+        axis.set_xlabel("x [mm]")
+        axis.set_ylabel("y [mm]")
+        axis.set_zlabel("z [mm]")
+        handles, labels = axis.get_legend_handles_labels()
+        if handles:
+            axis.legend(loc="upper left", bbox_to_anchor=(-0.02, 1.0), fontsize=8)
+        self.figure.tight_layout(rect=(0.12, 0.02, 0.86, 0.98))
+        self.draw_idle()
+        return f"Displayed {len(collision_records)} collided particle(s) with aperture geometry"
+
+    def plot_collision_power_surface_3d(
+        self,
+        vtk_path: Path,
+        runtime_case: dict[str, Any],
+    ) -> str:
+        points, lines, point_data, cell_data = self._read_vtk(vtk_path)
+        statuses = np.asarray(cell_data.get("particle_status", []))
+        energies = np.asarray(point_data.get("kinetic_energy_eV", []), dtype=float)
+        currents = np.asarray(cell_data.get("current_A", []), dtype=float)
+        charges = np.asarray(cell_data.get("charge_e", []), dtype=float)
+        if statuses.size < len(lines):
+            self.plot_placeholder("The selected VTK file has no particle status data.")
+            return "Collision status data unavailable"
+
+        geometry = runtime_case.get("geometry") if isinstance(runtime_case.get("geometry"), dict) else {}
+        domain = geometry.get("domain") if isinstance(geometry.get("domain"), dict) else None
+        solids = geometry.get("solids") if isinstance(geometry.get("solids"), list) else []
+        mesh = geometry.get("mesh") if isinstance(geometry.get("mesh"), dict) else {}
+        mesh_size = float(mesh.get("sizeMeters", geometry.get("meshSizeMeters", 0.0)) or 0.0)
+        if mesh_size <= 0.0:
+            self.plot_placeholder("The runtime case does not define a positive mesh size.")
+            return "Mesh size unavailable"
+
+        impact_records = []
+        for index, line_indices in enumerate(lines):
+            if len(line_indices) == 0 or int(statuses[index]) != 2:
+                continue
+            point_index = int(line_indices[-1])
+            energy = float(energies[point_index]) if energies.size > point_index else np.nan
+            current = float(currents[index]) if currents.size > index else np.nan
+            charge = float(charges[index]) if charges.size > index else np.nan
+            if abs(charge) > 1.0e-12:
+                power = abs(current) * energy / abs(charge)
+            else:
+                power = abs(current) * energy
+            if np.isfinite(power):
+                impact_records.append((np.asarray(points[point_index], dtype=float), max(power, 0.0)))
+
+        if not solids:
+            self.plot_placeholder("No aperture geometry is available for the power surface plot.")
+            return "Aperture geometry unavailable"
+
+        domain_origin = np.asarray(
+            [
+                -0.5 * float(domain.get("xSizeMeters", 0.0) or 0.0) if domain else 0.0,
+                -0.5 * float(domain.get("ySizeMeters", 0.0) or 0.0) if domain else 0.0,
+                float(domain.get("zStartMeters", 0.0) or 0.0) if domain else 0.0,
+            ],
+            dtype=float,
+        )
+        mesh_power: dict[tuple[int, int, int], float] = {}
+        for location, power in impact_records:
+            cell = tuple(np.floor((location - domain_origin) / mesh_size).astype(int))
+            mesh_power[cell] = mesh_power.get(cell, 0.0) + power
+
+        self.figure.set_dpi(160)
+        self.figure.clear()
+        axis = self.figure.add_subplot(111, projection="3d")
+        axis.set_proj_type("ortho")
+        geometry_canvas = GeometryCanvas.__new__(GeometryCanvas)
+        geometry_canvas.figure = self.figure
+        geometry_canvas._redraw = self.draw_idle
+        theta = np.linspace(0.0, 2.0 * np.pi, 36)
+        polygons: list[np.ndarray] = []
+        polygon_power: list[float] = []
+        for solid in solids:
+            z_values, r_values, rounding_values = geometry_canvas._solid_profile_arrays(solid)
+            if z_values.size < 2 or r_values.size < 2:
+                continue
+            display_z, display_r = geometry_canvas._sample_profile_boundary(
+                z_values, r_values, rounding_values
+            )
+            for center_x, center_y in geometry_canvas._solid_aperture_centers(solid):
+                x_grid = center_x + np.outer(display_r, np.cos(theta))
+                y_grid = center_y + np.outer(display_r, np.sin(theta))
+                z_grid = np.outer(display_z, np.ones_like(theta))
+                for z_index in range(len(display_z) - 1):
+                    for theta_index in range(len(theta) - 1):
+                        polygon = np.asarray(
+                            [
+                                [x_grid[z_index, theta_index], y_grid[z_index, theta_index], z_grid[z_index, theta_index]],
+                                [x_grid[z_index + 1, theta_index], y_grid[z_index + 1, theta_index], z_grid[z_index + 1, theta_index]],
+                                [x_grid[z_index + 1, theta_index + 1], y_grid[z_index + 1, theta_index + 1], z_grid[z_index + 1, theta_index + 1]],
+                                [x_grid[z_index, theta_index + 1], y_grid[z_index, theta_index + 1], z_grid[z_index, theta_index + 1]],
+                            ],
+                            dtype=float,
+                        )
+                        centroid = polygon.mean(axis=0)
+                        cell = tuple(np.floor((centroid - domain_origin) / mesh_size).astype(int))
+                        polygons.append(polygon * 1000.0)
+                        polygon_power.append(mesh_power.get(cell, 0.0))
+
+        if not polygons:
+            self.plot_placeholder("No aperture surface could be generated.")
+            return "Aperture surface unavailable"
+
+        power_array = np.asarray(polygon_power, dtype=float)
+        power_norm = _build_normalize(float(power_array.min()), float(power_array.max()))
+        surface = Poly3DCollection(
+            polygons,
+            facecolors=cm.viridis(power_norm(power_array)),
+            edgecolors="#4b5563",
+            linewidths=0.12,
+            alpha=0.9,
+        )
+        axis.add_collection3d(surface)
+        power_mappable = cm.ScalarMappable(norm=power_norm, cmap="viridis")
+        power_mappable.set_array(power_array)
+        self.figure.colorbar(power_mappable, ax=axis, label="Deposited impact power per mesh cell [W]")
+        all_surface_points = np.vstack(polygons)
+        _set_adaptive_3d_bounds(axis, all_surface_points, scale=1.0)
+        axis.set_title(f"Impact power on aperture surface ({len(impact_records)} collisions)")
+        axis.set_xlabel("x [mm]")
+        axis.set_ylabel("y [mm]")
+        axis.set_zlabel("z [mm]")
+        self.figure.tight_layout(rect=(0.02, 0.02, 0.86, 0.98))
+        self.draw_idle()
+        return f"Displayed impact power on aperture surface using {mesh_size:g} m mesh cells"
+
     def plot_phase_space(
         self,
         vtk_path: Path,
@@ -1988,6 +2224,28 @@ class OutputCanvas(FigureCanvasQTAgg):
     ) -> str:
         return self._trajectory_canvas().plot_3d(vtk_path, max_trajectories, trajectory_options)
 
+    def plot_vtk_collisions_3d(
+        self,
+        vtk_path: Path,
+        runtime_case: dict[str, Any],
+        max_collisions: int,
+    ) -> str:
+        return self._trajectory_canvas().plot_collisions_3d(
+            vtk_path,
+            runtime_case,
+            max_collisions,
+        )
+
+    def plot_vtk_collision_power_surface_3d(
+        self,
+        vtk_path: Path,
+        runtime_case: dict[str, Any],
+    ) -> str:
+        return self._trajectory_canvas().plot_collision_power_surface_3d(
+            vtk_path,
+            runtime_case,
+        )
+
     def plot_vtk_phase_space(
         self,
         vtk_path: Path,
@@ -2161,8 +2419,8 @@ class OutputCanvas(FigureCanvasQTAgg):
             )
             if trajectory_count > 0:
                 overlay_descriptions.append(f"{trajectory_count} projected trajectories")
-        if overlay_descriptions:
-            axis.legend(loc="upper right")
+        #if overlay_descriptions:
+            #axis.legend(loc="upper right")
         
         axis.grid(alpha=0.15, color="white")
         self.draw_idle()
@@ -2199,7 +2457,7 @@ class OutputCanvas(FigureCanvasQTAgg):
         dir_array = np.asarray(direction, dtype=float)
         dir_norm = np.linalg.norm(dir_array)
         if dir_norm == 0:
-            self.plot_placeholder("Line direction vector has zero magnitude")
+            self.plot_placeholder("Line direction vector has zero magnitude")      
             return "Invalid line direction"
         dir_unit = dir_array / dir_norm
         

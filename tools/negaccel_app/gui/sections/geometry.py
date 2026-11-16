@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 from ..common import ParameterBindingToggle, WorkflowError, nested_get, serialize_geometry_file_path
 from ..visualization import GeometryCanvas, NavigationToolbar2QT, configure_matplotlib_toolbar
 from ...workflow import TEMPLATES_DIR, load_geometry_file, load_geometry_reference, write_geometry_file
+from ...workflow.domains.geometry_validation import resolve_solid_boundary_ids
 
 
 # ── widget helpers ────────────────────────────────────────────────────────────
@@ -134,8 +135,11 @@ def _validate_solids(solids: list[dict]) -> None:
             raise WorkflowError(f"Duplicate solid name: {solid_name}")
         seen_names.add(normalized_name)
 
-        boundary_id = solid.get("boundaryId", 7 + solid_index)
-        if not isinstance(boundary_id, int) or boundary_id < 7:
+        boundary_id = solid.get("boundaryId")
+        if boundary_id is None:
+            # Left to the workflow, which gives it the lowest free id from 7 up.
+            boundary_id = resolve_solid_boundary_ids(solids)[solid_index]
+        if isinstance(boundary_id, bool) or not isinstance(boundary_id, int) or boundary_id < 7:
             raise WorkflowError(f"{solid_name}: boundaryId must be an integer >= 7")
 
         z_values = solid.get("zProfileMeters")

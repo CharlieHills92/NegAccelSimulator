@@ -6,6 +6,11 @@ from typing import Any
 
 from ...particles import BUILTIN_PARTICLE_KINDS, get_particle_kind_family
 from ..common import WorkflowError, require_number, require_object, require_string
+from .beamlets import (
+    beamlet_offsets,
+    expand_sources_over_beamlets,
+    normalize_beamlet_pattern,
+)
 
 
 SUPPORTED_PLASMA_MODELS = {"nsimp", "shield"}
@@ -39,11 +44,65 @@ def build_particle_configuration(particles: dict[str, Any]) -> dict[str, Any]:
     runtime_particle_types, particle_type_lookup = build_particle_types(particles)
     runtime_particle_sources = build_runtime_particle_sources(particles, particle_type_lookup)
 
+    # Multi-beamlet extraction. Expanding here, after the per-source validation, means the
+    # runtime case holds plain particleSources entries exactly as a hand-written multi-source
+    # case would -- the C++ runtime already loops over them, so it needs no notion of a
+    # beamlet lattice. Absent or disabled, the source list is untouched.
+    beamlet_pattern = normalize_beamlet_pattern(particles.get("beamlets"))
+    if beamlet_pattern is not None:
+        runtime_particle_sources = expand_sources_over_beamlets(
+            runtime_particle_sources, beamlet_pattern
+        )
+
     return {
         "particleTypes": runtime_particle_types,
         "particleSources": runtime_particle_sources,
         "plasma": build_particle_plasma(particles),
         "particleCount": sum(source["particleCount"] for source in runtime_particle_sources),
+        # None when no halo was asked for; the caller then omits the block entirely.
+        "beamHalo": build_beam_halo(particles),
+        # None for a single-beamlet case; carried for the run log and the GUI summary.
+        "beamlets": beamlet_pattern,
+        # How many copies each source became. The runtime divides the plasma reference
+        # density by this, because IBSimu accumulates J/v once per source.
+        "beamletCount": (
+            len(beamlet_offsets(beamlet_pattern)) if beamlet_pattern is not None else 1
+        ),
+    }
+
+
+def build_beam_halo(particles: dict[str, Any]) -> dict[str, Any] | None:
+    """Normalise the optional beam-halo block.
+
+    Returns None when the authoring spec does not ask for a halo, so the runtime case omits
+    the block entirely and the C++ default (disabled) applies. A halo must never appear
+    because of a defaulting accident.
+
+    Validation mirrors the runtime: the fraction is rejected rather than clamped, because a
+    value outside the band is no longer the model of Pimazzoni et al. and silently correcting
+    it would hide that the case has stopped representing what its author asked for.
+    """
+    halo = particles.get("halo")
+    if not isinstance(halo, dict) or not halo.get("enabled", False):
+        return None
+
+    fraction = halo.get("currentFractionPercent", 8.0)
+    if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
+        raise WorkflowError("particles.halo.currentFractionPercent must be numeric")
+    if not 0.0 < float(fraction) <= 50.0:
+        raise WorkflowError(
+            "particles.halo.currentFractionPercent must be in (0, 50]; the reference model "
+            "of Pimazzoni et al., Fus. Eng. Des. 192 (2023) 113621 uses 8"
+        )
+
+    energy = halo.get("axialEnergyEV", 4.0)
+    if isinstance(energy, bool) or not isinstance(energy, (int, float)) or float(energy) <= 0.0:
+        raise WorkflowError("particles.halo.axialEnergyEV must be a positive number")
+
+    return {
+        "enabled": True,
+        "currentFractionPercent": float(fraction),
+        "axialEnergyEV": float(energy),
     }
 
 

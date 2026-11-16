@@ -263,10 +263,13 @@ int main( int argc, char **argv )
 	       << " vtk=" << startup_parameters.getOutputVTKEnabled() << "\n";
 
 	const uint nscans = 1;
+	int exit_code = 0;
 	for ( size_t scan_index=0; scan_index<nscans; scan_index++ ) {
 
 		logfile << "*** Starting simulation " << scan_index+1 << "/" << nscans << " ***\n";
 		logfile << "*** Input file: " << config_file << " ***\n" << flush;
+
+	try {
 
 		ManageSimulation Simulation( case_tag, foldname );
 
@@ -426,17 +429,38 @@ int main( int argc, char **argv )
 			logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans <<" COMPLETED ***\n" << flush;
 		}
 
+	} catch (Error& e) {
+		// ibsimu's Error does NOT derive from std::exception, so it is invisible to a
+		// plain "catch (const std::exception&)". Left uncaught, this propagates out of
+		// main() as an uncaught exception -> std::terminate() -> abort() (SIGABRT / exit
+		// 134), even though the callers below (e.g. ManageSimulation::run_simulation)
+		// already logged a detailed diagnostic before re-throwing it for cleanup.
+		e.print_error_message(cerr, false);
+		logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans
+		        << " FAILED: " << e.get_error_message() << " ***\n" << flush;
+		exit_code = 1;
+	} catch (const std::exception& e) {
+		cerr << "Simulation failed: " << e.what() << endl;
+		logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans
+		        << " FAILED: " << e.what() << " ***\n" << flush;
+		exit_code = 1;
+	} catch (...) {
+		cerr << "Simulation failed with an unknown exception" << endl;
+		logfile << "*** SIMULATION " << scan_index+1 << "/" << nscans
+		        << " FAILED: unknown exception ***\n" << flush;
+		exit_code = 1;
+	}
 
 	}
 
-	logfile << "*** ALL SIMULATIONS COMPLETED ***";
+	logfile << "*** ALL SIMULATIONS " << (exit_code == 0 ? "COMPLETED" : "FAILED") << " ***";
 	cout_redirect.reset();
 	cerr_redirect.reset();
 	logfile.close();
 
-	
 
-	return 0;
+
+	return exit_code;
 
 }
 

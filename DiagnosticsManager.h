@@ -54,7 +54,34 @@ private:
     // map falls back to the summary folder.
     std::string vtk_folder_;
 
+    // Working-species ion mass in u, needed to classify particles at a diagnostic plane
+    // (identify_particle_species scales its species windows by it). Injected the same way
+    // as density_profile_filename_.
+    double ion_mass_u_ = 1.0;
+
 public:
+    /**
+     * @brief Statistics for the particles crossing one diagnostic plane.
+     *
+     * Computed twice per plane: once over the primary negative-ion beam alone, and once
+     * over every species, so that a run reports the beam it is trying to accelerate
+     * separately from everything the beam has produced.
+     */
+    struct PlaneStats {
+        double current_A;                ///< Signed sum of IQ over CHARGED species only
+        double x_ave, y_ave;             ///< Flux-weighted centroid [m]
+        double x_min, x_max, y_min, y_max;
+        double angle_x, angle_y;         ///< Flux-weighted mean angle [rad]
+        double div_x, div_y;             ///< Flux-weighted rms divergence [rad], incl. sqrt(2)
+        size_t macroparticles;           ///< How many macroparticles were selected
+
+        PlaneStats()
+            : current_A(0.0), x_ave(0.0), y_ave(0.0),
+              x_min(0.0), x_max(0.0), y_min(0.0), y_max(0.0),
+              angle_x(0.0), angle_y(0.0), div_x(0.0), div_y(0.0),
+              macroparticles(0) {}
+    };
+
     /**
      * @brief Constructor
      */
@@ -64,6 +91,11 @@ public:
      * @brief Destructor
      */
     ~DiagnosticsManager() = default;
+
+    /*! \brief Working-species ion mass in u, for species classification at a plane. */
+    void setIonMassU(double ion_mass_u) {
+        if (ion_mass_u > 0.0) ion_mass_u_ = ion_mass_u;
+    }
 
     void setDensityProfileFilename(const std::string& density_profile_filename) {
         density_profile_filename_ = density_profile_filename;
@@ -238,6 +270,18 @@ private:
     void setupGeometryPlotter(const Geometry* geometry, const EpotField* potential,
                              const MeshVectorField* magnetic, const EpotEfield* electric,
                              const MeshScalarField* spacecharge, const ParticleDataBase3D* particles);
+
+    /**
+     * @brief Reduce one plane's trajectory data to beam statistics.
+     *
+     * @param tdata Result of trajectories_at_plane with the column order
+     *              {X, Y, Z, VX, VY, VZ, CURR, MASS, CHARGE, NO}.
+     * @param beam_species_only Keep only the primary negative ion (PARTICLE_HM, i.e. H- or
+     *              D- depending on the working species) rather than every species.
+     * @return Statistics over the selected particles; all-zero if none were selected.
+     */
+    PlaneStats computePlaneStats(const TrajectoryDiagnosticData& tdata,
+                                 bool beam_species_only) const;
 
 };
 

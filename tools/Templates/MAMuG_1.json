@@ -1,0 +1,222 @@
+{
+ "name": "MAMuG (ITER, Japanese multiaperture-multigrid) - reconstruction of Fubiani et al., Phys. Rev. ST Accel. Beams 11, 014202 (2008), Fig. 6",
+ "meshSizeMeters": 0.0005,
+ "exportGeometryVtk": true,
+ "domain": {
+  "xSizeMeters": 0.08,
+  "ySizeMeters": 0.08,
+  "zSizeMeters": 0.48,
+  "zStartMeters": 0.0
+ },
+ "solids": [
+  {
+   "kind": "solid",
+   "name": "PG",
+   "boundaryId": 7,
+   "role": "plasmaGrid",
+   "zProfileMeters": [
+    0.003,
+    0.004,
+    0.008,
+    0.009
+   ],
+   "rProfileMeters": [
+    0.0085,
+    0.007,
+    0.007,
+    0.0085
+   ],
+   "aperturePattern": {
+    "layout": "rectangular-grid",
+    "countX": 5,
+    "countY": 5,
+    "pitchXMeters": 0.019,
+    "pitchYMeters": 0.021,
+    "outsidePatternIsSolid": true
+   }
+  },
+  {
+   "kind": "solid",
+   "name": "EG",
+   "boundaryId": 8,
+   "role": "extractionGrid",
+   "zProfileMeters": [
+    0.015,
+    0.0155,
+    0.022,
+    0.028,
+    0.0285
+   ],
+   "rProfileMeters": [
+    0.006,
+    0.0055,
+    0.0055,
+    0.0065,
+    0.0065
+   ],
+   "aperturePattern": {
+    "layout": "rectangular-grid",
+    "countX": 5,
+    "countY": 5,
+    "pitchXMeters": 0.019,
+    "pitchYMeters": 0.021,
+    "outsidePatternIsSolid": true
+   }
+  },
+  {
+   "kind": "solid",
+   "name": "AG1",
+   "boundaryId": 9,
+   "role": "accelerationGrid",
+   "stage": 1,
+   "zProfileMeters": [
+    0.11,
+    0.111,
+    0.117,
+    0.1255,
+    0.1255,
+    0.127
+   ],
+   "rProfileMeters": [
+    0.009,
+    0.008,
+    0.008,
+    0.009,
+    0.008,
+    0.0095
+   ],
+   "aperturePattern": {
+    "layout": "rectangular-grid",
+    "countX": 5,
+    "countY": 5,
+    "pitchXMeters": 0.019,
+    "pitchYMeters": 0.021,
+    "outsidePatternIsSolid": true
+   }
+  },
+  {
+   "kind": "solid",
+   "name": "AG2",
+   "boundaryId": 10,
+   "role": "accelerationGrid",
+   "stage": 2,
+   "zProfileMeters": [
+    0.193,
+    0.194,
+    0.2,
+    0.2085,
+    0.2085,
+    0.21
+   ],
+   "rProfileMeters": [
+    0.009,
+    0.008,
+    0.008,
+    0.009,
+    0.008,
+    0.0095
+   ],
+   "aperturePattern": {
+    "layout": "rectangular-grid",
+    "countX": 5,
+    "countY": 5,
+    "pitchXMeters": 0.019,
+    "pitchYMeters": 0.021,
+    "outsidePatternIsSolid": true
+   }
+  },
+  {
+   "kind": "solid",
+   "name": "AG3",
+   "boundaryId": 11,
+   "role": "accelerationGrid",
+   "stage": 3,
+   "zProfileMeters": [
+    0.276,
+    0.277,
+    0.283,
+    0.2915,
+    0.2915,
+    0.293
+   ],
+   "rProfileMeters": [
+    0.009,
+    0.008,
+    0.008,
+    0.009,
+    0.008,
+    0.0095
+   ],
+   "aperturePattern": {
+    "layout": "rectangular-grid",
+    "countX": 5,
+    "countY": 5,
+    "pitchXMeters": 0.019,
+    "pitchYMeters": 0.021,
+    "outsidePatternIsSolid": true
+   }
+  },
+  {
+   "kind": "solid",
+   "name": "AG4",
+   "boundaryId": 12,
+   "role": "accelerationGrid",
+   "stage": 4,
+   "zProfileMeters": [
+    0.359,
+    0.36,
+    0.366,
+    0.3745,
+    0.3745,
+    0.376
+   ],
+   "rProfileMeters": [
+    0.009,
+    0.008,
+    0.008,
+    0.009,
+    0.008,
+    0.0095
+   ],
+   "aperturePattern": {
+    "layout": "rectangular-grid",
+    "countX": 5,
+    "countY": 5,
+    "pitchXMeters": 0.019,
+    "pitchYMeters": 0.021,
+    "outsidePatternIsSolid": true
+   }
+  },
+  {
+   "kind": "solid",
+   "name": "AG5",
+   "boundaryId": 13,
+   "role": "accelerationGrid",
+   "stage": 5,
+   "zProfileMeters": [
+    0.442,
+    0.443,
+    0.449,
+    0.4575,
+    0.4575,
+    0.459
+   ],
+   "rProfileMeters": [
+    0.009,
+    0.008,
+    0.008,
+    0.009,
+    0.008,
+    0.0095
+   ],
+   "aperturePattern": {
+    "layout": "rectangular-grid",
+    "countX": 5,
+    "countY": 5,
+    "pitchXMeters": 0.019,
+    "pitchYMeters": 0.021,
+    "outsidePatternIsSolid": true
+   }
+  }
+ ]
+}

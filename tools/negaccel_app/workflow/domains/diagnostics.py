@@ -107,8 +107,14 @@ def build_diagnostics(authoring_diagnostics: dict[str, Any], geometry: dict[str,
     # Optional, so authoring files written before it existed keep validating. Normalized to
     # an explicit boolean here so the runtime case always carries it and the C++ parser
     # never has to distinguish "absent" from "false".
+    #
+    # Defaults to True: the density map is the only output that exposes a local peak, and an
+    # electrode can exceed its allowable density over a few square millimetres of bore while
+    # its total power stays inside budget. Binning is O(1) per impact and the file scales
+    # with the wetted surface, so the cost is small. An authoring file that sets it
+    # explicitly still wins.
     grid_power["writePowerDensityMap"] = _require_boolean(
-        grid_power.get("writePowerDensityMap", False),
+        grid_power.get("writePowerDensityMap", True),
         "diagnostics.gridPower.writePowerDensityMap",
     )
     raw_ranges = grid_power.get("ranges")

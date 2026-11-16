@@ -20,6 +20,7 @@
 #include "funct.h"
 #include "THCallback.h"
 #include "THCallback_surf_EAMCC.h"
+#include "CallbackThreading.h"
 
 #include <algorithm>
 #include <iostream>
@@ -93,15 +94,53 @@ void ManageSimulation::initializeComponents(const std::string& scan_name, const 
         }
     }
     diagnosticsManager->setDensityProfileFilename(parameters->getStrippingDensityProfile());
+    // Needed to tell the primary negative ion apart from everything it produces when the
+    // plane diagnostics classify species (identify_particle_species scales by it).
+    diagnosticsManager->setIonMassU(parameters->getMIons());
     diagnosticsManager->setVTKFolder(fileManager->getVTKFolder());
 }
 
 void ManageSimulation::initializeIbsimu() {
     // Initialize IBSIMU settings
     ibsimu.set_message_threshold(MSG_VERBOSE, 1);
-    const bool monte_carlo_enabled = parameters &&
-        (parameters->getIncludeStripping() > 0 || parameters->getIncludeSurfaceCollisions() > 0);
-    ibsimu.set_thread_count((debug || monte_carlo_enabled) ? 1 : 8);
+
+    // Worker threads for trajectory tracking.
+    //
+    // This used to drop to a single thread whenever stripping or surface collisions were
+    // enabled, because the callbacks were not thread-safe: they shared one scratch member
+    // for the impacted solid, non-atomic warn-once flags, and unsynchronised logfile
+    // writes. That penalty applied to the WHOLE run -- every Poisson solve and all primary
+    // tracing -- not just the one pass that generates secondaries, so a Monte Carlo run
+    // paid an 8x slowdown on top of the cost of the secondaries themselves.
+    //
+    // The callbacks are now thread-safe (see CallbackThreading.h), and the library side
+    // always was: Scheduler documents that any thread may add problems provided the
+    // problem vector is locked, and ParticleDataBasePPImp::add_particle already takes that
+    // lock, so secondaries created from a worker thread are still traced in the same pass.
+    //
+    // An EXPLICIT simulation.threadCount always wins, including under debug. `debug` here
+    // is driven by logging verbosity (main.cpp sets it from the console/file log levels and
+    // the debug-artifact flag), which is routinely on for production runs -- letting that
+    // silently force single-threaded execution is exactly the trap this change exists to
+    // remove. Callback logging is mutex-guarded now, so debug output stays readable when
+    // threaded; only the interleaving order between threads is no longer deterministic.
+    // With no explicit count, debug still defaults to 1 so that ad-hoc debugging runs stay
+    // reproducible and their log order is meaningful.
+    uint requested = parameters ? parameters->getThreadCount() : 0U;
+    uint threads = requested > 0U ? requested : (debug ? 1U : 8U);
+    ibsimu.set_thread_count(threads);
+
+    // Distinct per-thread random streams are derived from this. Fixing it here keeps a
+    // single-threaded run bit-reproducible; with more than one thread the assignment of
+    // particles to streams follows OS scheduling, so runs are statistically equivalent but
+    // not bit-identical.
+    cbthread::set_base_seed(20240917ULL);
+
+    const char* origin = requested > 0U ? " (simulation.threadCount)"
+                                       : (debug ? " (default for debug runs; set simulation.threadCount to override)"
+                                                : " (default)");
+    ibsimu.message(1) << "Trajectory tracking thread count: " << threads << origin << endl;
+    logfile << "IBSimu thread count = " << threads << origin << endl;
 }
 
 void ManageSimulation::ResetSimulation() {
@@ -293,9 +332,20 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
     
     ibsimu.message(1) << "*** SIMULATION READY ***" << endl;
 
-    double rho_h = pdb->get_rhosum(); // moved outside the main loop
+    // IBSimu accumulates J/v into rhosum once per add_rectangular_beam_* call, so an
+    // N-beamlet lattice reports N times the plasma charge density. Every beamlet is
+    // extracted from the same plasma and set_nsimp_plasma takes a single scalar density, so
+    // what the meniscus model needs is the per-aperture value. 1 for a single-beamlet case,
+    // which therefore keeps exactly the rho_h it had before multi-beamlet extraction.
+    const double beamlet_count = static_cast<double>(parameters->getBeamletCount());
+
+    double rho_h = pdb->get_rhosum() / beamlet_count; // moved outside the main loop
     double rho_tot = rho_h;
     cout << " RHO_H = " << rho_h << "\n";
+    if (beamlet_count > 1.0) {
+        ibsimu.message(1) << "Multi-beamlet extraction: plasma reference density divided by "
+                          << parameters->getBeamletCount() << " beamlets" << endl;
+    }
 
     uint n_iterations = parameters->getIterations();
     
@@ -407,7 +457,8 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
                 double secondary_z_min = parameters->getStrippingMinimumZ();
                 thcsec = new THCallback_secondaries(pdb, mass, periodicity, cross_section_processes,
                                                     density_profile,
-                                                    secondary_z_min);
+                                                    secondary_z_min,
+                                                    parameters->getStrippingSkipSlowNeutrals());
             }
             
             // Set appropriate callback based on iteration and stripping mode
@@ -440,7 +491,10 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
                             pdb,
                             mass,
                             debug_surf,
-                            parameters->getSurfaceCollisionsMinimumZ()));
+                            parameters->getSurfaceCollisionsMinimumZ(),
+                            parameters->getSurfaceSecondaryElectronBundle(),
+                            parameters->getSurfaceMaxSecondaryElectrons(),
+                            parameters->getSurfaceSecondaryElectronEnergyEV()));
                     }
                 }
                 if (surfaceCollisionCallback) {
@@ -485,6 +539,13 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
             if (final_particles > initial_particles) {
                 ibsimu.message(1) << "Generated " << (final_particles - initial_particles) << " secondary particles" << endl;
             }
+            // One random-number stream per worker thread that actually entered a callback.
+            ibsimu.message(1) << "Monte Carlo thread streams in use: "
+                              << cbthread::stream_count() << endl;
+            if (thcsec != nullptr && thcsec->slowNeutralsSkipped() > 0) {
+                ibsimu.message(1) << "Slow neutral products accounted but not tracked: "
+                                  << thcsec->slowNeutralsSkipped() << endl;
+            }
             
             ibsimu.message(1) << "Particle trajectory calculation completed successfully." << endl;
         } catch (Error& e) {
@@ -523,8 +584,16 @@ void ManageSimulation::run_simulation(bool pdbincycle) {
             }
             throw;
         }
+
+        // These callbacks are scoped to this tracking pass. Clear the database pointer
+        // before releasing them so a later iteration cannot retain a dangling callback.
+        pdb->set_trajectory_handler_callback(nullptr);
+        delete thcstr;
+        delete thcsec;
+        thcstr = nullptr;
+        thcsec = nullptr;
         
-        rho_tot = pdb->get_rhosum();
+        rho_tot = pdb->get_rhosum() / beamlet_count;
 
         // Space charge averaging: scharge_ave = (scharge_old + alpha*scharge_new) / (1+alpha)
         // scharge is NOT modified in-place so the saved file contains the true last-iteration scharge.
@@ -866,7 +935,8 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
                 double secondary_z_min = parameters->getStrippingMinimumZ();
                 thcsec = new THCallback_secondaries(pdb, mass, periodicity, cross_section_processes,
                                                     density_profile,
-                                                    secondary_z_min);
+                                                    secondary_z_min,
+                                                    parameters->getStrippingSkipSlowNeutrals());
                 pdb->set_trajectory_handler_callback(thcsec);
                 ibsimu.message(1) << "Using secondaries stripping callback" << endl;
                 
@@ -897,7 +967,10 @@ bool ManageSimulation::trace_particles_with_loaded_fields(bool use_stripping) {
                 pdb,
                 mass,
                 debug_surf,
-                parameters->getSurfaceCollisionsMinimumZ());
+                parameters->getSurfaceCollisionsMinimumZ(),
+                parameters->getSurfaceSecondaryElectronBundle(),
+                parameters->getSurfaceMaxSecondaryElectrons(),
+                parameters->getSurfaceSecondaryElectronEnergyEV());
             pdb->set_trajectory_end_callback(thc_surf);
             
             ibsimu.message(1) << "Surface collision callback enabled (EAMCC model)" << endl;

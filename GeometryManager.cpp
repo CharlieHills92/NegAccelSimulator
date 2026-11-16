@@ -196,12 +196,38 @@ bool evaluateGeneratedSolidProfile(double x,
     if (layout != "single") {
         const double half_x = aperture_pattern.countX * aperture_pattern.pitchXMeters / 2.0;
         const double half_y = aperture_pattern.countY * aperture_pattern.pitchYMeters / 2.0;
-        if (std::abs(local_x) > half_x + aperture_pattern.marginMeters ||
-            std::abs(local_y) > half_y + aperture_pattern.marginMeters) {
+
+        // Centre of the patterned region, relative to the pattern origin.
+        //
+        // Apertures sit on lattice nodes, at whole multiples of the pitch from the origin.
+        // For an odd count the group is symmetric about the node at the origin, so the
+        // region centres there. For an even count there is no node at the centre: the
+        // group runs over nodes -(count/2) .. -(count/2)+count-1, whose midpoint is half a
+        // pitch below the origin. Centring the region there is what makes all `count`
+        // apertures whole.
+        //
+        // Measuring the region from the origin instead -- as this did before -- puts the
+        // boundary exactly on the outermost node of an even group, slicing those apertures
+        // in half and leaving only count-1 whole ones. A `countX: 2` grid then had one
+        // aperture and two D-shaped slivers rather than the two holes its author asked
+        // for, and a 2-beamlet group fired at metal. The node set is now exactly
+        // axis_node_indices() in the beamlet expansion, for every count, so the grid and
+        // the beam always agree.
+        const double center_x = (aperture_pattern.countX % 2 == 0)
+            ? -0.5 * aperture_pattern.pitchXMeters
+            : 0.0;
+        const double center_y = (aperture_pattern.countY % 2 == 0)
+            ? -0.5 * aperture_pattern.pitchYMeters
+            : 0.0;
+        const double offset_x = local_x - center_x;
+        const double offset_y = local_y - center_y;
+
+        if (std::abs(offset_x) > half_x + aperture_pattern.marginMeters ||
+            std::abs(offset_y) > half_y + aperture_pattern.marginMeters) {
             return aperture_pattern.outsidePatternIsSolid;
         }
 
-        if (std::abs(local_x) < half_x && std::abs(local_y) < half_y) {
+        if (std::abs(offset_x) < half_x && std::abs(offset_y) < half_y) {
             local_x -= std::round(local_x / aperture_pattern.pitchXMeters) * aperture_pattern.pitchXMeters;
             local_y -= std::round(local_y / aperture_pattern.pitchYMeters) * aperture_pattern.pitchYMeters;
         }
