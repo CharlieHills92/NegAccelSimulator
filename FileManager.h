@@ -42,13 +42,18 @@ private:
     std::string plot_fold;
     std::string bfield_fold;
     std::string data_fold;
+    std::string vtk_fold;
 
 public:
     /**
      * @brief Constructor
      * @param foldername Base folder name for the simulation
      */
-    FileManager(const std::string& foldername);
+    FileManager(const std::string& foldername,
+                const std::string& summary_dir,
+                const std::string& plot_dir,
+                const std::string& data_dir,
+                const std::string& vtk_dir);
 
     /**
      * @brief Destructor
@@ -59,7 +64,11 @@ public:
      * @brief Create directory structure for simulation
      * @param foldername Base folder name
      */
-    void createDirectoryStructure(const std::string& foldername);
+    void createDirectoryStructure(const std::string& foldername,
+                                  const std::string& summary_dir,
+                                  const std::string& plot_dir,
+                                  const std::string& data_dir,
+                                  const std::string& vtk_dir);
 
     /**
      * @brief Set file tag and update all file paths
@@ -67,12 +76,19 @@ public:
      */
     void setFileTag(const std::string& filetag);
 
+    /**
+     * @brief Remove legacy summary artifacts for the active case tag.
+     * @return Filenames removed from the summary directory.
+     */
+    std::vector<std::string> removeLegacySummaryArtifacts() const;
+
     // Directory getters
     const std::string& getRefFolder() const { return ref_fold; }
     const std::string& getOutputSummaryFolder() const { return outsummary_fold; }
     const std::string& getPlotFolder() const { return plot_fold; }
     const std::string& getBFieldFolder() const { return bfield_fold; }
     const std::string& getDataFolder() const { return data_fold; }
+    const std::string& getVTKFolder() const { return vtk_fold; }
 
     // File path getters
     const std::string& getFileTag() const { return file_tag; }
@@ -87,6 +103,9 @@ public:
     const std::vector<std::string>& getDiagFileSpecies() const { return diagfile_species; }
     const std::string& getIterationsFileEG() const { return iterationsfileEG; }
     const std::string& getIterationsFileOUT() const { return iterationsfileOUT; }
+    std::string buildIterationDiagnosticFile(const std::string& label) const;
+    std::string buildIterationDiagnosticFileForZPosition(double z_position_meters) const;
+    std::string buildIterationVTKBase(unsigned int iteration) const;
 
     // Setters for specific fields
     void setBFieldFolder(const std::string& folder) { bfield_fold = folder; }

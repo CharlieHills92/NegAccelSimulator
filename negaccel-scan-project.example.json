@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "scanProjectTag": "MTF_particle_scan_example",
+    "authoringCasePath": "MTF_authoring_example.json",
+    "createdAt": "2026-06-24T12:00:00Z",
+    "lastModified": "2026-06-24T12:30:00Z"
+  },
+  "parameters": [
+    {
+      "path": "particles.sources[0].currentDensityAm2",
+      "label": "Source Current Density [A/m²]",
+      "parameterType": "number",
+      "min": 0,
+      "max": 1000,
+      "step": 10,
+      "unit": "A/m²"
+    },
+    {
+      "path": "particles.sources[0].axialEnergyEV",
+      "label": "Axial Energy [eV]",
+      "parameterType": "number",
+      "min": 0.1,
+      "max": 50,
+      "step": 0.5,
+      "unit": "eV"
+    },
+    {
+      "path": "boundaryConditions.gridVoltagesVolts.extractionGrid",
+      "label": "Extraction Grid Voltage [V]",
+      "parameterType": "number",
+      "min": 5000,
+      "max": 10000,
+      "step": 100,
+      "unit": "V"
+    }
+  ],
+  "scanTable": {
+    "cases": [
+      {
+        "caseIndex": 0,
+        "caseLabel": "Base case",
+        "parameterValues": [250.0, 5.0, 6800.0],
+        "status": "pending",
+        "parameterValues": [250.0, 5.0, 6800.0]
+      },
+      {
+        "caseIndex": 1,
+        "caseLabel": "Higher current",
+        "parameterValues": [350.0, 5.0, 6800.0],
+        "status": "pending"
+      },
+      {
+        "caseIndex": 2,
+        "caseLabel": "Higher energy",
+        "parameterValues": [250.0, 8.0, 6800.0],
+        "status": "pending"
+      },
+      {
+        "caseIndex": 3,
+        "caseLabel": "Different voltage",
+        "parameterValues": [250.0, 5.0, 7200.0],
+        "status": "pending"
+      }
+    ],
+    "executionHistory": []
+  },
+  "visualization": {
+    "defaultXMetric": "currentDensityAm2",
+    "defaultYMetric": "extracted_current_mA",
+    "favoriteMetrics": ["extracted_current_mA", "beam_divergence_dx_mrad", "transmission_fraction"]
+  }
+}

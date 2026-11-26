@@ -1,0 +1,185 @@
+{
+  "$schema": "./negaccel-authoring.schema.json",
+  "metadata": {
+    "schemaVersion": "1.0.0",
+    "caseTag": "MTF_authoring_example",
+    "title": "MTF authoring example",
+    "description": "User-facing Python-side input file organized by geometry, boundary conditions, source, gas, physics, run controls, and outputs."
+  },
+  "geometry": {
+    "path": "tools/Templates/MTF.json"
+  },
+  "boundaryConditions": {
+    "boundaries": [
+      {
+        "boundaryId": 1,
+        "name": "x-min",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 2,
+        "name": "x-max",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 3,
+        "name": "y-min",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 4,
+        "name": "y-max",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 5,
+        "name": "z-min",
+        "conditionType": "dirichlet",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 6,
+        "name": "z-max",
+        "conditionType": "neumann",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 7,
+        "name": "PG",
+        "conditionType": "dirichlet",
+        "value": 0.0
+      },
+      {
+        "boundaryId": 8,
+        "name": "EG",
+        "conditionType": "dirichlet",
+        "value": "12 * 600"
+      },
+      {
+        "boundaryId": 9,
+        "name": "AG1",
+        "conditionType": "dirichlet",
+        "value": "23 * EG"
+      },
+      {
+        "boundaryId": 10,
+        "name": "AG2",
+        "conditionType": "dirichlet",
+        "value": 324000.0
+      },
+      {
+        "boundaryId": 11,
+        "name": "AG3",
+        "conditionType": "dirichlet",
+        "value": 482400.0
+      },
+      {
+        "boundaryId": 12,
+        "name": "AG4",
+        "conditionType": "dirichlet",
+        "value": 640800.0
+      },
+      {
+        "boundaryId": 13,
+        "name": "AG5",
+        "conditionType": "dirichlet",
+        "value": 799200.0
+      }
+    ]
+  },
+  "particleSource": {
+    "species": "H-",
+    "chargeState": -1,
+    "massU": 1.0,
+    "currentDensityAm2": 270.0,
+    "perpendicularTemperatureEV": 0.0,
+    "axialEnergyEV": 3.0,
+    "sourceModel": "uniform"
+  },
+  "magneticField": {
+    "enabled": true,
+    "directory": "Bfield_MTF",
+    "fields": [
+      {
+        "name": "external",
+        "sourceType": "file",
+        "scale": 1.0,
+        "filePath": "EXTfield.fld"
+      }
+    ]
+  },
+  "gasInteractions": {
+    "densityProfile": {
+      "name": "mtf-background",
+      "species": "H2",
+      "path": "densprofiles/MTF_dens.txt",
+      "useFor": [
+        "stripping",
+        "secondaryEmission",
+        "diagnostics"
+      ]
+    },
+    "stripping": {
+      "enabled": true,
+      "generateSecondaries": true,
+      "minimumZMeters": 0.009
+    }
+  },
+  "surfaceInteractions": {
+    "enabled": false,
+    "model": "EAMCC",
+    "minimumImpactZMeters": 0.007,
+    "maximumSecondaryElectrons": 26,
+    "secondaryElectronEnergyEV": 10.0,
+    "debug": false
+  },
+  "run": {
+    "particleCount": 50000,
+    "iterations": 4,
+    "solver": {
+      "type": "bicgstab",
+      "shieldModel": "nsimp"
+    },
+    "spaceCharge": {
+      "alphaCoeff": 0.5
+    },
+    "convergence": {
+      "currentDensityTolerance": 1.0
+    },
+    "domainDecomposition": {
+      "splitDomain": false
+    }
+  },
+  "outputs": {
+    "summary": {
+      "enabled": true,
+      "directory": "Summary"
+    },
+    "plots": {
+      "enabled": true,
+      "directory": "Plots"
+    },
+    "data": {
+      "enabled": true,
+      "directory": "Data"
+    },
+    "vtk": {
+      "enabled": true,
+      "directory": "VTK",
+      "exportGeometry": true,
+      "exportSimulationState": true,
+      "exportTracedParticles": true
+    },
+    "logging": {
+      "consoleLevel": "info",
+      "fileLevel": "debug",
+      "captureStdout": true,
+      "writeDebugArtifacts": false,
+      "structuredLogFile": "run.log"
+    }
+  }
+}

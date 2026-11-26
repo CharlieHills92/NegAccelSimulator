@@ -1,6 +1,37 @@
 
 #include "funct.h"
 
+#include "constants.hpp"
+
+#include <atomic>
+
+
+namespace {
+
+particle_family active_particle_family = PARTICLE_FAMILY_H;
+
+const char* particle_family_prefix(particle_family family) {
+	return family == PARTICLE_FAMILY_D ? "D" : "H";
+}
+
+} // namespace
+
+
+size_t particle_kind_count() {
+	return 7U;
+}
+
+particle_family infer_particle_family(double ion_mass_u) {
+	return ion_mass_u >= 1.5 ? PARTICLE_FAMILY_D : PARTICLE_FAMILY_H;
+}
+
+void set_active_particle_family(particle_family family) {
+	active_particle_family = family;
+}
+
+particle_family get_active_particle_family() {
+	return active_particle_family;
+}
 
 
 particle_kind identify_particle_species( double mass, double charge, double ION_MASS ) {
@@ -25,6 +56,9 @@ particle_kind identify_particle_species( double mass, double charge, double ION_
 	else if ( (mass>2*ION_MASS*1.5e-27) & (mass<2*ION_MASS*1.8e-27) & (charge==0) ) {
 		kind=PARTICLE_H20; // H20
 	}
+	else if ( (mass>3*ION_MASS*1.5e-27) & (mass<3*ION_MASS*1.8e-27) & (charge>0) ) {
+		kind=PARTICLE_H3P; // H3+
+	}
 	else {
 		kind=PARTICLE_WRONG; // wrong def
 	}
@@ -33,23 +67,102 @@ particle_kind identify_particle_species( double mass, double charge, double ION_
 
 }
 
+particle_kind particle_kind_from_config_name(const std::string& kind) {
+	if (kind == "H-" || kind == "D-") {
+		return PARTICLE_HM;
+	}
+	if (kind == "H0" || kind == "D0") {
+		return PARTICLE_H0;
+	}
+	if (kind == "H+" || kind == "D+") {
+		return PARTICLE_HP;
+	}
+	if (kind == "H2+" || kind == "D2+") {
+		return PARTICLE_H2P;
+	}
+	if (kind == "H20" || kind == "D20") {
+		return PARTICLE_H20;
+	}
+	if (kind == "H3+" || kind == "D3+") {
+		return PARTICLE_H3P;
+	}
+	if (kind == "e-") {
+		return PARTICLE_E;
+	}
+	return PARTICLE_WRONG;
+}
+
+double particle_kind_charge_state(particle_kind kind) {
+	switch (kind) {
+		case PARTICLE_HM:
+		case PARTICLE_E:
+			return -1.0;
+		case PARTICLE_H0:
+		case PARTICLE_H20:
+			return 0.0;
+		case PARTICLE_HP:
+		case PARTICLE_H2P:
+		case PARTICLE_H3P:
+			return 1.0;
+		default:
+			return 0.0;
+	}
+}
+
+double particle_kind_mass_u(particle_kind kind, double ion_mass_u) {
+	switch (kind) {
+		case PARTICLE_HM:
+		case PARTICLE_H0:
+		case PARTICLE_HP:
+			return ion_mass_u;
+		case PARTICLE_H2P:
+		case PARTICLE_H20:
+			return 2.0*ion_mass_u;
+		case PARTICLE_H3P:
+			return 3.0*ion_mass_u;
+		case PARTICLE_E:
+			return MASS_E/MASS_U;
+		default:
+			return 0.0;
+	}
+}
+
+bool particle_kind_is_electron(particle_kind kind) {
+	return kind == PARTICLE_E;
+}
+
+bool particle_kind_is_positive_ion(particle_kind kind) {
+	return kind == PARTICLE_HP || kind == PARTICLE_H2P || kind == PARTICLE_H3P;
+}
+
+bool is_unextracted_primary_negative_ion(double mass, double charge, double vz, int gen,
+                                         double ION_MASS) {
+	if (gen != 0) return false;              // stripping / surface secondary: a real load
+	if (vz >= 0.0) return false;             // still heading downstream
+	return identify_particle_species(mass, charge, ION_MASS) == PARTICLE_NEGATIVE_ION;
+}
+
 string get_particle_name(particle_kind pk) {
 	string name;
+	const char* family_prefix = particle_family_prefix(active_particle_family);
 	switch (pk) {
 		case PARTICLE_HM:
-			name="HM";
+			name=string(family_prefix) + "M";
 			break;
 		case PARTICLE_H0:
-			name="H0";
+			name=string(family_prefix) + "0";
 			break;
 		case PARTICLE_HP:
-			name="HP";
+			name=string(family_prefix) + "P";
 			break;
 		case PARTICLE_H2P:
-			name="H2P";
+			name=string(family_prefix) + "2P";
 			break;
 		case PARTICLE_H20:
-			name="H20";
+			name=string(family_prefix) + "20";
+			break;
+		case PARTICLE_H3P:
+			name=string(family_prefix) + "3P";
 			break;
 		case PARTICLE_E:
 			name="E";
@@ -85,8 +198,11 @@ int get_particle_int(particle_kind pk) {
 		case PARTICLE_H20:
 			num=4;
 			break;
-		case PARTICLE_E:
+		case PARTICLE_H3P:
 			num=5;
+			break;
+		case PARTICLE_E:
+			num=6;
 			break;
 		case PARTICLE_WRONG:
 			num=-1;
@@ -121,6 +237,9 @@ particle_kind int2kind(int num) {
 			pk=PARTICLE_H20;
 			break;
 		case 5:
+			pk=PARTICLE_H3P;
+			break;
+		case 6:
 			pk=PARTICLE_E;
 			break;
 		case -1:
@@ -137,7 +256,7 @@ particle_kind int2kind(int num) {
 	return pk;
 }
 
-double density_at_z( double zc, double pressure, vector<double>& pos, vector<double>& dens, bool & ciaone ) {
+double density_at_z( double zc, double pressure, const vector<double>& pos, const vector<double>& dens, bool & ciaone ) {
 	
 	double target_n=_interp1(pos, dens, zc, ciaone);
 	
@@ -186,13 +305,16 @@ double interp1(double x1,double x2, double y1, double y2, double xi){
 	return y1+(xi-x1)*(y2-y1)/(x2-x1);
 }
 
-double _interp1(vector<double> x, vector<double> y, double xi, bool & found){
+double _interp1(const vector<double>& x, const vector<double>& y, double xi, bool & found){
 	found=false;
 	double yi=0;
-	if(xi==x[x.size()-1]){
-			   found=true; yi=y[x.size()-1];std::cout << yi <<" fatto!\n";
+	if(x.empty() || y.empty()) {
+		return yi;
 	}
-    
+	if(xi==x[x.size()-1]){
+			   found=true; yi=y[x.size()-1];
+	}
+
 	size_t j=1;
     if(xi>=x[0] && xi<=x[x.size()-1]) {
 	  while((found==false) && (j<x.size())) {
@@ -204,12 +326,19 @@ double _interp1(vector<double> x, vector<double> y, double xi, bool & found){
 	  }
 	}
 	if (!found) {
-      std::cout << "Warning: value out of range for 1D interpolation!\n";
-      std::cout <<"x: "<<x[x.size()-1] << ", xi: "<<xi;
-      std::cout <<", x-xi: "<<x[x.size()-1]-xi <<". \n";
-      //exit(1);
+      // Warn once. This runs on every integration step of every particle and from several
+      // worker threads at once, so the original unconditional three-line cout both
+      // dominated the run time and interleaved into unreadable output. The condition it
+      // reports -- a density profile that does not span the simulation domain -- is a
+      // property of the input file, so saying it once says everything it ever said.
+      static std::atomic<bool> warned(false);
+      bool expected = false;
+      if (warned.compare_exchange_strong(expected, true)) {
+        std::cout << "Warning: value out of range for 1D interpolation (suppressing repeats)!\n";
+        std::cout << "x: " << x[x.size()-1] << ", xi: " << xi;
+        std::cout << ", x-xi: " << x[x.size()-1]-xi << ". \n";
+      }
 	}
-    //  std::cout << "max x: "<< x[x.size()-1]*1000 <<" xi "<< xi*1000 <<" yi "<< yi*1000 <<" !\n";
     return yi;
 }
 

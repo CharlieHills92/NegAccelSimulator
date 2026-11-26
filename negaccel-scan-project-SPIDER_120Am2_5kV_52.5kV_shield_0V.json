@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0.0",
+  "metadata": {
+    "scanProjectTag": "SPIDER_120Am2_5kV_52.5kV_shield_0V_scan",
+    "authoringCasePath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/SPIDER_120Am2_5kV_52.5kV_shield_0V.json",
+    "lastModified": "2026-06-25T11:49:06.665475Z"
+  },
+  "parameters": [
+    {
+      "path": "particles.sources[0].currentDensityAm2",
+      "label": "Current density [A/m^2]",
+      "parameterType": "number",
+      "min": 0.0,
+      "max": 1000000000.0,
+      "step": 1.0,
+      "unit": null
+    }
+  ],
+  "scanTable": {
+    "cases": [
+      {
+        "caseIndex": 0,
+        "parameterValues": [
+          120.0
+        ],
+        "caseLabel": "Current GUI values",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_001/case_001.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_001",
+        "completedAt": "2026-06-25T09:48:44.179612Z"
+      },
+      {
+        "caseIndex": 1,
+        "parameterValues": [
+          100.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_002/case_002.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_002",
+        "completedAt": "2026-06-25T09:44:42.325576Z"
+      },
+      {
+        "caseIndex": 2,
+        "parameterValues": [
+          80.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_003/case_003.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_003",
+        "completedAt": "2026-06-25T09:42:54.825065Z"
+      },
+      {
+        "caseIndex": 3,
+        "parameterValues": [
+          60.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_004/case_004.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_004",
+        "completedAt": "2026-06-25T09:44:00.801148Z"
+      },
+      {
+        "caseIndex": 4,
+        "parameterValues": [
+          140.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_005/case_005.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_005",
+        "completedAt": "2026-06-25T09:46:35.473337Z"
+      },
+      {
+        "caseIndex": 5,
+        "parameterValues": [
+          160.0
+        ],
+        "caseLabel": "",
+        "status": "completed",
+        "runtimeJsonPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_006/case_006.json",
+        "outputDirectoryPath": "/home/ITER/poggic/Simulations/ibsimu/NegAccelSimulator/NegAccelSimulator/negaccel-scan-project-SPIDER_120Am2_5kV_52.5kV_shield_0V/case_006",
+        "completedAt": "2026-06-25T09:49:06.663732Z"
+      }
+    ],
+    "executionHistory": []
+  },
+  "visualization": {
+    "defaultXMetric": null,
+    "defaultYMetric": null,
+    "favoriteMetrics": []
+  }
+}

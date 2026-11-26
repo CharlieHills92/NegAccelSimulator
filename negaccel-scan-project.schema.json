@@ -1,0 +1,185 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NegAccel Scan Project",
+  "description": "GUI-driven parameter scanning project associated with an authoring case",
+  "type": "object",
+  "required": ["schemaVersion", "metadata"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "description": "Semantic version of this schema",
+      "const": "1.0.0"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Project metadata",
+      "required": ["scanProjectTag"],
+      "additionalProperties": false,
+      "properties": {
+        "scanProjectTag": {
+          "type": "string",
+          "description": "Unique identifier for this scan project"
+        },
+        "authoringCasePath": {
+          "type": "string",
+          "description": "Absolute or relative path to the associated authoring case JSON"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp when project was created"
+        },
+        "lastModified": {
+          "type": "string",
+          "description": "ISO 8601 timestamp when project was last modified"
+        }
+      }
+    },
+    "parameters": {
+      "type": "array",
+      "description": "List of flagged parameters; order matches table column order",
+      "items": {
+        "type": "object",
+        "required": ["path", "label", "parameterType"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "JSON pointer or dot-notation path to the parameter in authoring JSON"
+          },
+          "label": {
+            "type": "string",
+            "description": "Human-readable label for this parameter"
+          },
+          "parameterType": {
+            "type": "string",
+            "enum": ["number", "integer", "boolean", "string"],
+            "description": "Data type of the parameter"
+          },
+          "min": {
+            "description": "Minimum allowed value (for numeric types)"
+          },
+          "max": {
+            "description": "Maximum allowed value (for numeric types)"
+          },
+          "step": {
+            "description": "Step/increment for numeric types"
+          },
+          "unit": {
+            "type": "string",
+            "description": "Physical unit for reference (e.g., 'V', 'A', 'eV')"
+          }
+        }
+      }
+    },
+    "scanTable": {
+      "type": "object",
+      "description": "Scan table data and execution history",
+      "required": ["cases"],
+      "additionalProperties": false,
+      "properties": {
+        "cases": {
+          "type": "array",
+          "description": "List of scan cases; each represents one simulation point",
+          "items": {
+            "type": "object",
+            "required": ["caseIndex", "parameterValues"],
+            "additionalProperties": false,
+            "properties": {
+              "caseIndex": {
+                "type": "integer",
+                "description": "Zero-based case index for ordering and naming (case_001, case_002, etc.)"
+              },
+              "caseLabel": {
+                "type": "string",
+                "description": "Optional user-friendly label for this case"
+              },
+              "parameterValues": {
+                "type": "array",
+                "description": "Values for each parameter in the same order as the parameters list",
+                "items": {}
+              },
+              "status": {
+                "type": "string",
+                "enum": ["pending", "running", "completed", "failed", "skipped"],
+                "description": "Execution status of this case"
+              },
+              "runtimeJsonPath": {
+                "type": "string",
+                "description": "Path to the generated case_NNN.json file"
+              },
+              "outputDirectoryPath": {
+                "type": "string",
+                "description": "Path to the case_NNN output directory"
+              },
+              "errorMessage": {
+                "type": "string",
+                "description": "Error message if status is 'failed'"
+              },
+              "completedAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when case execution completed"
+              }
+            }
+          }
+        },
+        "executionHistory": {
+          "type": "array",
+          "description": "Historical scan runs for this project",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "runTag": {
+                "type": "string",
+                "description": "Unique identifier for this scan execution"
+              },
+              "startedAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when scan was started"
+              },
+              "completedAt": {
+                "type": "string",
+                "description": "ISO 8601 timestamp when scan execution finished"
+              },
+              "mode": {
+                "type": "string",
+                "enum": ["sequential", "parallel"],
+                "description": "Execution mode used"
+              },
+              "workerCount": {
+                "type": "integer",
+                "description": "Number of parallel workers (for parallel mode)"
+              },
+              "caseIndices": {
+                "type": "array",
+                "description": "Indices of cases executed in this run",
+                "items": {"type": "integer"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "visualization": {
+      "type": "object",
+      "description": "Visualization preferences and plot history",
+      "additionalProperties": false,
+      "properties": {
+        "defaultXMetric": {
+          "type": "string",
+          "description": "Default x-axis metric for plotting"
+        },
+        "defaultYMetric": {
+          "type": "string",
+          "description": "Default y-axis metric for plotting"
+        },
+        "favoriteMetrics": {
+          "type": "array",
+          "description": "List of frequently used metrics for quick access",
+          "items": {"type": "string"}
+        }
+      }
+    }
+  }
+}

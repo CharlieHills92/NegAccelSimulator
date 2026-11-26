@@ -22,6 +22,7 @@ class EpotEfield;
 class MeshScalarField;
 class SimulationParameters;
 class FileManager;
+class SurfaceEventLedger;
 struct PowerStruct;
 
 // IBSIMU includes
@@ -40,7 +41,47 @@ struct PowerStruct;
  * - Outputting trajectory data
  */
 class DiagnosticsManager {
+private:
+    std::string density_profile_filename_;
+
+    // Signed surface energy/charge balance for the tracking pass being analysed, or null
+    // when surface collisions were disabled (in which case there is nothing to net out and
+    // the gross columns are already correct). Not owned -- ManageSimulation owns it.
+    const SurfaceEventLedger* surface_event_ledger_ = nullptr;
+
+    // Destination folder for the power-density VTK map, injected rather than threaded
+    // through analyzeGridPowerLoads (which already takes nine parameters). Empty means the
+    // map falls back to the summary folder.
+    std::string vtk_folder_;
+
+    // Working-species ion mass in u, needed to classify particles at a diagnostic plane
+    // (identify_particle_species scales its species windows by it). Injected the same way
+    // as density_profile_filename_.
+    double ion_mass_u_ = 1.0;
+
 public:
+    /**
+     * @brief Statistics for the particles crossing one diagnostic plane.
+     *
+     * Computed twice per plane: once over the primary negative-ion beam alone, and once
+     * over every species, so that a run reports the beam it is trying to accelerate
+     * separately from everything the beam has produced.
+     */
+    struct PlaneStats {
+        double current_A;                ///< Signed sum of IQ over CHARGED species only
+        double x_ave, y_ave;             ///< Flux-weighted centroid [m]
+        double x_min, x_max, y_min, y_max;
+        double angle_x, angle_y;         ///< Flux-weighted mean angle [rad]
+        double div_x, div_y;             ///< Flux-weighted rms divergence [rad], incl. sqrt(2)
+        size_t macroparticles;           ///< How many macroparticles were selected
+
+        PlaneStats()
+            : current_A(0.0), x_ave(0.0), y_ave(0.0),
+              x_min(0.0), x_max(0.0), y_min(0.0), y_max(0.0),
+              angle_x(0.0), angle_y(0.0), div_x(0.0), div_y(0.0),
+              macroparticles(0) {}
+    };
+
     /**
      * @brief Constructor
      */
@@ -50,6 +91,30 @@ public:
      * @brief Destructor
      */
     ~DiagnosticsManager() = default;
+
+    /*! \brief Working-species ion mass in u, for species classification at a plane. */
+    void setIonMassU(double ion_mass_u) {
+        if (ion_mass_u > 0.0) ion_mass_u_ = ion_mass_u;
+    }
+
+    void setDensityProfileFilename(const std::string& density_profile_filename) {
+        density_profile_filename_ = density_profile_filename;
+    }
+
+    /**
+     * @brief Attach the signed surface energy/charge ledger for net power/current output.
+     *
+     * Injected the same way as density_profile_filename_ so that analyzeGridPowerLoads and
+     * performAnalysis keep their (already long) signatures. Pass nullptr to detach.
+     */
+    void setSurfaceEventLedger(const SurfaceEventLedger* ledger) {
+        surface_event_ledger_ = ledger;
+    }
+
+    /// Where to write the power-density VTK map. Empty falls back to the summary folder.
+    void setVTKFolder(const std::string& vtk_folder) {
+        vtk_folder_ = vtk_folder;
+    }
 
     /**
      * @brief Generate diagnostic data along z-axis
@@ -104,7 +169,8 @@ public:
      * @param plot_folder Output folder for plots
      * @param file_tag File tag for naming
      */
-    void createPlots(int argc, char **argv, const Geometry* geometry,
+    void createPlots(int argc, char **argv, const SimulationParameters& params,
+                    const Geometry* geometry,
                     const EpotField* potential, const MeshVectorField* magnetic,
                     const EpotEfield* electric, const MeshScalarField* spacecharge,
                     const ParticleDataBase3D* particles, const std::string& plot_folder,
@@ -125,7 +191,8 @@ public:
      * @param plot_folder Output folder for plots
      * @param file_tag File tag for naming
      */
-    void createPlots(int argc, char **argv, const Geometry* geometry,
+    void createPlots(int argc, char **argv, const SimulationParameters& params,
+                    const Geometry* geometry,
                     const EpotField* potential, const MeshVectorField* magnetic,
                     const EpotEfield* electric, const MeshScalarField* spacecharge,
                     const ParticleDataBase3D* particles,
@@ -170,70 +237,8 @@ public:
     void printTrajectoryData(const std::string& filename, const ParticleDataBase3D* particles);
 
     /**
-     * @brief Create simulation summary
-     * @param zlocsummary Z location for summary
-     * @param summary_file_tag File tag for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles Particle database
-     * @param outsummary_fold Output summary folder
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, const ParticleDataBase3D* particles,
-                                const std::string& outsummary_fold);
-    
-    /**
-     * @brief Create simulation summary for specific particle species
-     * @param zlocsummary Z location for summary
-     * @param summary_file_tag File tag for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles_species Species-specific particle databases
-     * @param pk Particle kind
-     * @param outsummary_fold Output summary folder
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, 
-                                const std::vector<ParticleDataBase3D*>& particles_species,
-                                particle_kind pk, const std::string& outsummary_fold);
-
-    /**
-     * @brief Create simulation summary with field calculations
-     * @param zlocsummary Z location for summary
-     * @param summary_file_tag File tag for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles Particle database
-     * @param outsummary_fold Output summary folder
-     * @param geometry Simulation geometry
-     * @param potential Electric potential field
-     * @param magnetic Magnetic field
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, const ParticleDataBase3D* particles,
-                                const std::string& outsummary_fold,
-                                const Geometry* geometry, const EpotField* potential, 
-                                const MeshVectorField* magnetic);
-
-    /**
-     * @brief Create simulation summary with field calculations and extracted current density
-     * @param zlocsummary Z location for summary analysis
-     * @param summary_file_tag File tag for summary outputs
-     * @param append_at_end Whether to append to existing files
-     * @param particles Particle database
-     * @param outsummary_fold Output folder for summary
-     * @param geometry Geometry object
-     * @param potential Electric potential field
-     * @param magnetic Magnetic field
-     * @param extracted_current_density Extracted current density at EG exit (A/m²)
-     */
-    void createSimulationSummary(double zlocsummary, const std::string& summary_file_tag, 
-                                bool append_at_end, const ParticleDataBase3D* particles,
-                                const std::string& outsummary_fold,
-                                const Geometry* geometry, const EpotField* potential, 
-                                const MeshVectorField* magnetic, double extracted_current_density);
-
-    /**
      * @brief Analyze particle end locations and calculate grid power loads
      * @param particles Particle database to analyze
-     * @param zgrids Vector of grid z-positions
      * @param mesh_size Mesh size for grid collision detection
      * @param geometry Geometry object for domain boundaries
      * @param ionmass Ion mass for power calculations
@@ -243,7 +248,7 @@ public:
      * @return Vector of power values per grid/solid
      */
     std::vector<double> analyzeGridPowerLoads(const ParticleDataBase3D* particles,
-                                             const std::vector<double>& zgrids,
+                                             const SimulationParameters& params,
                                              double mesh_size,
                                              const Geometry* geometry,
                                              double ionmass,
@@ -251,74 +256,6 @@ public:
                                              const std::string& file_tag,
                                              particle_kind pk = PARTICLE_ALL,
                                              std::vector<double>* current_per_solid_out = nullptr);
-
-    /**
-     * @brief Create enhanced simulation summary with current density analysis
-     * @param accelerated_current_density Current density at accelerator exit (A/m²)
-     * @param extracted_current_density Current density at EG exit (A/m²)
-     * @param filename Output filename for summary
-     * @param append_at_end Whether to append to existing file
-     * @param particles Particle database for analysis
-     * @param extra_info Additional information to include in summary
-     */
-    void createSimulationSummary(double accelerated_current_density,
-                                double extracted_current_density,
-                                const std::string& filename, bool append_at_end,
-                                const ParticleDataBase3D* particles,
-                                const std::string& extra_info);
-
-    /**
-     * @brief Create individual simulation summary (for single simulation in scan)
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation (e.g. "MTF_STRIP_TEST_0")
-     * @param zlocsummary Z location for summary analysis
-     * @param particles Particle database
-     * @param geometry Geometry object
-     * @param potential Electric potential field
-     * @param magnetic Magnetic field
-     * @param extracted_current_density Extracted current density at EG exit (A/m²)
-     * @param outsummary_fold Output folder for individual simulation summary
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void createIndividualSimulationSummary(int scan_index, double zlocsummary,
-                                          const ParticleDataBase3D* particles,
-                                          double extracted_current_density,
-                                          const FileManager* fileManager,
-                                          particle_kind pk = PARTICLE_ALL);
-
-    /**
-     * @brief Add entry to scan-level beam properties summary
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation
-     * @param scan_folder Main scan folder path
-     * @param scan_file_tag Base scan file tag (e.g. "MTF_STRIP_TEST")
-     * @param zlocsummary Z location for analysis
-     * @param particles Particle database
-     * @param extracted_current_density Extracted current density at EG exit (A/m²)
-     * @param magnetic Magnetic field for field analysis
-     * @param potential Electric potential field
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void addToScanBeamPropertiesSummary(int scan_index, const std::string& simulation_tag,
-                                       const std::string& scan_folder, const std::string& scan_file_tag,
-                                       double zlocsummary, const ParticleDataBase3D* particles,
-                                       double extracted_current_density, const MeshVectorField* magnetic,
-                                       const EpotField* potential, particle_kind pk = PARTICLE_ALL);
-
-    /**
-     * @brief Add entry to scan-level grid power summary
-     * @param scan_index Index of simulation in scan (0-based)
-     * @param simulation_tag Tag identifying the simulation
-     * @param scan_folder Main scan folder path
-     * @param scan_file_tag Base scan file tag (e.g. "MTF_STRIP_TEST")
-     * @param particles Particle database
-     * @param geometry Geometry object
-     * @param pk Particle kind (default: PARTICLE_ALL)
-     */
-    void addToScanGridPowerSummary(int scan_index, const std::string& simulation_tag,
-                                  const std::string& scan_folder, const std::string& scan_file_tag,
-                                  const ParticleDataBase3D* particles, const Geometry* geometry,
-                                  particle_kind pk = PARTICLE_ALL);
 
 private:
     /**
@@ -335,11 +272,17 @@ private:
                              const MeshScalarField* spacecharge, const ParticleDataBase3D* particles);
 
     /**
-     * @brief Get particle species name string
-     * @param pk Particle kind
-     * @return String representation of particle species
+     * @brief Reduce one plane's trajectory data to beam statistics.
+     *
+     * @param tdata Result of trajectories_at_plane with the column order
+     *              {X, Y, Z, VX, VY, VZ, CURR, MASS, CHARGE, NO}.
+     * @param beam_species_only Keep only the primary negative ion (PARTICLE_HM, i.e. H- or
+     *              D- depending on the working species) rather than every species.
+     * @return Statistics over the selected particles; all-zero if none were selected.
      */
-    std::string getParticleSpeciesName(particle_kind pk) const;
+    PlaneStats computePlaneStats(const TrajectoryDiagnosticData& tdata,
+                                 bool beam_species_only) const;
+
 };
 
 #endif /* DIAGNOSTICSMANAGER_H_ */

@@ -1,0 +1,1445 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://negaccelsimulator.local/schema/negaccel-authoring.schema.json",
+  "title": "NegAccelSimulator Python authoring specification",
+  "description": "User-facing Python-side case authoring model. The workflow tool materializes this organized input into the canonical runtime case JSON consumed by the C++ simulator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "metadata",
+    "geometry",
+    "boundaryConditions",
+    "gasInteractions",
+    "diagnostics",
+    "run"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "particleSource"
+      ]
+    },
+    {
+      "required": [
+        "particles"
+      ]
+    }
+  ],
+  "properties": {
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "caseTag"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "caseTag": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "title": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string"
+        },
+        "author": {
+          "type": "string"
+        }
+      }
+    },
+    "geometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Path to the external geometry JSON file. Relative paths resolve from the authoring JSON location. Example geometry JSON files live under tools/Templates/*.json."
+        }
+      }
+    },
+    "boundaryConditions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "boundaries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/boundaryDefinition"
+          }
+        },
+        "gridVoltagesVolts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "extractionGrid",
+            "acceleratorStages"
+          ],
+          "properties": {
+            "extractionGrid": {
+              "type": "number"
+            },
+            "acceleratorStages": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "periodicBoundaries": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "xMinMeters": {
+              "type": "number"
+            },
+            "xMaxMeters": {
+              "type": "number"
+            },
+            "yMinMeters": {
+              "type": "number"
+            },
+            "yMaxMeters": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "particles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "types",
+        "sources",
+        "plasma"
+      ],
+      "properties": {
+        "types": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "name": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "H-",
+                  "H0",
+                  "H+",
+                  "H2+",
+                  "H20",
+                  "H3+",
+                  "D-",
+                  "D0",
+                  "D+",
+                  "D2+",
+                  "D20",
+                  "D3+",
+                  "e-"
+                ]
+              }
+            }
+          }
+        },
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "particleTypeId",
+              "sourceModel",
+              "particleCount",
+              "currentDensityAm2",
+              "axialEnergyEV",
+              "uniform"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "name": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "particleTypeId": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "sourceModel": {
+                "type": "string",
+                "enum": [
+                  "uniform"
+                ],
+                "default": "uniform"
+              },
+              "particleCount": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "currentDensityAm2": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "perpendicularTemperatureEV": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "parallelTemperatureEV": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "axialEnergyEV": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "uniform": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "centerMeters",
+                  "mainDirection",
+                  "inPlaneReferenceDirection",
+                  "widthMeters",
+                  "heightMeters"
+                ],
+                "properties": {
+                  "centerMeters": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "mainDirection": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "inPlaneReferenceDirection": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "items": {
+                      "type": "number"
+                    }
+                  },
+                  "widthMeters": {
+                    "$ref": "#/$defs/positiveNumber"
+                  },
+                  "heightMeters": {
+                    "$ref": "#/$defs/positiveNumber"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "plasma": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "model"
+          ],
+          "properties": {
+            "model": {
+              "type": "string",
+              "enum": [
+                "nsimp",
+                "shield"
+              ]
+            },
+            "initialPlasmaMaxZMeters": {
+              "type": "number"
+            },
+            "positiveIonTemperatureEV": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            },
+            "plasmaPotentialVolts": {
+              "type": "number"
+            },
+            "tanhWidthEV": {
+              "$ref": "#/$defs/positiveNumber"
+            },
+            "meniscusVoltageVolts": {
+              "type": "number"
+            }
+          },
+          "anyOf": [
+            {
+              "properties": {
+                "model": {
+                  "const": "nsimp"
+                }
+              },
+              "required": [
+                "model",
+                "positiveIonTemperatureEV",
+                "plasmaPotentialVolts"
+              ]
+            },
+            {
+              "properties": {
+                "model": {
+                  "const": "shield"
+                }
+              },
+              "required": [
+                "model",
+                "tanhWidthEV",
+                "meniscusVoltageVolts"
+              ]
+            }
+          ]
+        },
+        "halo": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Beamlet halo after Pimazzoni et al., Fus. Eng. Des. 192 (2023) 113621, Sec. 2: particles born on the downstream chamfer of the plasma grid, aimed along the local surface normal. Omit the block or set enabled=false and no halo is emitted. One halo ring is emitted per particle source, so with multi-beamlet extraction every beamlet gets its own halo carrying its own share of the current.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Emit the halo. Defaults to false."
+            },
+            "currentFractionPercent": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 50,
+              "description": "Halo current as a percentage of the core current of each source. The reference work fixes this at 8 %."
+            },
+            "axialEnergyEV": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Emission energy normal to the chamfer. The reference uses 4 eV."
+            }
+          }
+        },
+        "beamlets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "description": "Multi-beamlet extraction. Replicates every entry of 'sources' over a lattice of beamlets, moving only the source centre: each beamlet keeps the current density, particle count, energy, temperatures and emission rectangle of the source it came from, so the physics of one beamlet is unchanged and the total current and particle count scale with the beamlet count. The lattice should match the aperture pattern of the plasma grid; nothing enforces that, and a mismatch fires beamlets at solid metal. Omit the block or set enabled=false for a single beamlet. Because the grid geometry folds apertures onto integer multiples of the pitch, an even count places count-1 beamlets along that axis -- the outermost apertures are truncated and are skipped.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Replicate the sources over the lattice. Defaults to false."
+            },
+            "layout": {
+              "type": "string",
+              "enum": [
+                "single",
+                "rectangular-grid",
+                "staggered-grid"
+              ]
+            },
+            "countX": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "countY": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "pitchXMeters": {
+              "$ref": "#/$defs/positiveNumber"
+            },
+            "pitchYMeters": {
+              "$ref": "#/$defs/positiveNumber"
+            },
+            "xOffsetMeters": {
+              "type": "number"
+            },
+            "yOffsetMeters": {
+              "type": "number"
+            },
+            "rowShiftXMeters": {
+              "type": "number",
+              "description": "Alternating row offset, staggered-grid only."
+            }
+          }
+        }
+      }
+    },
+    "particleSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Legacy singular source block. Deprecated in favor of particles.types, particles.sources, and particles.plasma.",
+      "required": [
+        "massU",
+        "currentDensityAm2",
+        "axialEnergyEV"
+      ],
+      "properties": {
+        "species": {
+          "type": "string",
+          "enum": [
+            "H-",
+            "D-",
+            "custom"
+          ],
+          "default": "H-"
+        },
+        "chargeState": {
+          "type": "number",
+          "default": -1
+        },
+        "massU": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "currentDensityAm2": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "perpendicularTemperatureEV": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "parallelTemperatureEV": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "axialEnergyEV": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "plasmaPotentialVolts": {
+          "type": "number"
+        },
+        "electronsModelWeight": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "sourceModel": {
+          "type": "string",
+          "enum": [
+            "uniform",
+            "gaussian",
+            "measured",
+            "custom"
+          ],
+          "default": "uniform"
+        }
+      }
+    },
+    "magneticField": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "directory": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "sourceType",
+              "scale"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "#/$defs/nonEmptyString"
+              },
+              "sourceType": {
+                "type": "string",
+                "enum": [
+                  "constant",
+                  "file"
+                ]
+              },
+              "scale": {
+                "$ref": "#/$defs/nonNegativeNumber"
+              },
+              "constantValue": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "bx",
+                  "by",
+                  "bz"
+                ],
+                "properties": {
+                  "bx": {
+                    "type": "number"
+                  },
+                  "by": {
+                    "type": "number"
+                  },
+                  "bz": {
+                    "type": "number"
+                  }
+                }
+              },
+              "filePath": {
+                "type": "string"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "sourceType": {
+                      "const": "constant"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "constantValue"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "sourceType": {
+                      "const": "file"
+                    }
+                  }
+                },
+                "then": {
+                  "required": [
+                    "filePath"
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        "plotProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "components": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "enum": [
+                  "Bx",
+                  "By",
+                  "Bz"
+                ]
+              }
+            },
+            "startPoint": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string"
+            },
+            "points": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "step": {
+              "$ref": "#/$defs/positiveNumber"
+            }
+          }
+        }
+      }
+    },
+    "gasInteractions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "densityProfile"
+      ],
+      "properties": {
+        "densityProfile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "species",
+            "path"
+          ],
+          "properties": {
+            "name": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "species": {
+              "type": "string",
+              "enum": [
+                "H2",
+                "D2",
+                "H0",
+                "H+",
+                "D0",
+                "D+",
+                "e-",
+                "custom"
+              ]
+            },
+            "path": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "format": {
+              "type": "string",
+              "default": "z-density-columns"
+            },
+            "pressureScale": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            }
+          }
+        },
+        "stripping": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "generateSecondaries": {
+              "type": "boolean"
+            },
+            "minimumZMeters": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            },
+            "skipSlowNeutralProducts": {
+              "type": "boolean",
+              "description": "Account slow neutral reaction products without tracking them. Does not affect fast neutrals (the stripped beam)."
+            }
+          }
+        },
+        "reactions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/crossSectionProcessAuthoring"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "stripping": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "enabled"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "reactions"
+            ]
+          }
+        }
+      ]
+    },
+    "surfaceInteractions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "type": "string",
+          "enum": [
+            "EAMCC"
+          ]
+        },
+        "minimumImpactZMeters": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "maximumSecondaryElectrons": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-impact cap on secondary electrons from one ION or NEUTRAL impact (lsec_max). Default 26, matching the Fortran ion_surf_coll.f:101. Electron impacts use a separate fixed cap of 3, which is unreachable because etaSEC <= 3.09. 0 means 'unset, keep the default' rather than 'emit none'."
+        },
+        "secondaryElectronEnergyEV": {
+          "$ref": "#/$defs/nonNegativeNumber",
+          "description": "Birth energy of a true secondary electron [eV]. EAMCC uses a fixed value rather than sampling the 0-50 eV spectrum (Fubiani et al. 2008, Sec. II A). Default 10.0. 0 means 'unset, keep the default': a 0 eV secondary would be born at rest."
+        },
+        "debug": {
+          "type": "boolean"
+        },
+        "secondaryElectronBundle": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum macroparticles used to carry one impact's secondary-electron yield (default 4, mean-preserving). 0 restores one macroparticle per electron."
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "iterations"
+      ],
+      "properties": {
+        "particleCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "iterations": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "domainDecomposition": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "splitDomain": {
+              "type": "boolean"
+            },
+            "domainIndex": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "solver": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "bicgstab",
+                "multigrid"
+              ]
+            },
+            "shieldModel": {
+              "type": "string",
+              "enum": [
+                "nsimp",
+                "shield"
+              ]
+            },
+            "bicgstab": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "eps": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "maxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "newtonEps": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "newtonMaxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "globallyConvergentNewton": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "multigrid": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "levels": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "mgTolerance": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "maxCycles": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "gamma": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "preSmooth": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "postSmooth": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "coarseRelaxation": {
+                  "$ref": "#/$defs/positiveNumber"
+                },
+                "coarseMaxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "localPlasmaMaxIterations": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        },
+        "spaceCharge": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "alphaCoeff": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            }
+          }
+        },
+        "convergence": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "currentDensityTolerance": {
+              "$ref": "#/$defs/nonNegativeNumber"
+            }
+          }
+        },
+        "threadCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Worker threads for trajectory tracking. Omit for the built-in default (8). Set to 1 for a bit-reproducible run."
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "serverCommand": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Optional shell-launch command used by the GUI to run the simulator inside a remote or cluster shell, for example 'srun --pty /bin/bash'."
+        },
+        "outputParentDirectory": {
+          "$ref": "#/$defs/nonEmptyString",
+          "description": "Parent directory under which the GUI creates the case-tag folder and writes the runtime JSON plus output files."
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "$ref": "#/$defs/outputChannel"
+        },
+        "plots": {
+          "$ref": "#/$defs/outputChannel"
+        },
+        "data": {
+          "$ref": "#/$defs/outputChannel"
+        },
+        "vtk": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "directory": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "exportGeometry": {
+              "type": "boolean"
+            },
+            "exportSimulationState": {
+              "type": "boolean"
+            },
+            "exportTracedParticles": {
+              "type": "boolean"
+            }
+          }
+        },
+        "iteration": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "everyNIterations": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "exportPlaneDiagnostics": {
+              "type": "boolean"
+            },
+            "exportSimulationState": {
+              "type": "boolean"
+            },
+            "exportTracedParticles": {
+              "type": "boolean"
+            },
+            "planeZPositionsMeters": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        "logging": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "consoleLevel": {
+              "$ref": "#/$defs/logLevel"
+            },
+            "fileLevel": {
+              "$ref": "#/$defs/logLevel"
+            },
+            "captureStdout": {
+              "type": "boolean"
+            },
+            "writeDebugArtifacts": {
+              "type": "boolean"
+            },
+            "structuredLogFile": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "diagnostics": {
+      "$ref": "#/$defs/diagnosticsConfig"
+    },
+    "beamHalo": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Beamlet halo after Pimazzoni et al., Fus. Eng. Des. 192 (2023) 113621, Sec. 2: particles born on the downstream chamfer of the plasma grid, aimed along the local surface normal. Omit the block or set enabled=false and no halo is emitted. The halo macroparticle count is the same fraction of the core count as the current fraction, so each halo particle carries the same charge as a core one and the added run time is just that fraction.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Emit the halo. Defaults to false."
+        },
+        "currentFractionPercent": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 50,
+          "description": "Halo current as a percentage of the summed core source current. The reference work fixes this at 8 %, and notes that holding it independent of perveance is its largest stated uncertainty. Values outside (0, 50] are rejected."
+        },
+        "axialEnergyEV": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Emission energy normal to the chamfer. The reference uses 4 eV and notes the initial velocity matters little, since the field at the emission point focuses these particles strongly."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "positiveNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "nonNegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "logLevel": {
+      "type": "string",
+      "enum": [
+        "trace",
+        "debug",
+        "info",
+        "warning",
+        "error",
+        "critical"
+      ]
+    },
+    "outputChannel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "directory": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "diagnosticsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planes",
+        "species",
+        "gridPower",
+        "summary",
+        "plots"
+      ],
+      "properties": {
+        "planes": {
+          "$ref": "#/$defs/diagnosticPlanes"
+        },
+        "species": {
+          "$ref": "#/$defs/diagnosticSpeciesConfig"
+        },
+        "gridPower": {
+          "$ref": "#/$defs/diagnosticGridPowerConfig"
+        },
+        "summary": {
+          "$ref": "#/$defs/diagnosticSummaryConfig"
+        },
+        "plots": {
+          "$ref": "#/$defs/diagnosticPlotConfig"
+        }
+      }
+    },
+    "diagnosticPlanes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sampleZPositionsMeters",
+        "summaryZPositionMeters",
+        "emitterExportZPositionMeters"
+      ],
+      "properties": {
+        "sampleZPositionsMeters": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "number"
+          }
+        },
+        "summaryZPositionMeters": {
+          "type": "number"
+        },
+        "emitterExportZPositionMeters": {
+          "type": "number"
+        }
+      }
+    },
+    "diagnosticSpeciesConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "writePerSpeciesDiagnostics",
+        "writePerSpeciesGridPower",
+        "writePerSpeciesPlots",
+        "writeNegativeIonSummary"
+      ],
+      "properties": {
+        "writePerSpeciesDiagnostics": {
+          "type": "boolean"
+        },
+        "writePerSpeciesGridPower": {
+          "type": "boolean"
+        },
+        "writePerSpeciesPlots": {
+          "type": "boolean"
+        },
+        "writeNegativeIonSummary": {
+          "type": "boolean"
+        }
+      }
+    },
+    "diagnosticGridPowerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ranges"
+      ],
+      "properties": {
+        "writePowerDensityMap": {
+          "type": "boolean",
+          "description": "Write a per-triangle net power density map (W/cm2) over the boundary triangulation, as <tag>_power_density.vtk plus a text summary. Defaults to true: the binning is O(1) per impact and the file is proportional to the wetted surface, while the map is the only output that exposes a local density peak, which can exceed an electrode's limit while its total power stays within budget. The VTK carries a row_id cell array, so thresholding on it isolates one electrode. Read the impacts array before quoting a peak: a triangle holding a handful of macroparticles is Poisson noise. Set false to skip it."
+        },
+        "ranges": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/diagnosticGridRange"
+          }
+        }
+      }
+    },
+    "diagnosticGridRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "includeInTotal"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "includeInTotal": {
+          "type": "boolean"
+        }
+      }
+    },
+    "diagnosticSummaryConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apertureRadiusMeters",
+        "transmissionPlaneZPositionMeters"
+      ],
+      "properties": {
+        "apertureRadiusMeters": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "transmissionPlaneZPositionMeters": {
+          "type": "number",
+          "description": "Z position where the extracted current after the PG is evaluated and the EG iteration diagnostic is sampled."
+        }
+      }
+    },
+    "diagnosticPlotConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meniscus"
+      ],
+      "properties": {
+        "meniscus": {
+          "$ref": "#/$defs/diagnosticMeniscusPlotConfig"
+        }
+      }
+    },
+    "diagnosticMeniscusPlotConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "zMinMeters",
+        "zMaxMeters",
+        "transverseMinMeters",
+        "transverseMaxMeters"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "zMinMeters": {
+          "type": "number"
+        },
+        "zMaxMeters": {
+          "type": "number"
+        },
+        "transverseMinMeters": {
+          "type": "number"
+        },
+        "transverseMaxMeters": {
+          "type": "number"
+        }
+      }
+    },
+    "particleKind": {
+      "type": "string",
+      "enum": [
+        "H-",
+        "H0",
+        "H+",
+        "H2+",
+        "H20",
+        "H3+",
+        "D-",
+        "D0",
+        "D+",
+        "D2+",
+        "D20",
+        "D3+",
+        "e-"
+      ]
+    },
+    "crossSectionProcessProductAuthoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "particleKind",
+        "speedClass"
+      ],
+      "properties": {
+        "particleKind": {
+          "$ref": "#/$defs/particleKind"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "speedClass": {
+          "type": "string",
+          "enum": [
+            "fast",
+            "slow"
+          ]
+        }
+      }
+    },
+    "crossSectionProcessAuthoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourcePath",
+        "fitDegree",
+        "coefficients"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "reactionId"
+          ]
+        },
+        {
+          "required": [
+            "processId",
+            "projectileKind",
+            "projectileFate"
+          ]
+        }
+      ],
+      "properties": {
+        "reactionId": {
+          "type": "string",
+          "enum": [
+            "negative_ion_single_stripping",
+            "negative_ion_double_stripping",
+            "background_gas_ionization",
+            "neutral_projectile_ionization",
+            "positive_ion_charge_exchange"
+          ]
+        },
+        "processId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "projectileKind": {
+          "$ref": "#/$defs/particleKind"
+        },
+        "projectileFate": {
+          "type": "string",
+          "enum": [
+            "consume",
+            "survive"
+          ]
+        },
+        "products": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/crossSectionProcessProductAuthoring"
+          }
+        },
+        "sourcePath": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "fitDegree": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "coefficients": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "number"
+          }
+        },
+        "scaleEnergyByIonMass": {
+          "type": "boolean"
+        },
+        "minimumEnergyEV": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "maximumEnergyEV": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        }
+      }
+    },
+    "geometrySolid": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "zProfileMeters",
+        "rProfileMeters"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "solid",
+            "diagnosticPlane"
+          ]
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "plasma",
+            "extraction_grid",
+            "accelerator_grid",
+            "ground_grid",
+            "repeller",
+            "wall",
+            "custom"
+          ]
+        },
+        "stage": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "boundaryId": {
+          "type": "integer",
+          "minimum": 7
+        },
+        "voltageVolts": {
+          "type": "number"
+        },
+        "material": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "zProfileMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/nonNegativeNumber"
+          }
+        },
+        "rProfileMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/nonNegativeNumber"
+          }
+        },
+        "roundingRadiiMeters": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "aperturePattern": {
+          "$ref": "#/$defs/aperturePattern"
+        }
+      }
+    },
+    "boundaryDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "boundaryId",
+        "conditionType",
+        "value"
+      ],
+      "properties": {
+        "boundaryId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "conditionType": {
+          "type": "string",
+          "enum": [
+            "dirichlet",
+            "neumann"
+          ]
+        },
+        "value": {
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          ],
+          "description": "Numeric boundary value or an arithmetic expression. Names such as EG or AG1 resolve from boundaryConditions.boundaries[*].name."
+        }
+      }
+    },
+    "aperturePattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "layout": {
+          "type": "string",
+          "enum": [
+            "single",
+            "rectangular-grid",
+            "staggered-grid"
+          ]
+        },
+        "countX": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "countY": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pitchXMeters": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "pitchYMeters": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "marginMeters": {
+          "$ref": "#/$defs/nonNegativeNumber"
+        },
+        "xOffsetMeters": {
+          "type": "number"
+        },
+        "yOffsetMeters": {
+          "type": "number"
+        },
+        "rowShiftXMeters": {
+          "type": "number"
+        },
+        "outsidePatternIsSolid": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

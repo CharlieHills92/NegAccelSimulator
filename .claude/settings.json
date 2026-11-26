@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c ' *)",
+      "Bash(python3 -m compileall -q negaccel_app/gui/sections/diagnostics.py negaccel_app/workflow/domains/diagnostics.py)"
+    ]
+  }
+}

@@ -9,17 +9,19 @@ echo "Loading modules..."
 module load GSL 2>/dev/null || echo "Warning: GSL module not available"
 module load GTK3 2>/dev/null || echo "Warning: GTK3 module not available"  
 module load cairo 2>/dev/null || echo "Warning: cairo module not available"
-module load matplotlib 2>/dev/null || echo "Warning: matplotlib module not available"
+module load Python 2>/dev/null || echo "Warning: Python module not available"
+module load PySide6 2>/dev/null || echo "Warning: PySide6 module not available"
 
 # IBSimu paths - use the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export IBSIMU_ROOT="$SCRIPT_DIR"
 export IBSIMU_DIR="${IBSIMU_ROOT}/libibsimu_patched"
+export NEGACCEL_ENV_READY=1
+export NEGACCEL_ENV_SCRIPT="${SCRIPT_DIR}/setup_environment.sh"
 
 # Library paths
 export LDFLAGS="${LDFLAGS} -L${IBSIMU_DIR}/src/.libs -Wl,-rpath,${IBSIMU_DIR}/src/.libs"
-# export LD_LIBRARY_PATH="${IBSIMU_DIR}/src/.libs${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-export LD_LIBRARY_PATH="$PWD/libibsimu_patched/src/.libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export LD_LIBRARY_PATH="${IBSIMU_DIR}/src/.libs${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 
 # PKG_CONFIG paths
 export PKG_CONFIG_PATH="${IBSIMU_DIR}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"

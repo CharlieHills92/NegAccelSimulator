@@ -1,0 +1,143 @@
+{
+  "name": "MTF",
+  "meshSizeMeters": 0.002,
+  "exportGeometryVtk": true,
+  "domain": {
+    "xSizeMeters": 0.08,
+    "ySizeMeters": 0.08,
+    "zSizeMeters": 0.567,
+    "zStartMeters": 0.0
+  },
+  "solids": [
+    {
+      "name": "PG",
+      "kind": "solid",
+      "boundaryId": 7,
+      "zProfileMeters": [0.003, 0.007, 0.009],
+      "rProfileMeters": [0.01, 0.007, 0.0085],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "rectangular-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "outsidePatternIsSolid": true
+      }
+    },
+    {
+      "name": "EG",
+      "kind": "solid",
+      "boundaryId": 8,
+      "zProfileMeters": [0.015, 0.0155, 0.022, 0.028, 0.0285],
+      "rProfileMeters": [0.007, 0.0065, 0.0065, 0.0075, 0.0075],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "rectangular-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "outsidePatternIsSolid": true
+      }
+    },
+    {
+      "name": "SG",
+      "kind": "solid",
+      "boundaryId": 8,
+      "zProfileMeters": [0.0285, 0.03, 0.0315],
+      "rProfileMeters": [0.008, 0.008, 0.009],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "staggered-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "yOffsetMeters": -0.0007,
+        "rowShiftXMeters": -0.001,
+        "outsidePatternIsSolid": true
+      }
+    },
+    {
+      "name": "AG1",
+      "kind": "solid",
+      "boundaryId": 9,
+      "zProfileMeters": [0.1195, 0.1205, 0.1265, 0.135, 0.135, 0.1365],
+      "rProfileMeters": [0.008, 0.007, 0.007, 0.0085, 0.007, 0.0085],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "rectangular-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "outsidePatternIsSolid": true
+      }
+    },
+    {
+      "name": "AG2",
+      "kind": "solid",
+      "boundaryId": 10,
+      "zProfileMeters": [0.2245, 0.2255, 0.2315, 0.24, 0.24, 0.2415],
+      "rProfileMeters": [0.008, 0.007, 0.007, 0.0085, 0.007, 0.0085],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "rectangular-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "outsidePatternIsSolid": true
+      }
+    },
+    {
+      "name": "AG3",
+      "kind": "solid",
+      "boundaryId": 11,
+      "zProfileMeters": [0.3295, 0.3305, 0.3365, 0.345, 0.345, 0.3465],
+      "rProfileMeters": [0.009, 0.008, 0.008, 0.009, 0.008, 0.0095],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "rectangular-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "outsidePatternIsSolid": true
+      }
+    },
+    {
+      "name": "AG4",
+      "kind": "solid",
+      "boundaryId": 12,
+      "zProfileMeters": [0.4345, 0.4355, 0.4415, 0.45, 0.45, 0.4515],
+      "rProfileMeters": [0.009, 0.008, 0.008, 0.009, 0.008, 0.0095],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "rectangular-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "outsidePatternIsSolid": true
+      }
+    },
+    {
+      "name": "AG5",
+      "kind": "solid",
+      "boundaryId": 13,
+      "zProfileMeters": [0.5395, 0.5405, 0.5465, 0.555, 0.555, 0.5565],
+      "rProfileMeters": [0.009, 0.008, 0.008, 0.009, 0.008, 0.0095],
+      "roundingRadiiMeters": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+      "aperturePattern": {
+        "layout": "rectangular-grid",
+        "countX": 5,
+        "countY": 5,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "outsidePatternIsSolid": true
+      }
+    }
+  ]
+}

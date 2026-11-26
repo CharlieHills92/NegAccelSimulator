@@ -2,10 +2,32 @@
 #define CROSS_SECTIONS_H_
 
 #include "particledatabase.hpp"
+#include <string>
+#include <vector>
 //~ #include "src/pier/matlabfun.h"
 
 using namespace std;
 
+
+/*! \brief Physical ceiling on one cross section [m^2].
+ *
+ *  Backstop against a log10-sigma polynomial fit evaluated outside its fitted energy
+ *  range, where it diverges rather than failing. About 100x the largest legitimate
+ *  value in this data set, so it cannot clip real physics.
+ */
+#define MAX_PHYSICAL_CROSS_SECTION_M2 1.0e-17
+
+void clear_cross_section_processes();
+void configure_cross_section_process( const std::string& reaction_id,
+									 const std::string& source_path,
+									 const std::vector<double>& coefficients,
+									 unsigned int fit_degree,
+									 bool scale_energy_by_ion_mass,
+									 double minimum_energy_ev,
+									 double maximum_energy_ev );
+double evaluate_cross_section_process( const std::string& process_id,
+								   double energy,
+								   double M_IONS );
 
 // Energy in eV, sigma out in m2
 double stripping_cross_at_E( double energy, double M_IONS, double & sigma_single, double & sigma_double);

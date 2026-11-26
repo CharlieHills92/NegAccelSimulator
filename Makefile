@@ -9,6 +9,7 @@ MKDIR_P = mkdir -p
 
 # Directories
 BUILD_DIR = build
+EXECUTABLE = NegAccelExec
 IBSIMU_ROOT = $(CURDIR)
 IBSIMU_DIR = $(IBSIMU_ROOT)/libibsimu_patched
 IBSIMU_PATCH_DIR = $(IBSIMU_ROOT)/patches/ibsimu
@@ -26,7 +27,7 @@ export LD_LIBRARY_PATH := $(IBSIMU_LIB_DIR)$(if $(LD_LIBRARY_PATH),:$(LD_LIBRARY
 CXXFLAGS = -std=$(CXX_STD) -Wall -Wextra -g -O2 -MMD -MP -DNEW_IMPLEMENTATION
 
 # Always add the patched IBSimu headers directly
-CXXFLAGS += -I$(IBSIMU_SRC_DIR)
+CXXFLAGS += -I$(IBSIMU_SRC_DIR) -I$(IBSIMU_ROOT)/include
 
 # Library flags (try pkg-config first, fallback to direct paths)
 LIBS := $(shell pkg-config --libs ibsimu-1.0.6dev 2>/dev/null || echo "-L$(IBSIMU_LIB_DIR) -libsimu-1.0.6dev -lfreetype -lfontconfig -lz -lpng16 -lcairo -lglib-2.0 -lgtk-3 -lgsl -lgslcblas -lm")
@@ -44,11 +45,10 @@ LDFLAGS = -Wall -g -Wl,-rpath,$(IBSIMU_LIB_DIR)
 
 # Source files for main simulation (using refactored managers)
 SOURCES = main.cpp ManageSimulation_New.cpp \
-          SimulationParameters.cpp FileManager.cpp GeometryManager.cpp \
+		  SimulationParameters.cpp FileManager.cpp GeometryManager.cpp \
           FieldManager.cpp ParticleManager.cpp DiagnosticsManager.cpp \
-          ScanManager.cpp \
-          TransverseData.cpp my_diagnostics.cpp globals.cpp funct.cpp \
-          cross_sections.cpp THCallback.cpp StrippingUtils.cpp
+		  my_diagnostics.cpp globals.cpp funct.cpp \
+		  cross_sections.cpp THCallback.cpp SurfaceEventLedger.cpp
 
 # Object files  
 OBJECTS = $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
@@ -56,8 +56,22 @@ OBJECTS = $(SOURCES:%.cpp=$(BUILD_DIR)/%.o)
 # Dependency files
 DEPS = $(OBJECTS:.o=.d)
 
+.PHONY: all clean distclean bootstrap-ibsimu test test_grid_power test_mtf_grid_power test_load_and_trace guard-env
+
+guard-env:
+	@if [ "$${NEGACCEL_ENV_READY}" != "1" ]; then \
+		echo "Build environment not initialized."; \
+		echo "Run 'source ./setup_environment.sh' in the same shell before invoking make."; \
+		exit 2; \
+	fi
+	@if ! pkg-config --exists cairo gtk+-3.0 gsl; then \
+		echo "Build dependencies are not visible through pkg-config."; \
+		echo "Run 'source ./setup_environment.sh' and verify the module loads succeed before invoking make."; \
+		exit 2; \
+	fi
+
 # Default target
-all: $(IBSIMU_SHARED) runtest_new_v2
+all: guard-env $(IBSIMU_SHARED) $(EXECUTABLE)
 
 # Bootstrap patched IBSimu from the pinned upstream source when missing.
 $(IBSIMU_BOOTSTRAP_STAMP): $(IBSIMU_BOOTSTRAP_SCRIPT) $(wildcard $(IBSIMU_PATCH_DIR)/*.patch)
@@ -65,18 +79,19 @@ $(IBSIMU_BOOTSTRAP_STAMP): $(IBSIMU_BOOTSTRAP_SCRIPT) $(wildcard $(IBSIMU_PATCH_
 	bash $(IBSIMU_BOOTSTRAP_SCRIPT)
 
 # Build patched IBSimu before linking the application
-$(IBSIMU_SHARED): $(IBSIMU_BOOTSTRAP_STAMP)
+$(IBSIMU_SHARED): guard-env $(IBSIMU_BOOTSTRAP_STAMP)
 	@echo "Building libibsimu_patched..."
 	$(MAKE) -C $(IBSIMU_DIR) -j4
 
 # Build main executable
-runtest_new_v2: $(IBSIMU_SHARED) $(OBJECTS) | $(BUILD_DIR)
-	@echo "Linking runtest_new_v2..."
+
+$(EXECUTABLE): guard-env $(IBSIMU_SHARED) $(OBJECTS) | $(BUILD_DIR)
+	@echo "Linking $(EXECUTABLE)..."
 	$(CXX) $(OBJECTS) -o $@ $(LDFLAGS) $(LIBS)
-	@echo "Successfully built runtest_new_v2"
+	@echo "Successfully built $(EXECUTABLE)"
 
 # Object file compilation
-$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR) $(IBSIMU_BOOTSTRAP_STAMP)
+$(BUILD_DIR)/%.o: %.cpp guard-env | $(BUILD_DIR) $(IBSIMU_BOOTSTRAP_STAMP)
 	@echo "Compiling $<..."
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -93,16 +108,16 @@ clean:
 	@if [ -d $(IBSIMU_DIR) ]; then $(MAKE) -C $(IBSIMU_DIR) clean >/dev/null 2>&1 || true; fi
 
 distclean: clean
-	$(RM) runtest_new_v2
+	$(RM) $(EXECUTABLE)
 	$(RM) -r $(BUILD_DIR)
 	$(RM) -r $(IBSIMU_DIR)
 
 bootstrap-ibsimu: $(IBSIMU_BOOTSTRAP_STAMP)
 
 # Test targets
-test: runtest_new_v2
+test: $(EXECUTABLE)
 	@echo "Running basic test..."
-	./runtest_new_v2
+	./$(EXECUTABLE)
 
 # Test for grid power analysis
 TEST_OBJECTS = $(filter-out $(BUILD_DIR)/main.o, $(OBJECTS))
@@ -117,14 +132,12 @@ test_mtf_grid_power: $(TEST_OBJECTS) test_mtf_grid_power.o
 test_load_and_trace: $(TEST_OBJECTS) test_load_and_trace.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-.PHONY: all clean distclean bootstrap-ibsimu test test_grid_power test_mtf_grid_power test_load_and_trace
-
 # Help target
 help:
 	@echo "Available targets:"
-	@echo "  all         - Build runtest_new_v2 executable (default)"
+	@echo "  all         - Build $(EXECUTABLE) executable (default)"
 	@echo "  bootstrap-ibsimu - Clone and patch the pinned upstream IBSimu tree"
-	@echo "  runtest_new_v2 - Build the simulation executable using main.cpp"
+	@echo "  $(EXECUTABLE) - Build the simulation executable using main.cpp"
 	@echo "  clean       - Remove object and dependency files"
 	@echo "  distclean   - Remove all generated files, including libibsimu_patched"
 	@echo "  test        - Build and run basic test"

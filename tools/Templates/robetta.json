@@ -1,0 +1,233 @@
+{
+  "name": "MTF",
+  "meshSizeMeters": 0.002,
+  "exportGeometryVtk": true,
+  "domain": {
+    "xSizeMeters": 0.08,
+    "ySizeMeters": 0.08,
+    "zSizeMeters": 0.567,
+    "zStartMeters": 0.0
+  },
+  "solids": [
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021
+      },
+      "boundaryId": 7,
+      "kind": "solid",
+      "name": "PG",
+      "rProfileMeters": [
+        0.01,
+        0.007,
+        0.0085
+      ],
+      "zProfileMeters": [
+        0.003,
+        0.007,
+        0.009
+      ]
+    },
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021
+      },
+      "boundaryId": 8,
+      "kind": "solid",
+      "name": "EG",
+      "rProfileMeters": [
+        0.007,
+        0.0065,
+        0.0065,
+        0.0075,
+        0.0075
+      ],
+      "zProfileMeters": [
+        0.015,
+        0.0155,
+        0.022,
+        0.028,
+        0.0285
+      ]
+    },
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "staggered-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021,
+        "rowShiftXMeters": -0.001,
+        "yOffsetMeters": -0.0007
+      },
+      "boundaryId": 8,
+      "kind": "solid",
+      "name": "SG",
+      "rProfileMeters": [
+        0.008,
+        0.008,
+        0.009
+      ],
+      "zProfileMeters": [
+        0.0285,
+        0.03,
+        0.0315
+      ]
+    },
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021
+      },
+      "boundaryId": 9,
+      "kind": "solid",
+      "name": "AG1",
+      "rProfileMeters": [
+        0.008,
+        0.007,
+        0.007,
+        0.0085,
+        0.007,
+        0.0085
+      ],
+      "zProfileMeters": [
+        0.1195,
+        0.1205,
+        0.1265,
+        0.135,
+        0.135,
+        0.1365
+      ]
+    },
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021
+      },
+      "boundaryId": 10,
+      "kind": "solid",
+      "name": "AG2",
+      "rProfileMeters": [
+        0.008,
+        0.007,
+        0.007,
+        0.0085,
+        0.007,
+        0.0085
+      ],
+      "zProfileMeters": [
+        0.2245,
+        0.2255,
+        0.2315,
+        0.24,
+        0.24,
+        0.2415
+      ]
+    },
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021
+      },
+      "boundaryId": 11,
+      "kind": "solid",
+      "name": "AG3",
+      "rProfileMeters": [
+        0.009,
+        0.008,
+        0.008,
+        0.009,
+        0.008,
+        0.0095
+      ],
+      "zProfileMeters": [
+        0.3295,
+        0.3305,
+        0.3365,
+        0.345,
+        0.345,
+        0.3465
+      ]
+    },
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021
+      },
+      "boundaryId": 12,
+      "kind": "solid",
+      "name": "AG4",
+      "rProfileMeters": [
+        0.009,
+        0.008,
+        0.008,
+        0.009,
+        0.008,
+        0.0095
+      ],
+      "zProfileMeters": [
+        0.4345,
+        0.4355,
+        0.4415,
+        0.45,
+        0.45,
+        0.4515
+      ]
+    },
+    {
+      "aperturePattern": {
+        "countX": 5,
+        "countY": 5,
+        "layout": "rectangular-grid",
+        "outsidePatternIsSolid": true,
+        "pitchXMeters": 0.019,
+        "pitchYMeters": 0.021
+      },
+      "boundaryId": 13,
+      "kind": "solid",
+      "name": "AG5",
+      "rProfileMeters": [
+        0.009,
+        0.008,
+        0.008,
+        0.009,
+        0.008,
+        0.0095
+      ],
+      "zProfileMeters": [
+        0.5395,
+        0.5405,
+        0.5465,
+        0.555,
+        0.555,
+        0.5565
+      ]
+    }
+  ]
+}

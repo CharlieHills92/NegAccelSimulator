@@ -3,7 +3,7 @@
 
 
 
-int check_periodicity( ParticleDataBase3D* _pdb, ParticleBase *particle, ParticleP3D *pcur, ParticleP3D *pend, vector<double>& _periodicity ) {
+int check_periodicity( ParticleDataBase3D* _pdb, ParticleBase *particle, ParticleP3D *pcur, ParticleP3D *pend, const vector<double>& _periodicity ) {
 	
 	int bound=0;
 
@@ -22,44 +22,66 @@ int check_periodicity( ParticleDataBase3D* _pdb, ParticleBase *particle, Particl
         int hor_addition=100;
 
         int genORI=particle->gen();
-        int current_periodic_ver=(int)genORI/ver_addition;
-        int current_periodic_hor=(int)(genORI-ver_addition*current_periodic_ver)/hor_addition;
+        // Round to nearest rather than letting C++ integer division truncate toward zero.
+        // The two wrap counters are packed additively as hor*100 + ver*10000, and truncation
+        // mis-decodes every mixed-sign pair: a particle one cell along +x and one along -y
+        // carries gen = 100-10000 = -9900, which truncates to ver=0, hor=-99 instead of
+        // ver=-1, hor=+1. The cell test below then evaluates beamlet_x-99 = -96, fails the
+        // >0 condition, and the particle silently stops wrapping for the rest of its life.
+        // Rounding recovers the intended pair for every offset the cell test permits
+        // (|hor| <= 2, |ver| <= 10), because no legal |hor| reaches the 50 that would make
+        // the packing genuinely ambiguous.
+        int current_periodic_ver=(int)lround((double)genORI/ver_addition);
+        int current_periodic_hor=(int)lround((double)(genORI-ver_addition*current_periodic_ver)/hor_addition);
 
         if ( beamlet_x+current_periodic_hor<5 && beamlet_x+current_periodic_hor>0 && 
              beamlet_y+current_periodic_ver<16 && beamlet_y+current_periodic_ver>0 ) {
-            // positive x
+            // Resolve the x and y wraps together and inject exactly ONE replacement.
+            //
+            // The x block and the y block used to be two independent `if`s, each killing the
+            // parent and calling add_particle() with the parent's full IQ. A step that landed
+            // outside BOTH bounds -- a diagonal exit, which the transverse sweep makes common
+            // -- therefore fired both and injected TWO full-weight particles for one parent,
+            // duplicating charge. Neither copy was at the true diagonal neighbour either:
+            // one was shifted in x with y still out of bounds, the other vice versa.
+            //
+            // Accumulating the two shifts and adding one particle conserves IQ exactly and
+            // lands a diagonal escape on the correct diagonal cell in a single step. The
+            // generation offsets accumulate the same way, so both cell hops stay recorded.
+            const double span_x = _periodicity[0]-_periodicity[1];
+            const double span_y = _periodicity[2]-_periodicity[3];
+            double newx = (*pend)[1];
+            double newy = (*pend)[3];
+            int gen_shift = 0;
+
+            // x
             if( (*pend)[1] > _periodicity[0] ) {
                 bound=1;
-                particle->set_status( PARTICLE_PERIODIC );
-                double newx=(*pend)[1]-(_periodicity[0]-_periodicity[1]);
-                ParticleP3D peri( (*pend)[0], newx,(*pend)[2],(*pend)[3],(*pend)[4],(*pend)[5],(*pend)[6] );
-                _pdb->add_particle( particle->IQ(), particle->q()/CHARGE_E, particle->m()/MASS_U, genORI+hor_addition, peri);
+                newx -= span_x;
+                gen_shift += hor_addition;
             }
-            // negative x
             else if( (*pend)[1] < _periodicity[1] ) {
                 bound=-1;
-                particle->set_status( PARTICLE_PERIODIC );
-                double newx=(*pend)[1]+(_periodicity[0]-_periodicity[1]);
-                ParticleP3D peri( (*pend)[0], newx,(*pend)[2],(*pend)[3],(*pend)[4],(*pend)[5],(*pend)[6] );
-                _pdb->add_particle( particle->IQ(), particle->q()/CHARGE_E, particle->m()/MASS_U, genORI-hor_addition, peri);
+                newx += span_x;
+                gen_shift -= hor_addition;
             }
-            // positive y
+            // y
             if( (*pend)[3] > _periodicity[2] ) {
                 bound=2;
-                particle->set_status( PARTICLE_PERIODIC );
-                int genORI=particle->gen();
-                double newy=(*pend)[3]-(_periodicity[2]-_periodicity[3]);
-                ParticleP3D peri( (*pend)[0], (*pend)[1],(*pend)[2],newy,(*pend)[4],(*pend)[5],(*pend)[6] );
-                _pdb->add_particle( particle->IQ(), particle->q()/CHARGE_E, particle->m()/MASS_U, genORI+ver_addition, peri);
+                newy -= span_y;
+                gen_shift += ver_addition;
             }
-            // negative y
             else if( (*pend)[3] < _periodicity[3] ) {
                 bound=-2;
+                newy += span_y;
+                gen_shift -= ver_addition;
+            }
+
+            if( gen_shift != 0 ) {
                 particle->set_status( PARTICLE_PERIODIC );
-                int genORI=particle->gen();
-                double newy=(*pend)[3]+(_periodicity[2]-_periodicity[3]);
-                ParticleP3D peri( (*pend)[0], (*pend)[1],(*pend)[2],newy,(*pend)[4],(*pend)[5],(*pend)[6] );
-                _pdb->add_particle( particle->IQ(), particle->q()/CHARGE_E, particle->m()/MASS_U, genORI-ver_addition, peri);
+                ParticleP3D peri( (*pend)[0], newx,(*pend)[2],newy,(*pend)[4],(*pend)[5],(*pend)[6] );
+                _pdb->add_particle( particle->IQ(), particle->q()/CHARGE_E, particle->m()/MASS_U,
+                                    genORI+gen_shift, peri);
             }
         }
 	}
