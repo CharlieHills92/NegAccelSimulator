@@ -18,6 +18,7 @@ from negaccel_app.particles import (
 
 from ..common import (
     ParameterBindingToggle,
+    QCheckBox,
     QComboBox,
     QFormLayout,
     QGroupBox,
@@ -36,6 +37,11 @@ from ..common import (
     Qt,
     nested_get,
     set_combo_value,
+)
+from ...workflow.domains.beamlets import (
+    beamlet_offsets,
+    beamlet_pattern_warnings,
+    normalize_beamlet_pattern,
 )
 
 
@@ -58,6 +64,13 @@ def _build_default_source(family: str = "H") -> dict[str, object]:
             "heightMeters": 0.02,
         },
     }
+
+
+def _ispin(min_: int, max_: int, value: int = 0) -> QSpinBox:
+    widget = QSpinBox()
+    widget.setRange(min_, max_)
+    widget.setValue(value)
+    return widget
 
 
 def _default_particles_spec(family: str = "H") -> dict[str, object]:
@@ -217,6 +230,14 @@ def _normalized_particles_spec(spec: dict[str, object]) -> dict[str, object]:
     if plasma:
         normalized["plasma"] = deepcopy(plasma)
         normalized["plasma"].setdefault("initialPlasmaMaxZMeters", 7.0e-3)
+
+    # Carried through verbatim. Both blocks are optional and absent means off, so copying
+    # them only when present keeps a case that never asked for either exactly as it was --
+    # and keeps a case that did ask from quietly losing the setting on reload.
+    for optional_block in ("halo", "beamlets"):
+        block = particles.get(optional_block)
+        if isinstance(block, dict):
+            normalized[optional_block] = deepcopy(block)
 
     return normalized
 
@@ -821,7 +842,8 @@ class _ParticlesWorkspaceWidget(QWidget):
         sources_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         sources_layout = QVBoxLayout(sources_box)
         self._sources_editor = _ParticleSourcesEditorWidget(self._window, change_callback=self._notify_change)
-        sources_layout.addWidget(self._sources_editor)
+        sources_layout.addWidget(self._sources_editor, 1)
+        sources_layout.addWidget(self._build_beamlet_box())
 
         plasma_box = QGroupBox("Plasma model")
         plasma_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -896,12 +918,61 @@ class _ParticlesWorkspaceWidget(QWidget):
         plasma_layout.addWidget(self._shield_fields)
         plasma_layout.addStretch(1)
 
+        # --- Beam halo -------------------------------------------------------------
+        # Pimazzoni et al., Fus. Eng. Des. 192 (2023) 113621, Sec. 2: halo particles are born
+        # on the downstream chamfer of the plasma grid and aimed along its normal. Off unless
+        # asked for, so an existing case is unaffected.
+        halo_box = QGroupBox("Beam halo")
+        halo_layout = QVBoxLayout(halo_box)
+        halo_layout.setContentsMargins(8, 8, 8, 8)
+        halo_layout.setSpacing(8)
+
+        self._halo_enabled = QCheckBox("Emit beamlet halo from the plasma-grid chamfer")
+        self._halo_enabled.setToolTip(
+            "Adds halo particles born on the downstream chamfer of the plasma grid, aimed "
+            "along the local surface normal, following Pimazzoni et al., Fus. Eng. Des. 192 "
+            "(2023) 113621. Leave unchecked and no halo is emitted."
+        )
+        halo_layout.addWidget(self._halo_enabled)
+
+        self._halo_fraction = self._window._double_spin(0.1, 50.0, 2, 0.5)
+        self._halo_fraction.setToolTip(
+            "Halo current as a percentage of the total core source current. The reference "
+            "work fixes this at 8 %, and states that holding it independent of beamlet "
+            "perveance is the largest single uncertainty in its results. The halo "
+            "macroparticle count is the same fraction of the core count, so each halo "
+            "particle carries the same charge as a core one and the extra run time is just "
+            "this percentage."
+        )
+        self._halo_energy = self._window._double_spin(0.01, 1000.0, 3, 0.5)
+        self._halo_energy.setToolTip(
+            "Emission energy normal to the chamfer. The reference uses 4 eV and notes the "
+            "initial velocity is of minor relevance, because the field at the emission point "
+            "focuses these particles strongly."
+        )
+        self._halo_fields = _build_form_panel(
+            ("Halo current [% of core]", self._halo_fraction, None),
+            ("Halo axial energy [eV]", self._halo_energy, None),
+        )
+        halo_layout.addWidget(self._halo_fields)
+
+        self._halo_note = QLabel()
+        self._halo_note.setWordWrap(True)
+        self._halo_note.setStyleSheet("color: #666; font-size: 11px;")
+        halo_layout.addWidget(self._halo_note)
+        halo_layout.addStretch(1)
+
+        _connect_widget_change(self._halo_enabled, self._on_halo_toggled)
+        _connect_widget_change(self._halo_fraction, self._on_halo_toggled)
+        _connect_widget_change(self._halo_energy, self._notify_change)
+
         lower_panel = QWidget()
         lower_row = QHBoxLayout(lower_panel)
         lower_row.setContentsMargins(0, 0, 0, 0)
         lower_row.setSpacing(10)
         lower_row.addWidget(sources_box, 3)
         lower_row.addWidget(plasma_box, 2)
+        lower_row.addWidget(halo_box, 2)
         root.addWidget(lower_panel, 1)
 
         _connect_widget_change(self._plasma_model, self._on_plasma_model_changed)
@@ -913,6 +984,318 @@ class _ParticlesWorkspaceWidget(QWidget):
 
         self._sources_editor.refresh_particle_types(self._types_editor.get_particle_types())
         self._on_plasma_model_changed()
+        self._on_beamlets_changed()
+
+    # --- Multi-beamlet extraction ---------------------------------------------------
+    # The grid solids already tile their bore over an aperture pattern. This tiles the beam
+    # over the matching lattice, so a patterned geometry is fed one beamlet per aperture
+    # instead of one hand-placed source per aperture. Only the source centres move: every
+    # beamlet keeps the current density, particle count, energy and temperatures of the
+    # source it was replicated from, so the physics of a single beamlet is unchanged.
+
+    def _build_beamlet_box(self) -> QGroupBox:
+        box = QGroupBox("Multi-beamlet extraction")
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        self._beamlets_enabled = QCheckBox("Extract one beamlet per grid aperture")
+        self._beamlets_enabled.setToolTip(
+            "Replicates every source over a lattice of beamlets. Leave unchecked and a "
+            "single beamlet is extracted, exactly as before.\n\n"
+            "Each beamlet carries the full per-source current and particle count, so a "
+            "beamlet in an N-beamlet run is statistically identical to the same beamlet run "
+            "on its own -- but the total current, particle count, memory and run time all "
+            "scale with the number of beamlets."
+        )
+        layout.addWidget(self._beamlets_enabled)
+
+        self._beamlets_layout_cb = QComboBox()
+        self._beamlets_layout_cb.addItems(["rectangular-grid", "staggered-grid"])
+        self._beamlets_count_x = _ispin(1, 199, 5)
+        self._beamlets_count_y = _ispin(1, 199, 5)
+        self._beamlets_pitch_x = self._window._double_spin(0.0, 1.0, 6, 0.001)
+        self._beamlets_pitch_y = self._window._double_spin(0.0, 1.0, 6, 0.001)
+        self._beamlets_x_offset = self._window._double_spin(-1.0, 1.0, 6, 0.001)
+        self._beamlets_y_offset = self._window._double_spin(-1.0, 1.0, 6, 0.001)
+        self._beamlets_row_shift = self._window._double_spin(-1.0, 1.0, 6, 0.001)
+        self._beamlets_pitch_x.setValue(0.019)
+        self._beamlets_pitch_y.setValue(0.021)
+
+        self._beamlets_row_shift.setToolTip(
+            "Alternating row offset, following the grid geometry: even rows are shifted by "
+            "-this and odd rows by +this, so the row-to-row stagger is TWICE this value. "
+            "For a half-pitch stagger enter a quarter of the pitch."
+        )
+        self._beamlets_row_shift_row = _build_form_panel(
+            ("Row shift X [m]", self._beamlets_row_shift, None),
+        )
+        self._beamlets_fields = QWidget()
+        fields_layout = QVBoxLayout(self._beamlets_fields)
+        fields_layout.setContentsMargins(0, 0, 0, 0)
+        fields_layout.setSpacing(4)
+        fields_layout.addWidget(
+            _build_inline_row(
+                ("Layout", self._beamlets_layout_cb, 1),
+                ("Count X", self._beamlets_count_x, 0),
+                ("Count Y", self._beamlets_count_y, 0),
+            )
+        )
+        fields_layout.addWidget(
+            _build_inline_row(
+                ("Pitch X [m]", self._beamlets_pitch_x, 1),
+                ("Pitch Y [m]", self._beamlets_pitch_y, 1),
+            )
+        )
+        fields_layout.addWidget(
+            _build_inline_row(
+                ("X offset [m]", self._beamlets_x_offset, 1),
+                ("Y offset [m]", self._beamlets_y_offset, 1),
+            )
+        )
+        fields_layout.addWidget(self._beamlets_row_shift_row)
+
+        sync_button = QPushButton("Sync from grid aperture pattern")
+        sync_button.setToolTip(
+            "Copies the aperture pattern of the plasma grid into these fields, so every "
+            "beamlet is emitted into a real aperture. Nothing else keeps the two in step: "
+            "a mismatch fires beamlets at solid metal and the run will still complete."
+        )
+        sync_button.clicked.connect(self._sync_beamlets_from_geometry)
+        fields_layout.addWidget(sync_button)
+        layout.addWidget(self._beamlets_fields)
+
+        self._beamlets_note = QLabel()
+        self._beamlets_note.setWordWrap(True)
+        self._beamlets_note.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self._beamlets_note)
+
+        _connect_widget_change(self._beamlets_enabled, self._on_beamlets_changed)
+        for widget in (
+            self._beamlets_layout_cb,
+            self._beamlets_count_x,
+            self._beamlets_count_y,
+            self._beamlets_pitch_x,
+            self._beamlets_pitch_y,
+            self._beamlets_x_offset,
+            self._beamlets_y_offset,
+            self._beamlets_row_shift,
+        ):
+            _connect_widget_change(widget, self._on_beamlets_changed)
+
+        return box
+
+    def _beamlet_pattern(self) -> dict[str, object]:
+        """The block as the authoring spec carries it, whether enabled or not."""
+        layout_name = self._beamlets_layout_cb.currentText().strip() or "rectangular-grid"
+        pattern: dict[str, object] = {
+            "enabled": bool(self._beamlets_enabled.isChecked()),
+            "layout": layout_name,
+            "countX": int(self._beamlets_count_x.value()),
+            "countY": int(self._beamlets_count_y.value()),
+            "pitchXMeters": float(self._beamlets_pitch_x.value()),
+            "pitchYMeters": float(self._beamlets_pitch_y.value()),
+            "xOffsetMeters": float(self._beamlets_x_offset.value()),
+            "yOffsetMeters": float(self._beamlets_y_offset.value()),
+        }
+        if layout_name == "staggered-grid":
+            pattern["rowShiftXMeters"] = float(self._beamlets_row_shift.value())
+        return pattern
+
+    def _plasma_grid_aperture_pattern(self) -> dict[str, object] | None:
+        """The plasma grid's aperture pattern, found the way the runtime finds it.
+
+        Name first, then the solid that starts furthest upstream -- the same rule as
+        findPlasmaGrid in ParticleManager.cpp, so the GUI and the run agree on which solid
+        the beamlets belong to.
+        """
+        editor = self._window.widgets.get("geometry.solidsEditor")
+        if editor is None or not hasattr(editor, "get_solids"):
+            return None
+        try:
+            solids = editor.get_solids()
+        except Exception:                                       # noqa: BLE001
+            return None
+
+        upstream: tuple[float, dict] | None = None
+        for solid in solids:
+            if not isinstance(solid, dict):
+                continue
+            z_profile = solid.get("zProfileMeters")
+            if not isinstance(z_profile, list) or len(z_profile) < 2:
+                continue
+            name = str(solid.get("name") or "").strip().upper()
+            if name in {"PG", "PLASMA GRID", "PLASMAGRID"} or solid.get("role") == "plasmaGrid":
+                return solid.get("aperturePattern") if isinstance(solid.get("aperturePattern"), dict) else {}
+            try:
+                z_front = float(z_profile[0])
+            except (TypeError, ValueError):
+                continue
+            if upstream is None or z_front < upstream[0]:
+                upstream = (z_front, solid)
+
+        if upstream is None:
+            return None
+        pattern = upstream[1].get("aperturePattern")
+        return pattern if isinstance(pattern, dict) else {}
+
+    def _sync_beamlets_from_geometry(self) -> None:
+        pattern = self._plasma_grid_aperture_pattern()
+        if pattern is None:
+            self._beamlets_note.setText(
+                "No grid solid found to sync from. Define the geometry first."
+            )
+            return
+        if str(pattern.get("layout", "single")) == "single":
+            self._beamlets_note.setText(
+                "The plasma grid has a single aperture, so there is nothing to tile. Give it "
+                "a rectangular or staggered aperture pattern in the Geometry section first."
+            )
+            return
+
+        widgets = (
+            self._beamlets_layout_cb,
+            self._beamlets_count_x,
+            self._beamlets_count_y,
+            self._beamlets_pitch_x,
+            self._beamlets_pitch_y,
+            self._beamlets_x_offset,
+            self._beamlets_y_offset,
+            self._beamlets_row_shift,
+        )
+        _set_signal_blocked(widgets, True)
+        try:
+            set_combo_value(self._beamlets_layout_cb, str(pattern.get("layout")))
+            self._beamlets_count_x.setValue(int(pattern.get("countX", 1) or 1))
+            self._beamlets_count_y.setValue(int(pattern.get("countY", 1) or 1))
+            self._beamlets_pitch_x.setValue(float(pattern.get("pitchXMeters", 0.0) or 0.0))
+            self._beamlets_pitch_y.setValue(float(pattern.get("pitchYMeters", 0.0) or 0.0))
+            self._beamlets_x_offset.setValue(float(pattern.get("xOffsetMeters", 0.0) or 0.0))
+            self._beamlets_y_offset.setValue(float(pattern.get("yOffsetMeters", 0.0) or 0.0))
+            self._beamlets_row_shift.setValue(float(pattern.get("rowShiftXMeters", 0.0) or 0.0))
+        finally:
+            _set_signal_blocked(widgets, False)
+        self._on_beamlets_changed()
+
+    def _on_beamlets_changed(self) -> None:
+        enabled = self._beamlets_enabled.isChecked()
+        self._beamlets_fields.setEnabled(enabled)
+        staggered = self._beamlets_layout_cb.currentText().strip() == "staggered-grid"
+        self._beamlets_row_shift_row.setVisible(staggered)
+
+        if not enabled:
+            self._beamlets_note.setText("Single beamlet on the machine axis.")
+            self._on_halo_toggled()
+            return
+
+        try:
+            pattern = normalize_beamlet_pattern(self._beamlet_pattern())
+            offsets = beamlet_offsets(pattern) if pattern else []
+            warnings = beamlet_pattern_warnings(pattern, self._plasma_grid_aperture_pattern())
+        except Exception as error:                              # noqa: BLE001
+            self._beamlets_note.setText(str(error))
+            self._on_halo_toggled()
+            return
+
+        try:
+            per_beamlet = sum(
+                int(source.get("particleCount") or 0)
+                for source in self._sources_editor.get_sources()
+            )
+        except Exception:                                       # noqa: BLE001
+            per_beamlet = 0
+
+        xs = [offset[0] for offset in offsets] or [0.0]
+        ys = [offset[1] for offset in offsets] or [0.0]
+        lines = [
+            "{count} beamlets, {span_x:.1f} x {span_y:.1f} mm across. "
+            "{total:,} core macroparticles in total ({per:,} per beamlet).".format(
+                count=len(offsets),
+                span_x=1.0e3 * (max(xs) - min(xs)),
+                span_y=1.0e3 * (max(ys) - min(ys)),
+                total=per_beamlet * len(offsets),
+                per=per_beamlet,
+            ),
+            "Field mesh and memory scale with the beamlet count, not the particle count: "
+            "run this on Slurm, not the login node.",
+        ]
+        lines.extend(warnings)
+        mismatch = self._beamlet_geometry_mismatch()
+        if mismatch:
+            lines.append(mismatch)
+        domain = self._beamlet_domain_warning(offsets)
+        if domain:
+            lines.append(domain)
+        self._beamlets_note.setText(" ".join(lines))
+        self._on_halo_toggled()
+
+    def _beamlet_domain_warning(self, offsets: list[tuple[float, float]]) -> str:
+        """Warn when the lattice will not fit the field domain.
+
+        The runtime rejects a source whose footprint leaves geometry.domain, so without this
+        the first sign of a too-small domain is a failed run. Reported here instead, while
+        the domain is still one field away.
+        """
+        try:
+            domain_x = float(self._window.widgets["geometry.domain.x"].value())
+            domain_y = float(self._window.widgets["geometry.domain.y"].value())
+        except Exception:                                       # noqa: BLE001
+            return ""
+
+        half_width = 0.0
+        half_height = 0.0
+        try:
+            for source in self._sources_editor.get_sources():
+                uniform = source.get("uniform")
+                if isinstance(uniform, dict):
+                    half_width = max(half_width, 0.5 * float(uniform.get("widthMeters") or 0.0))
+                    half_height = max(half_height, 0.5 * float(uniform.get("heightMeters") or 0.0))
+        except Exception:                                       # noqa: BLE001
+            return ""
+
+        needed_x = 2.0 * (max(abs(offset[0]) for offset in offsets) + half_width)
+        needed_y = 2.0 * (max(abs(offset[1]) for offset in offsets) + half_height)
+        if needed_x <= domain_x + 1.0e-12 and needed_y <= domain_y + 1.0e-12:
+            return ""
+        return (
+            "The lattice needs a domain of at least {nx:.1f} x {ny:.1f} mm and the geometry "
+            "domain is {dx:.1f} x {dy:.1f} mm, so the run will be rejected. Enlarge "
+            "geometry.domain.".format(
+                nx=1.0e3 * needed_x, ny=1.0e3 * needed_y,
+                dx=1.0e3 * domain_x, dy=1.0e3 * domain_y,
+            )
+        )
+
+    def _beamlet_geometry_mismatch(self) -> str:
+        """Warn when the beamlet lattice and the grid aperture pattern have drifted apart."""
+        pattern = self._plasma_grid_aperture_pattern()
+        if not pattern or str(pattern.get("layout", "single")) == "single":
+            return (
+                "The plasma grid has no aperture pattern, so these beamlets are being fired "
+                "into a single-aperture grid."
+            )
+
+        differences: list[str] = []
+        for label, key, value in (
+            ("layout", "layout", self._beamlets_layout_cb.currentText().strip()),
+            ("count X", "countX", int(self._beamlets_count_x.value())),
+            ("count Y", "countY", int(self._beamlets_count_y.value())),
+            ("pitch X", "pitchXMeters", float(self._beamlets_pitch_x.value())),
+            ("pitch Y", "pitchYMeters", float(self._beamlets_pitch_y.value())),
+        ):
+            grid_value = pattern.get(key)
+            if isinstance(value, float):
+                if grid_value is None or abs(float(grid_value) - value) > 1.0e-9:
+                    differences.append(label)
+            elif str(grid_value) != str(value):
+                differences.append(label)
+
+        if not differences:
+            return ""
+        return (
+            "Does not match the grid aperture pattern ({}): some beamlets will be fired at "
+            "solid metal. Use 'Sync from grid aperture pattern'.".format(", ".join(differences))
+        )
 
     def _notify_change(self) -> None:
         self._window.schedule_preview_refresh()
@@ -927,6 +1310,43 @@ class _ParticlesWorkspaceWidget(QWidget):
             self._particle_family = new_family
         self._sources_editor.refresh_particle_types(self._types_editor.get_particle_types())
         self._notify_change()
+
+    def _on_halo_toggled(self) -> None:
+        """Grey out the halo inputs when disabled and show what it will cost."""
+        enabled = self._halo_enabled.isChecked()
+        self._halo_fields.setEnabled(enabled)
+        if not enabled:
+            self._halo_note.setText("No halo particles will be emitted.")
+        else:
+            try:
+                core = sum(int(src.get("particleCount") or 0)
+                           for src in self._sources_editor.get_sources())
+            except Exception:                                   # noqa: BLE001
+                core = 0
+            pct = float(self._halo_fraction.value())
+            # Per beamlet: each beamlet gets its own halo ring on its own aperture chamfer,
+            # carrying its own share of the current (ParticleManager.cpp, addBeamHalo).
+            beamlets = self._beamlet_multiplier()
+            extra = int(round(0.01 * pct * core)) * beamlets
+            core_total = core * beamlets
+            per_beamlet = (
+                " One ring per beamlet, on its own aperture chamfer." if beamlets > 1 else ""
+            )
+            self._halo_note.setText(
+                "Adds about {:,} macroparticles to the {:,} core particles "
+                "(+{:.1f}% run time and memory).{}".format(extra, core_total, pct, per_beamlet)
+            )
+        self._notify_change()
+
+    def _beamlet_multiplier(self) -> int:
+        """How many beamlets the current settings produce; 1 when disabled or invalid."""
+        if not getattr(self, "_beamlets_enabled", None) or not self._beamlets_enabled.isChecked():
+            return 1
+        try:
+            pattern = normalize_beamlet_pattern(self._beamlet_pattern())
+            return max(1, len(beamlet_offsets(pattern))) if pattern else 1
+        except Exception:                                       # noqa: BLE001
+            return 1
 
     def _on_plasma_model_changed(self) -> None:
         model = self._plasma_model.currentText().strip() or "nsimp"
@@ -949,7 +1369,26 @@ class _ParticlesWorkspaceWidget(QWidget):
         self._plasma_potential.setValue(float(plasma.get("plasmaPotentialVolts") or 0.0))
         self._tanh_width.setValue(float(plasma.get("tanhWidthEV") or 1.0))
         self._meniscus_voltage.setValue(float(plasma.get("meniscusVoltageVolts") or 0.0))
+
+        halo = particles.get("halo") if isinstance(particles.get("halo"), dict) else {}
+        self._halo_enabled.setChecked(bool(halo.get("enabled", False)))
+        self._halo_fraction.setValue(float(halo.get("currentFractionPercent") or 8.0))
+        self._halo_energy.setValue(float(halo.get("axialEnergyEV") or 4.0))
+
+        beamlets = particles.get("beamlets") if isinstance(particles.get("beamlets"), dict) else {}
+        self._beamlets_enabled.setChecked(bool(beamlets.get("enabled", False)))
+        set_combo_value(self._beamlets_layout_cb, str(beamlets.get("layout") or "rectangular-grid"))
+        self._beamlets_count_x.setValue(int(beamlets.get("countX") or 5))
+        self._beamlets_count_y.setValue(int(beamlets.get("countY") or 5))
+        self._beamlets_pitch_x.setValue(float(beamlets.get("pitchXMeters") or 0.019))
+        self._beamlets_pitch_y.setValue(float(beamlets.get("pitchYMeters") or 0.021))
+        self._beamlets_x_offset.setValue(float(beamlets.get("xOffsetMeters") or 0.0))
+        self._beamlets_y_offset.setValue(float(beamlets.get("yOffsetMeters") or 0.0))
+        self._beamlets_row_shift.setValue(float(beamlets.get("rowShiftXMeters") or 0.0))
+
+        self._on_halo_toggled()
         self._on_plasma_model_changed()
+        self._on_beamlets_changed()
 
     def get_particle_family(self) -> str:
         return self._types_editor.get_particle_family()
@@ -976,6 +1415,18 @@ class _ParticlesWorkspaceWidget(QWidget):
         else:
             particles["plasma"]["tanhWidthEV"] = float(self._tanh_width.value())
             particles["plasma"]["meniscusVoltageVolts"] = float(self._meniscus_voltage.value())
+        # Written only when enabled: an absent block means no halo, all the way down to the
+        # runtime, so a case cannot acquire one by defaulting.
+        if self._halo_enabled.isChecked():
+            particles["halo"] = {
+                "enabled": True,
+                "currentFractionPercent": float(self._halo_fraction.value()),
+                "axialEnergyEV": float(self._halo_energy.value()),
+            }
+        # Same rule as the halo: written only when enabled, so a single-beamlet case stays
+        # exactly the case it was and cannot acquire a lattice by defaulting.
+        if self._beamlets_enabled.isChecked():
+            particles["beamlets"] = self._beamlet_pattern()
         return particles
 
 
@@ -984,8 +1435,20 @@ def _connect_widget_change(widget, callback) -> None:
         widget.textChanged.connect(callback)
     elif isinstance(widget, QComboBox):
         widget.currentTextChanged.connect(callback)
-    else:
+    elif isinstance(widget, QCheckBox):
+        # Checkboxes have no valueChanged. Use toggled(bool) rather than stateChanged: it is
+        # the signal on QAbstractButton and is stable across Qt versions, whereas
+        # stateChanged is deprecated from Qt 6.7 in favour of checkStateChanged.
+        widget.toggled.connect(callback)
+    elif hasattr(widget, "valueChanged"):
         widget.valueChanged.connect(callback)
+    else:
+        # Fail loudly and usefully rather than with a bare AttributeError from a signal that
+        # happens not to exist on whatever was passed in.
+        raise TypeError(
+            "_connect_widget_change does not know how to observe %s; add a branch for it"
+            % type(widget).__name__
+        )
 
 
 def _set_signal_blocked(widgets, blocked: bool) -> None:

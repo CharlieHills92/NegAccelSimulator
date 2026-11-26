@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from .common import (
@@ -32,6 +33,8 @@ from .visualization import (
     TRAJECTORY_COLOR_MODE_SINGLE,
     TRAJECTORY_COLOR_MODE_SPECIES,
     TRAJECTORY_COLOR_MODE_STATUS,
+    TRAJECTORY_COLLISIONS_3D_MODE,
+    TRAJECTORY_POWER_SURFACE_3D_MODE,
     TrajectoryRenderOptions,
     configure_matplotlib_toolbar,
 )
@@ -60,6 +63,8 @@ ARTIFACT_TYPES = [ARTIFACT_TYPE_VTK, ARTIFACT_TYPE_PNG, ARTIFACT_TYPE_TEXT]
 TRAJECTORY_VTK_MODES = [
     "Cross-section",
     "3D trajectories",
+    TRAJECTORY_COLLISIONS_3D_MODE,
+    TRAJECTORY_POWER_SURFACE_3D_MODE,
     "Phase space x-x'",
     "Phase space y-y'",
 ]
@@ -453,6 +458,81 @@ class ResultsMixin:
         self._ensure_result_widgets()
         return self.visualization_tab
 
+    def load_runtime_case_into_visualization(
+        self,
+        runtime_case: dict,
+        runtime_path: Path,
+        label: str | None = None,
+    ) -> int:
+        """Point the Visualization tab at a different runtime case and show it.
+
+        Returns the number of artifacts found for the selected category/type.
+
+        Setting current_runtime_case/current_runtime_path alone is NOT enough. The file
+        list is built by refresh_vtk_files() from _resolve_visualization_entries(), which
+        filters the catalogue by whatever the Category and Artifact-type combos currently
+        say. Those combos still hold the selection made for the PREVIOUS case, and the
+        categories are not populated uniformly -- e.g. "General outputs" carries only VTK,
+        with no PNG plots or text outputs. So a case can have hundreds of artifacts and
+        still display "No png plots available in general outputs yet." purely because the
+        stale pair selects an empty slice.
+
+        This therefore re-picks a (category, artifact type) pair that actually has
+        artifacts in the new case, preferring to keep the user's current choice when it is
+        still valid.
+        """
+        self.current_runtime_case = runtime_case
+        self.current_runtime_path = runtime_path
+        if hasattr(self, "runtime_preview"):
+            self.runtime_preview.setPlainText(json.dumps(runtime_case, indent=2))
+
+        catalog = self._resolve_visualization_catalog()
+        available = {
+            (str(entry.get("category")), str(entry.get("artifactType")))
+            for entry in catalog
+        }
+
+        category = self.output_category_combo.currentText()
+        artifact_type = self.artifact_type_combo.currentText()
+
+        if available and (category, artifact_type) not in available:
+            # keep the category if it has anything, else take the first populated pair
+            # in the canonical order so the choice is deterministic
+            ordered = [
+                (c, a)
+                for c in OUTPUT_CATEGORIES
+                for a in ARTIFACT_TYPES
+                if (c, a) in available
+            ]
+            same_category = [pair for pair in ordered if pair[0] == category]
+            category, artifact_type = (same_category or ordered)[0]
+            self.output_category_combo.blockSignals(True)
+            self.output_category_combo.setCurrentText(category)
+            self.output_category_combo.blockSignals(False)
+
+        # repopulate the artifact-type combo against the NEW catalogue, then apply
+        self._refresh_artifact_type_options()
+        self.artifact_type_combo.blockSignals(True)
+        self.artifact_type_combo.setCurrentText(artifact_type)
+        self.artifact_type_combo.blockSignals(False)
+
+        self._refresh_visualization_options()
+        self.refresh_vtk_files()
+
+        found = len(self._resolve_visualization_entries())
+        if hasattr(self, "statusBar"):
+            name = label or runtime_path.stem
+            if catalog:
+                self.statusBar().showMessage(
+                    f"Visualizing '{name}': {found} {artifact_type.lower()} in "
+                    f"{category.lower()} ({len(catalog)} artifacts total)"
+                )
+            else:
+                self.statusBar().showMessage(
+                    f"Visualizing '{name}': no output artifacts found under {runtime_path.parent}"
+                )
+        return found
+
     def refresh_vtk_files(self) -> None:
         current_selection = self.visualization_file_combo.currentData()
         self.visualization_file_combo.blockSignals(True)
@@ -559,7 +639,24 @@ class ResultsMixin:
                             trajectory_options=trajectory_options,
                         )
                 else:
-                    if vtk_mode == "3D trajectories":
+                    if vtk_mode == TRAJECTORY_POWER_SURFACE_3D_MODE:
+                        runtime_case, _runtime_path = self._resolve_runtime_outputs()
+                        if runtime_case is None:
+                            raise RuntimeError("Runtime case is not available for power surface visualization")
+                        message = self.visualization_canvas.plot_vtk_collision_power_surface_3d(
+                            output_path,
+                            runtime_case,
+                        )
+                    elif vtk_mode == TRAJECTORY_COLLISIONS_3D_MODE:
+                        runtime_case, _runtime_path = self._resolve_runtime_outputs()
+                        if runtime_case is None:
+                            raise RuntimeError("Runtime case is not available for collision visualization")
+                        message = self.visualization_canvas.plot_vtk_collisions_3d(
+                            output_path,
+                            runtime_case,
+                            int(self.max_trajectories_spin.value()),
+                        )
+                    elif vtk_mode == "3D trajectories":
                         message = self.visualization_canvas.plot_vtk_3d(
                             output_path,
                             int(self.max_trajectories_spin.value()),
@@ -714,7 +811,10 @@ class ResultsMixin:
             (is_field_vtk and not is_line_plot)
             or vtk_mode in {"Cross-section", "Phase space x-x'", "Phase space y-y'"}
         )
-        needs_max_trajectories = is_vtk and vtk_group == "trajectory" and vtk_mode == "3D trajectories"
+        needs_max_trajectories = is_vtk and vtk_group == "trajectory" and vtk_mode in {
+            "3D trajectories",
+            TRAJECTORY_COLLISIONS_3D_MODE,
+        }
         needs_contour_lines = (
             is_scalar_field_vtk and self.scalar_display_mode_combo.currentText() == "Contour lines"
         )

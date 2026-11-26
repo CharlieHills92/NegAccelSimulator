@@ -19,6 +19,7 @@ from .common import (
     write_json,
 )
 from negaccel_app.workflow.post_processing import write_runtime_setup_summary
+from negaccel_app.workflow.scan_summary import write_case_summary
 
 
 _EXPLICIT_ITERATION_STATUS_PATTERN = re.compile(r"^Iteration\s+(\d+)\s*/\s*(\d+)\s*:\s*(.+?)\s*$")
@@ -158,6 +159,9 @@ class ExecutionMixin:
         self.process_output.appendPlainText(f"\n$ {display_command}\n")
         self.process.setWorkingDirectory(str(REPO_ROOT))
         self._stop_requested = False
+        # Remembered so on_process_finished can summarise the run it actually launched,
+        # rather than whatever the authoring form happens to hold by the time it finishes.
+        self._running_runtime_path = Path(runtime_path)
         self.process.start(program, arguments)
         if self.output_tabs is not None:
             self.output_tabs.setCurrentWidget(self.process_output)
@@ -197,12 +201,32 @@ class ExecutionMixin:
         elif exit_status == QProcess.ExitStatus.NormalExit and exit_code == 0:
             status_text = "Run completed!"
             self._set_simulation_status(status_text, self._simulation_progress_value("completed"))
+            self._write_case_summary_for_finished_run()
         else:
             status_text = f"Run failed (exit code {exit_code})"
             self._set_simulation_status(status_text, None)
 
         self._stop_requested = False
         self.statusBar().showMessage(status_text)
+
+    def _write_case_summary_for_finished_run(self) -> None:
+        """Write the headline .txt for a run launched outside the scan manager.
+
+        The scan manager already exports the same table for every case it runs; a solo run
+        had no equivalent, so its impact power, divergence and loss breakdown were only
+        reachable by opening the individual Summary/ files. Failure here is reported to the
+        log and never raised: the run itself succeeded, and losing the summary must not
+        present itself as a failed simulation.
+        """
+        runtime_path = getattr(self, "_running_runtime_path", None)
+        if runtime_path is None:
+            return
+        try:
+            written = write_case_summary(Path(runtime_path))
+        except Exception as exc:                                   # noqa: BLE001
+            self.append_log(f"Case summary not written: {type(exc).__name__}: {exc}")
+            return
+        self.append_log(f"Case summary written: {written}")
 
     def append_process_output(self) -> None:
         data = bytes(self.process.readAllStandardOutput()).decode("utf-8", errors="replace")

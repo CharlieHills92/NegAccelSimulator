@@ -65,12 +65,20 @@ bool particle_kind_is_positive_ion(particle_kind kind);
  */
 bool is_unextracted_primary_negative_ion(double mass, double charge, double vz, int gen,
                                          double ION_MASS);
-double density_at_z( double zc, double pressure, vector<double>& pos, vector<double>& dens, bool & ciaone );
+/*! \brief Background-gas density at axial position \a zc.
+ *
+ *  Called on every integration step of every particle from the gas callbacks, and from
+ *  several worker threads at once. Both profile vectors are taken by const reference: they
+ *  used to be passed by value all the way down into _interp1, which copied the entire
+ *  density profile twice per call -- a heap allocation in the innermost loop of the
+ *  simulation, and allocator contention once that loop is threaded.
+ */
+double density_at_z( double zc, double pressure, const vector<double>& pos, const vector<double>& dens, bool & ciaone );
 void load_density_profile( string filename, vector<double>& pos, vector<double>& dens );
 /// 1 D interpolation of a float in a interval of 2 float
 double interp1(double x1,double x2, double y1, double y2, double xi);
 /// 1 D interpolation of  a float wrt 2 vectors yi=interp1(x,y,xi);
-double _interp1(vector<double> x, vector<double> y, double xi, bool & found);
+double _interp1(const vector<double>& x, const vector<double>& y, double xi, bool & found);
 
 
 

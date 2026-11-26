@@ -170,6 +170,114 @@ int classifyGridPowerRowId(Particle3D& particle, const Geometry* geometry, doubl
 
 } // namespace
 
+
+/**
+ * @brief Reduce one plane's trajectory data to beam statistics.
+ *
+ * Three deliberate departures from what this code used to do inline:
+ *
+ * 1. SPECIES SELECTION. The old code fed every macroparticle crossing the plane into one
+ *    set of numbers -- the H- beam, the neutrals it stripped into, the secondary electrons,
+ *    the slow ions from gas reactions, everything. In the last iteration, which is the only
+ *    one that generates secondaries, that is a different population by more than an order
+ *    of magnitude, which is why the "beam" columns jumped there. beam_species_only keeps
+ *    just the primary negative ion, which is the beam the accelerator is designed around.
+ *
+ * 2. NEUTRALS ARE EXCLUDED FROM THE CURRENT SUM. IQ is sign-carrying and, for a neutral
+ *    reaction product, is a particle-rate proxy rather than a current -- the child inherits
+ *    the parent's full IQ even though it carries no charge (THCallback.h
+ *    child_particle_current). Summing it into a current is meaningless and it double-counts
+ *    the parent it came from, so a stripping event appeared to double the beam current.
+ *    This applies the rule PowerStruct::add already uses: current comes from the signed
+ *    physical charge, and is exactly zero for a neutral.
+ *
+ * 3. WEIGHTS ARE |IQ|, AND DIVERGENCE IS WEIGHTED. Divergence used CalcolaDivergenza2,
+ *    which is an UNWEIGHTED stdev over macroparticles ("Not weighted avergae (on current!)"
+ *    -- my_diagnostics.cpp) so a swarm of near-isotropic low-current secondaries moved it
+ *    as much as the beam did. The current-weighted CalcolaDivergenza next to it is the
+ *    right estimator and is what is used here. Weighting uses |IQ| rather than signed IQ
+ *    because an all-species selection mixes positive and negative IQ, and signed weights
+ *    make the weighted centroid and mean angle meaningless (they can even sum to zero).
+ */
+DiagnosticsManager::PlaneStats
+DiagnosticsManager::computePlaneStats(const TrajectoryDiagnosticData& tdata,
+                                      bool beam_species_only) const {
+    PlaneStats stats;
+
+    const size_t n = tdata.traj_size();
+    vector<double> x_sel, y_sel, vx_sel, vy_sel, vz_sel, w_sel;
+    x_sel.reserve(n); y_sel.reserve(n);
+    vx_sel.reserve(n); vy_sel.reserve(n); vz_sel.reserve(n); w_sel.reserve(n);
+
+    double current_sum = 0.0;
+
+    for (size_t i = 0; i < n; ++i) {
+        // UNIT CARE: trajectories_at_plane reports DIAG_MASS in atomic mass units and
+        // DIAG_CHARGE in elementary charges (particledatabaseimp.hpp:256-261 divide by
+        // MASS_U and CHARGE_E), whereas identify_particle_species compares against absolute
+        // kg/C thresholds. Passing the raw columns through would classify EVERY particle as
+        // PARTICLE_WRONG and silently empty the beam selection.
+        const double mass_kg   = tdata(i,7) * MASS_U;    // DIAG_MASS  [u] -> [kg]
+        const double charge_C  = tdata(i,8) * CHARGE_E;  // DIAG_CHARGE [e] -> [C]
+        const double iq        = tdata(i,6);             // DIAG_CURR  [A]
+
+        if (beam_species_only) {
+            if (identify_particle_species(mass_kg, charge_C, ion_mass_u_) != PARTICLE_HM) {
+                continue;
+            }
+        }
+
+        // Only charged species contribute to a current.
+        if (charge_C != 0.0) {
+            current_sum += iq;
+        }
+
+        const double w = fabs(iq);
+        if (!std::isfinite(w)) {
+            continue;
+        }
+
+        x_sel.push_back(tdata(i,0));
+        y_sel.push_back(tdata(i,1));
+        vx_sel.push_back(tdata(i,3));
+        vy_sel.push_back(tdata(i,4));
+        vz_sel.push_back(tdata(i,5));
+        w_sel.push_back(w);
+    }
+
+    stats.macroparticles = x_sel.size();
+    stats.current_A = current_sum;
+    if (x_sel.empty()) {
+        return stats;
+    }
+
+    // Average/CalcolaAngolo/CalcolaDivergenza all divide by the weight sum; guard the case
+    // where every selected particle carries zero current (possible for a neutral-only
+    // selection whose IQ happens to be zero) rather than producing NaN columns.
+    double wsum = 0.0;
+    for (size_t i = 0; i < w_sel.size(); ++i) wsum += w_sel[i];
+    if (!(wsum > 0.0)) {
+        stats.x_min = min_vec(x_sel); stats.x_max = max_vec(x_sel);
+        stats.y_min = min_vec(y_sel); stats.y_max = max_vec(y_sel);
+        return stats;
+    }
+
+    stats.x_ave = Average(x_sel, w_sel);
+    stats.y_ave = Average(y_sel, w_sel);
+    stats.x_min = min_vec(x_sel);
+    stats.x_max = max_vec(x_sel);
+    stats.y_min = min_vec(y_sel);
+    stats.y_max = max_vec(y_sel);
+
+    stats.angle_x = CalcolaAngolo(vx_sel, vz_sel, w_sel);
+    stats.angle_y = CalcolaAngolo(vy_sel, vz_sel, w_sel);
+    stats.div_x = sqrt(2.0) * CalcolaDivergenza(vx_sel, vz_sel, w_sel, stats.angle_x);
+    stats.div_y = sqrt(2.0) * CalcolaDivergenza(vy_sel, vz_sel, w_sel, stats.angle_y);
+
+    return stats;
+}
+
+
 void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, int iteration, 
                                                const string& outfile, bool append_at_end, 
                                                const ParticleDataBase3D* pdb) {
@@ -201,8 +309,14 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
 
     // Write header if not appending
     if (!append_at_end) {
+        // Columns 3-13 describe the PRIMARY NEGATIVE ION BEAM alone (H- or D-, per the
+        // working species). The all-species totals follow at the end, so a run reports the
+        // beam it is accelerating separately from everything that beam has produced.
+        // Currents exclude neutrals, whose IQ is a particle-rate proxy rather than a
+        // current; Nbeam/Ntot are macroparticle counts, not physical particle counts.
         pout5 << "# it z[mm] I[mA] <x>[mm] xmax[mm] xmin[mm] <y>[mm] ymax[mm] ymin[mm] "
-              << "<x'>[mrad] <y'>[mrad] Dx[mrad] Dy[mrad] <V>[V] <B>[mT] rho[1/m3] sigma[m2]\n";
+              << "<x'>[mrad] <y'>[mrad] Dx[mrad] Dy[mrad] <V>[V] <B>[mT] rho[1/m3] sigma[m2] "
+              << "Itot[mA] <x'tot>[mrad] <y'tot>[mrad] Dxtot[mrad] Dytot[mrad] Nbeam Ntot\n";
     }
 
     for (size_t ii = 0; ii < diagzpos.size(); ii++) {
@@ -242,44 +356,25 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
             if (tdata.traj_size() > 0) {
             if (debug) std::cerr << "  Processing " << tdata.traj_size() << " particles for diagnostic calculations..." << std::endl << std::flush;
             
-            // Extract data into vectors using the correct access pattern (i,column) from ManageSimulation.cpp
-            vector<double> x_data, y_data, z_data, vx_data, vy_data, vz_data, curr_data;
-            size_t n_particles = tdata.traj_size();
-            
-            for (size_t i = 0; i < n_particles; ++i) {
-                x_data.push_back(tdata(i,0));    // DIAG_X is column 0
-                y_data.push_back(tdata(i,1));    // DIAG_Y is column 1
-                z_data.push_back(tdata(i,2));    // DIAG_Z is column 2
-                vx_data.push_back(tdata(i,3));   // DIAG_VX is column 3
-                vy_data.push_back(tdata(i,4));   // DIAG_VY is column 4
-                vz_data.push_back(tdata(i,5));   // DIAG_VZ is column 5
-                curr_data.push_back(tdata(i,6)); // DIAG_CURR is column 6
+            // Beam statistics for the primary negative ion, and separately for every
+            // species. See DiagnosticsManager::computePlaneStats for why the beam columns
+            // are species-selected, current-weighted and neutral-free.
+            const PlaneStats beam  = computePlaneStats(tdata, true);
+            const PlaneStats total = computePlaneStats(tdata, false);
+
+            double current_sum = beam.current_A;
+            double x_ave = beam.x_ave, y_ave = beam.y_ave;
+            double x_min = beam.x_min, x_max = beam.x_max;
+            double y_min = beam.y_min, y_max = beam.y_max;
+            double angle_x = beam.angle_x, angle_y = beam.angle_y;
+            double div_x = beam.div_x, div_y = beam.div_y;
+
+            if (debug) {
+                std::cerr << "  Beam (H-/D-) macroparticles: " << beam.macroparticles
+                          << " of " << total.macroparticles
+                          << ", I_beam = " << 1000*beam.current_A << " mA"
+                          << ", I_total = " << 1000*total.current_A << " mA" << std::endl << std::flush;
             }
-            
-            // Calculate statistics using the proper diagnostic functions
-            double current_sum = sumcurrent(curr_data);
-            if (debug) std::cerr << "  Current data size: " << curr_data.size() << std::endl << std::flush;
-            if (debug && curr_data.size() > 0) {
-                std::cerr << "  First few current values: ";
-                for (size_t ii = 0; ii < std::min(size_t(5), curr_data.size()); ++ii) {
-                    std::cerr << curr_data[ii] << " ";
-                }
-                std::cerr << std::endl << std::flush;
-            }
-            if (debug) std::cerr << "  Current sum calculated: " << current_sum << " A (" << 1000*current_sum << " mA)" << std::endl << std::flush;
-            
-            double x_ave = Average(x_data, curr_data);
-            double y_ave = Average(y_data, curr_data);
-            double x_min = min_vec(x_data);
-            double x_max = max_vec(x_data);
-            double y_min = min_vec(y_data);
-            double y_max = max_vec(y_data);
-            
-            // Calculate angles and divergences using the diagnostic functions
-            double angle_x = CalcolaAngolo(vx_data, vz_data, curr_data);
-            double angle_y = CalcolaAngolo(vy_data, vz_data, curr_data);
-            double div_x = sqrt(2.0) * CalcolaDivergenza2(vx_data, vz_data, curr_data, angle_x);
-            double div_y = sqrt(2.0) * CalcolaDivergenza2(vy_data, vz_data, curr_data, angle_y);
             
             // Additional field calculations (use default values when field objects not available)
             Vec3D pos3d(0.0, 0.0, zloc);
@@ -305,31 +400,38 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                   << 1000*bfield_val << " "
                   << density_val << " "
                   << sigma_val << " "
+                  << 1000*total.current_A << " "
+                  << 1000*total.angle_x << " "
+                  << 1000*total.angle_y << " "
+                  << 1000*total.div_x << " "
+                  << 1000*total.div_y << " "
+                  << beam.macroparticles << " "
+                  << total.macroparticles << " "
                   << "\n" << flush;
         } else {
             if (debug) std::cerr << "  No particles found at z=" << zloc << ". Writing zeros." << std::endl << std::flush;
             if (debug) logfile << "DEBUG: No particles intercepting at z position " << zloc << " m. Skipping." << endl;
-            // Write zeros for this z position (17 columns total)
+            // Write zeros for this z position (24 columns total)
             pout5 << iteration << " "
                   << 1000*zloc << " "
-                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
+                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
         }
         } catch (const Error& e) {
             if (debug) std::cerr << "DEBUG: IBSimu Error caught at z=" << zloc << " m" << std::endl << std::flush;
             if (debug) logfile << "DEBUG: Error in trajectory diagnostics at z=" << zloc 
                                << " m: IBSIMU Error. Writing zeros." << endl;
-            // Write zeros for this z position due to error (17 columns total)
+            // Write zeros for this z position due to error (24 columns total)
             pout5 << iteration << " "
                   << 1000*zloc << " "
-                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
+                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
         } catch (const std::exception& e) {
             if (debug) std::cerr << "DEBUG: Standard exception caught at z=" << zloc << " m: " << e.what() << std::endl << std::flush;
             if (debug) logfile << "DEBUG: Standard exception in trajectory diagnostics at z=" << zloc 
                                << " m: " << e.what() << ". Writing zeros." << endl;
-            // Write zeros for this z position due to error (17 columns total)
+            // Write zeros for this z position due to error (24 columns total)
             pout5 << iteration << " "
                   << 1000*zloc << " "
-                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
+                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n" << flush;
         }
     }
     
@@ -656,7 +758,10 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
     } else {
         pout5.open(outfile.c_str());
         // Write header only when creating new file
-        pout5 << "# it z[mm] I[mA] <x>[mm] xmax[mm] xmin[mm] <y>[mm] ymax[mm] ymin[mm] <x'>[mrad] <y'>[mrad] Dx[mrad] Dy[mrad] <V>[V] <B>[mT] rho[1/m3] sigma[m2]" << endl;
+        // See the matching header in the field-less overload for what these columns mean.
+        pout5 << "# it z[mm] I[mA] <x>[mm] xmax[mm] xmin[mm] <y>[mm] ymax[mm] ymin[mm] "
+              << "<x'>[mrad] <y'>[mrad] Dx[mrad] Dy[mrad] <V>[V] <B>[mT] rho[1/m3] sigma[m2] "
+              << "Itot[mA] <x'tot>[mrad] <y'tot>[mrad] Dxtot[mrad] Dytot[mrad] Nbeam Ntot" << endl;
     }
 
     for (size_t i = 0; i < diagzpos.size(); ++i) {
@@ -703,43 +808,24 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
             if (particle_count > 0) {
                 if (debug) std::cerr << "  Processing " << particle_count << " particles for diagnostic calculations..." << std::endl << std::flush;
                 
-                // Extract data into vectors using the correct access pattern
-                vector<double> x_data, y_data, z_data, vx_data, vy_data, vz_data, curr_data;
-                
-                for (size_t j = 0; j < particle_count; ++j) {
-                    x_data.push_back(tdata(j,0));    // DIAG_X is column 0
-                    y_data.push_back(tdata(j,1));    // DIAG_Y is column 1
-                    z_data.push_back(tdata(j,2));    // DIAG_Z is column 2
-                    vx_data.push_back(tdata(j,3));   // DIAG_VX is column 3
-                    vy_data.push_back(tdata(j,4));   // DIAG_VY is column 4
-                    vz_data.push_back(tdata(j,5));   // DIAG_VZ is column 5
-                    curr_data.push_back(tdata(j,6)); // DIAG_CURR is column 6
+                // Beam statistics for the primary negative ion, and separately for every
+                // species. See DiagnosticsManager::computePlaneStats.
+                const PlaneStats beam  = computePlaneStats(tdata, true);
+                const PlaneStats total = computePlaneStats(tdata, false);
+
+                double current_sum = beam.current_A;
+                double x_ave = beam.x_ave, y_ave = beam.y_ave;
+                double x_min = beam.x_min, x_max = beam.x_max;
+                double y_min = beam.y_min, y_max = beam.y_max;
+                double angle_x = beam.angle_x, angle_y = beam.angle_y;
+                double div_x = beam.div_x, div_y = beam.div_y;
+
+                if (debug) {
+                    std::cerr << "  Beam (H-/D-) macroparticles: " << beam.macroparticles
+                              << " of " << total.macroparticles
+                              << ", I_beam = " << 1000*beam.current_A << " mA"
+                              << ", I_total = " << 1000*total.current_A << " mA" << std::endl << std::flush;
                 }
-                
-                // Calculate statistics using the proper diagnostic functions
-                double current_sum = sumcurrent(curr_data);
-                if (debug) std::cerr << "  Current data size: " << curr_data.size() << std::endl << std::flush;
-                if (debug && curr_data.size() > 0) {
-                    std::cerr << "  First few current values: ";
-                    for (size_t ii = 0; ii < std::min(size_t(5), curr_data.size()); ++ii) {
-                        std::cerr << curr_data[ii] << " ";
-                    }
-                    std::cerr << std::endl << std::flush;
-                }
-                if (debug) std::cerr << "  Current sum calculated: " << current_sum << " A (" << 1000*current_sum << " mA)" << std::endl << std::flush;
-                
-                double x_ave = Average(x_data, curr_data);
-                double y_ave = Average(y_data, curr_data);
-                double x_min = min_vec(x_data);
-                double x_max = max_vec(x_data);
-                double y_min = min_vec(y_data);
-                double y_max = max_vec(y_data);
-                
-                // Calculate angles and divergences using the diagnostic functions
-                double angle_x = CalcolaAngolo(vx_data, vz_data, curr_data);
-                double angle_y = CalcolaAngolo(vy_data, vz_data, curr_data);
-                double div_x = sqrt(2.0) * CalcolaDivergenza2(vx_data, vz_data, curr_data, angle_x);
-                double div_y = sqrt(2.0) * CalcolaDivergenza2(vy_data, vz_data, curr_data, angle_y);
                 
                 // Field calculations using provided field objects
                 Vec3D pos3d(0.0, 0.0, zloc);
@@ -823,6 +909,13 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                       << 1000*bfield_val << " "    // Convert T to mT
                       << density_val << " "        // kg/m³
                       << sigma_val << " "          // m²
+                      << 1000*total.current_A << " "
+                      << 1000*total.angle_x << " "
+                      << 1000*total.angle_y << " "
+                      << 1000*total.div_x << " "
+                      << 1000*total.div_y << " "
+                      << beam.macroparticles << " "
+                      << total.macroparticles << " "
                       << endl << flush;
             } else {
                 if (debug) std::cerr << "  No particles found at z=" << zloc << std::endl << std::flush;
@@ -830,7 +923,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
                 // Write zeros for empty locations
                 pout5 << iteration << " "
                       << 1000*zloc << " "
-                      << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+                      << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
                       << endl << flush;
             }
             
@@ -840,7 +933,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
             // Write error entry
             pout5 << iteration << " "
                   << 1000*zloc << " "
-                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
                   << endl << flush;
         } catch (std::exception& e) {
             if (debug) std::cerr << "  Standard exception caught: " << e.what() << std::endl << std::flush;
@@ -848,7 +941,7 @@ void DiagnosticsManager::generateDiagnosticData(const vector<double>& diagzpos, 
             // Write error entry
             pout5 << iteration << " "
                   << 1000*zloc << " "
-                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+                  << "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
                   << endl << flush;
         }
     }
@@ -865,10 +958,67 @@ namespace {
 // ---------------------------------------------------------------------------------------
 
 /// One impact or emission, ready to be binned onto the boundary triangulation.
+/// Power-density channels written side by side in the density map, so one file answers
+/// "which species put this heat here?".
+///
+/// The species channels partition the arriving load: PD_HM..PD_H3P plus PD_OTHER sum to
+/// PD_TOTAL exactly. The two electron sub-channels are a FURTHER split of PD_E and so
+/// OVERLAP it -- "secondary electron" means two different populations here: electrons
+/// emitted from an electrode surface (raw gen >= 100, the EAMCC surface model) and electrons
+/// born in the gas by stripping or ionisation (gen < 100). Summing PD_E with either
+/// sub-channel double-counts.
+enum PdChannel {
+    PD_TOTAL = 0,
+    PD_HM,          // H-, the primary beam
+    PD_H0,
+    PD_HP,
+    PD_H2P,
+    PD_H20,
+    PD_H3P,
+    PD_E,           // electrons, all origins
+    PD_E_SURF,      // electrons emitted from a surface (subset of PD_E)
+    PD_E_VOL,       // electrons born in the gas        (subset of PD_E)
+    PD_OTHER,       // species the runtime could not classify
+    N_PD_CH
+};
+
+const char* const PD_CHANNEL_NAME[N_PD_CH] = {
+    "Pd_Total_MW_per_m2",
+    "Pd_Hminus_MW_per_m2",
+    "Pd_H0_MW_per_m2",
+    "Pd_Hplus_MW_per_m2",
+    "Pd_H2plus_MW_per_m2",
+    "Pd_H2neutral_MW_per_m2",
+    "Pd_H3plus_MW_per_m2",
+    "Pd_Electrons_MW_per_m2",
+    "Pd_ElectronsSurface_MW_per_m2",
+    "Pd_ElectronsVolume_MW_per_m2",
+    "Pd_Unclassified_MW_per_m2"
+};
+
+/// particle_kind (funct.h, 0..6) -> species channel. Anything else is a classification
+/// failure and is kept visible in PD_OTHER rather than folded into a real species.
+int pdSpeciesChannel(int kind) {
+    switch (kind) {
+        case PARTICLE_HM:  return PD_HM;    case PARTICLE_H0:  return PD_H0;
+        case PARTICLE_HP:  return PD_HP;    case PARTICLE_H2P: return PD_H2P;
+        case PARTICLE_H20: return PD_H20;   case PARTICLE_H3P: return PD_H3P;
+        case PARTICLE_E:   return PD_E;
+        default: return PD_OTHER;
+    }
+}
+
+/// Same origin rule as breakdownOriginName() below: raw gen >= 100 came off a surface.
+bool pdBornOnSurface(int gen) { return gen >= 100; }
+
 struct SurfaceDeposit {
     Vec3D loc;
     double power_W;   ///< positive for an arrival, negative for an emission
     int row_id;
+    int kind;         ///< particle_kind of the depositing particle
+    int gen;          ///< raw generation, for the surface/volume electron split
+
+    SurfaceDeposit() : power_W(0.0), row_id(-1), kind(PARTICLE_WRONG), gen(0) {}
 };
 
 /// Lowest grid-power row id that corresponds to an actual defined solid.
@@ -889,9 +1039,15 @@ struct TriangleLoad {
     size_t impacts;
     int row_id;          ///< row of the FIRST contributing deposit; see mixed_row_triangles
     bool mixed_rows;
+    /// Per-species ARRIVING power [W]. Gross, not net: emissions are excluded, so these
+    /// reconcile with the per-species <tag>_<species>_grid_power_summary.txt files and sum
+    /// to gross_power_W. The net/gross distinction only exists for the total.
+    double chan_W[N_PD_CH];
 
     TriangleLoad()
-        : net_power_W(0.0), gross_power_W(0.0), impacts(0), row_id(-1), mixed_rows(false) {}
+        : net_power_W(0.0), gross_power_W(0.0), impacts(0), row_id(-1), mixed_rows(false) {
+        for (int c = 0; c < N_PD_CH; c++) chan_W[c] = 0.0;
+    }
 };
 
 /// Squared distance from point p to triangle (v1,v2,v3).
@@ -1250,6 +1406,10 @@ void writePowerDensityMap(const std::string& vtk_folder,
     // count, wetted area and max density are necessarily triangle-attributed, and the
     // mixed-row count below says how often that attribution is ambiguous.
     std::map<int, double> row_deposit_net_power;
+    // Per-row gross arrival power by species channel, summed from the deposits for the same
+    // reason as row_deposit_net_power: exact, and independent of triangle attribution, so it
+    // reconciles with the per-species <tag>_<species>_grid_power_summary.txt files.
+    std::map<int, std::vector<double> > row_chan_W;
     size_t mixed_row_triangles = 0;
 
     // Deposits that are not on a surface at all: the domain boundary planes and In_volume.
@@ -1266,6 +1426,16 @@ void writePowerDensityMap(const std::string& vtk_folder,
         }
 
         row_deposit_net_power[dep.row_id] += dep.power_W;
+
+        if (dep.power_W > 0.0) {
+            std::vector<double>& rc = row_chan_W[dep.row_id];
+            if (rc.empty()) rc.assign(N_PD_CH, 0.0);
+            rc[PD_TOTAL] += dep.power_W;
+            const int sc = pdSpeciesChannel(dep.kind);
+            rc[sc] += dep.power_W;
+            if (sc == PD_E)
+                rc[pdBornOnSurface(dep.gen) ? PD_E_SURF : PD_E_VOL] += dep.power_W;
+        }
 
         const int32_t tri = nearestSurfaceTriangle(*geometry, dep.loc);
 
@@ -1286,6 +1456,13 @@ void writePowerDensityMap(const std::string& vtk_folder,
         if (dep.power_W > 0.0) {
             load.gross_power_W += dep.power_W;
             load.impacts++;
+            // Species channels are gross arrivals only; an emission carries negative power
+            // and belongs to the net total, not to "power deposited by species X".
+            load.chan_W[PD_TOTAL] += dep.power_W;
+            const int sc = pdSpeciesChannel(dep.kind);
+            load.chan_W[sc] += dep.power_W;
+            if (sc == PD_E)
+                load.chan_W[pdBornOnSurface(dep.gen) ? PD_E_SURF : PD_E_VOL] += dep.power_W;
         }
         if (load.row_id < 0) {
             load.row_id = dep.row_id;
@@ -1326,6 +1503,9 @@ void writePowerDensityMap(const std::string& vtk_folder,
     std::vector<float> area_cm2(tri_indices.size(), 0.0f);
     std::vector<int32_t> impacts(tri_indices.size(), 0);
     std::vector<int32_t> row_of_triangle(tri_indices.size(), -1);
+    // Per-species density [MW/m^2], one array per channel.
+    std::vector<std::vector<float> > chan_mw_m2(
+        N_PD_CH, std::vector<float>(tri_indices.size(), 0.0f));
 
     // Per-row aggregates. Wetted area only -- see the file header note.
     std::map<int, double> wetted_area_m2;
@@ -1350,6 +1530,14 @@ void writePowerDensityMap(const std::string& vtk_folder,
         area_cm2[tt] = static_cast<float>(area_cm2_value);
         impacts[tt] = static_cast<int32_t>(load.impacts);
         row_of_triangle[tt] = load.row_id;
+
+        // 1 W/cm^2 = 1e-2 MW/m^2; guard the degenerate-triangle case as above.
+        for (int c = 0; c < N_PD_CH; c++) {
+            chan_mw_m2[c][tt] = (area_cm2_value > 1e-12)
+                                    ? static_cast<float>(1.0e-2 * load.chan_W[c]
+                                                         / area_cm2_value)
+                                    : 0.0f;
+        }
 
         if (load.impacts > 0) {
             wetted_area_m2[load.row_id] += area;
@@ -1401,6 +1589,8 @@ void writePowerDensityMap(const std::string& vtk_folder,
         writeVTKFloatScalars(vtk, "area_cm2", area_cm2);
         writeVTKIntScalars(vtk, "impacts", impacts);
         writeVTKIntScalars(vtk, "row_id", row_of_triangle);
+        for (int c = 0; c < N_PD_CH; c++)
+            writeVTKFloatScalars(vtk, PD_CHANNEL_NAME[c], chan_mw_m2[c]);
         vtk << "\n";
         vtk.close();
         ibsimu.message(1) << "Power density map saved to: " << vtk_filename << endl;
@@ -1438,6 +1628,13 @@ void writePowerDensityMap(const std::string& vtk_folder,
             << "attributed to more than one row, so their area is credited to the row of "
             << "the first deposit only." << endl;
     }
+    txt << "# The VTK file also carries one power-density array per species, in MW/m2, named "
+        << "Pd_<species>_MW_per_m2. Those are GROSS arrivals -- emissions are not netted out "
+        << "of them -- so they sum to gross_power_W and reconcile with the per-species "
+        << "<tag>_<species>_grid_power_summary.txt files, NOT with the net density above. "
+        << "Pd_ElectronsSurface and Pd_ElectronsVolume are a further split of Pd_Electrons "
+        << "(surface-emitted vs born in the gas) and OVERLAP it; adding all three "
+        << "double-counts. The per-row totals of every channel are tabulated below." << endl;
     txt << "# RowID\tTriangles\tWettedArea[cm2]\tNetPower[W]\tMeanDensity[W/cm2]"
         << "\tMaxDensity[W/cm2]\tUnbinnedPower[W]\tUnbinnedDeposits\tIncludeInTotal"
         << "\tDescription" << endl;
@@ -1470,6 +1667,23 @@ void writePowerDensityMap(const std::string& vtk_folder,
             << unb << "\t" << unb_n << "\t"
             << (gridPowerIncludeInTotal(params, include_map, row_id) ? "true" : "false")
             << "\t" << gridPowerRowName(params, row_id) << endl;
+    }
+
+    // ---- Per-species gross arrival power, per row -------------------------------------
+    // Written as its own block with a Channel column so a reader can check any single
+    // species against that species' own grid power summary without opening ParaView.
+    txt << "# ChannelRow\tRowID\tChannel\tGrossPower[W]\tShareOfRowTotal[%]" << endl;
+    for (std::vector<int>::const_iterator id_it = row_ids.begin();
+         id_it != row_ids.end(); ++id_it) {
+        const int row_id = *id_it;
+        if (row_id < FIRST_SOLID_ROW_ID) continue;
+        std::map<int, std::vector<double> >::const_iterator rit = row_chan_W.find(row_id);
+        if (rit == row_chan_W.end()) continue;
+        const std::vector<double>& rc = rit->second;
+        for (int c = 0; c < N_PD_CH; c++) {
+            txt << "ChannelRow\t" << row_id << "\t" << PD_CHANNEL_NAME[c] << "\t" << rc[c]
+                << "\t" << (rc[PD_TOTAL] > 0.0 ? 100.0 * rc[c] / rc[PD_TOTAL] : 0.0) << endl;
+        }
     }
 
     // Deposits whose row_id fell outside the configured rows entirely.
@@ -1656,6 +1870,8 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
                 dep.loc = Vec3D(pow.xdata[jj], pow.ydata[jj], pow.zdata[jj]);
                 dep.power_W = pow.wdata[jj];
                 dep.row_id = static_cast<int>(ss);
+                dep.kind = pow.kinddata[jj];
+                dep.gen = pow.gendata[jj];
                 deposits.push_back(dep);
             }
         }
@@ -1702,6 +1918,8 @@ std::vector<double> DiagnosticsManager::analyzeGridPowerLoads(const ParticleData
                     dep.loc = events[ee].loc;
                     dep.power_W = events[ee].power_W;   // already negative
                     dep.row_id = static_cast<int>(ss);
+                    dep.kind = events[ee].kind;
+                    dep.gen = events[ee].gen;
                     deposits.push_back(dep);
                 }
             } else {

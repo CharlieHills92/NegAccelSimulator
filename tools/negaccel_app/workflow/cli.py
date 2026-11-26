@@ -12,6 +12,7 @@ from .common import WorkflowError
 from .post_processing import write_case_diagnostics_aggregation, write_scan_synthesis
 from .runtime import materialize_authored_case, materialize_case
 from .scan import expand_scan, run_scan
+from .scan_summary import write_case_summary
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,6 +82,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     aggregate_parser.add_argument("--output", help="Output path for the aggregated diagnostics JSON.")
 
+    case_summary_parser = subparsers.add_parser(
+        "case-summary",
+        help="Write the headline comparison .txt for one finished run (the same table the "
+             "scan manager exports, for a run made outside it).",
+    )
+    case_summary_parser.add_argument(
+        "case_source",
+        help="Case JSON path or case output directory containing the resolved runtime JSON.",
+    )
+    case_summary_parser.add_argument(
+        "--output",
+        help="Output path. Defaults to <run root>/Summary/<caseTag>_case_summary.txt.",
+    )
+
     synthesize_parser = subparsers.add_parser(
         "synthesize-scan",
         help="Aggregate retained diagnostics across all cases listed in a scan manifest.",
@@ -108,6 +123,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             output_path = Path(args.output).resolve() if args.output else None
             case_path = materialize_authored_case(authoring_path, output_path, args.case_tag, args.overrides)
             print(case_path.as_posix())
+            return 0
+
+        if args.command == "case-summary":
+            written = write_case_summary(
+                Path(args.case_source).resolve(),
+                Path(args.output).resolve() if args.output else None,
+            )
+            print(written.as_posix())
             return 0
 
         if args.command == "expand-scan":

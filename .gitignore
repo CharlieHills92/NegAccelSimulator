@@ -68,3 +68,48 @@ __pycache__/
 
 # OS files
 .DS_Store
+
+# ---------------------------------------------------------------------------
+# Code-only policy: this repository holds the simulator, not what it produces.
+# Authored cases, their materialized runtime twins and every analysis artefact
+# stay local. Geometry templates under tools/Templates/ are deliberately NOT
+# ignored -- the GUI ships them.
+# ---------------------------------------------------------------------------
+
+# Local tooling / editor state
+.claude/
+.mcp.json
+.idea/
+.vscode
+
+# Authored case files and the runtime cases materialized from them
+Updates_Trial_*
+Multi_beamlet-*
+*_rt.json
+*_bench.json
+cycA_*.json
+cycB_*.json
+heatA_*.json
+heatB_*.json
+heatC_*.json
+fixed_rt.json
+fldtest_rt.json
+
+# Analysis, reports and scratch areas
+Report/
+Compare/
+Cross-sections-1/
+MITICIInput/
+MTFInputFile/
+scratch_*/
+Full_i20_*/
+
+# MATLAB and extracted data
+*.mat
+*.m
+*.asv
+*.fig
+*.csv
+
+# Slurm job output
+*.out

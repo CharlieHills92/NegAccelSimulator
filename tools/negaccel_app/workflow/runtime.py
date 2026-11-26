@@ -72,16 +72,19 @@ def authored_to_runtime_case(authoring_spec: dict[str, Any], case_tag_override: 
         particle_configuration = build_particle_configuration(particles)
         runtime_particle_types = particle_configuration["particleTypes"]
         runtime_particle_sources: Any = particle_configuration["particleSources"]
+        runtime_beam_halo = particle_configuration["beamHalo"]
         simulation = build_simulation(
             run,
             particle_configuration["particleCount"],
             particle_configuration["plasma"],
             runtime_geometry,
+            beamlet_count=particle_configuration["beamletCount"],
         )
     else:
         particle_source = require_object(authoring_spec, "particleSource", "authoring specification")
         runtime_particle_sources = build_particle_sources(particle_source)
         simulation = build_simulation(run, runtime_geometry=runtime_geometry)
+        runtime_beam_halo = None     # legacy single-source path carries no halo
 
     validate_uniform_sources_within_domain(runtime_geometry, runtime_particle_sources)
     diagnostics = build_diagnostics(diagnostics_spec, runtime_geometry)
@@ -109,6 +112,11 @@ def authored_to_runtime_case(authoring_spec: dict[str, Any], case_tag_override: 
 
     if runtime_particle_types is not None:
         runtime_case["particleTypes"] = runtime_particle_types
+
+    # Omitted entirely when no halo was requested, so the runtime default (disabled) stands
+    # and an existing case is unchanged.
+    if runtime_beam_halo is not None:
+        runtime_case["beamHalo"] = runtime_beam_halo
 
     if runtime_execution is not None:
         runtime_case["execution"] = runtime_execution

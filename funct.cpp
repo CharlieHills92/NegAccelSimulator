@@ -3,6 +3,8 @@
 
 #include "constants.hpp"
 
+#include <atomic>
+
 
 namespace {
 
@@ -254,7 +256,7 @@ particle_kind int2kind(int num) {
 	return pk;
 }
 
-double density_at_z( double zc, double pressure, vector<double>& pos, vector<double>& dens, bool & ciaone ) {
+double density_at_z( double zc, double pressure, const vector<double>& pos, const vector<double>& dens, bool & ciaone ) {
 	
 	double target_n=_interp1(pos, dens, zc, ciaone);
 	
@@ -303,13 +305,16 @@ double interp1(double x1,double x2, double y1, double y2, double xi){
 	return y1+(xi-x1)*(y2-y1)/(x2-x1);
 }
 
-double _interp1(vector<double> x, vector<double> y, double xi, bool & found){
+double _interp1(const vector<double>& x, const vector<double>& y, double xi, bool & found){
 	found=false;
 	double yi=0;
-	if(xi==x[x.size()-1]){
-			   found=true; yi=y[x.size()-1];std::cout << yi <<" fatto!\n";
+	if(x.empty() || y.empty()) {
+		return yi;
 	}
-    
+	if(xi==x[x.size()-1]){
+			   found=true; yi=y[x.size()-1];
+	}
+
 	size_t j=1;
     if(xi>=x[0] && xi<=x[x.size()-1]) {
 	  while((found==false) && (j<x.size())) {
@@ -321,12 +326,19 @@ double _interp1(vector<double> x, vector<double> y, double xi, bool & found){
 	  }
 	}
 	if (!found) {
-      std::cout << "Warning: value out of range for 1D interpolation!\n";
-      std::cout <<"x: "<<x[x.size()-1] << ", xi: "<<xi;
-      std::cout <<", x-xi: "<<x[x.size()-1]-xi <<". \n";
-      //exit(1);
+      // Warn once. This runs on every integration step of every particle and from several
+      // worker threads at once, so the original unconditional three-line cout both
+      // dominated the run time and interleaved into unreadable output. The condition it
+      // reports -- a density profile that does not span the simulation domain -- is a
+      // property of the input file, so saying it once says everything it ever said.
+      static std::atomic<bool> warned(false);
+      bool expected = false;
+      if (warned.compare_exchange_strong(expected, true)) {
+        std::cout << "Warning: value out of range for 1D interpolation (suppressing repeats)!\n";
+        std::cout << "x: " << x[x.size()-1] << ", xi: " << xi;
+        std::cout << ", x-xi: " << x[x.size()-1]-xi << ". \n";
+      }
 	}
-    //  std::cout << "max x: "<< x[x.size()-1]*1000 <<" xi "<< xi*1000 <<" yi "<< yi*1000 <<" !\n";
     return yi;
 }
 

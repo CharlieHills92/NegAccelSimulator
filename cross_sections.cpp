@@ -1,7 +1,18 @@
 
 #include "cross_sections.h"
+#include <atomic>
 #include <cmath>
+#include <iostream>
 #include <map>
+
+// Physical ceiling on a single cross section, as a backstop against a runaway polynomial
+// fit. The largest legitimate value in this data set is negative_ion_single_stripping at
+// ~1.1e-19 m^2, and resonant charge exchange reaches ~1e-18 m^2 at low energy, so 1e-17
+// is roughly 100x anything real and cannot clip physics. It exists because a log10-sigma
+// polynomial evaluated outside its fitted range does not fail, it diverges: the
+// h0_process_2 fit reached 1.2e-7 m^2, a mean free path of 4e-13 m, and hence a collision
+// on every integration step. The primary defence is a correct maximumEnergyEV per process
+// (set from the fit's own data range); this catches the case where that is missing.
 //~ #include "src/pier/matlabfun.h"
 
 using namespace std;
@@ -39,7 +50,21 @@ double evaluate_configured_cross_section( const string& reaction_id,
 	}
 
 	const ConfiguredCrossSectionProcess& process = it->second;
-	double evaluation_energy = process.scale_energy_by_ion_mass ? energy*M_IONS : energy;
+
+	// Velocity-equivalence scaling. The .cross tables are tabulated against the LAB ENERGY
+	// OF A HYDROGEN projectile. A projectile of mass A (in u) at energy E has the velocity
+	// of a hydrogen projectile at E_H = E*(m_H/m_A) = E/A, so the table must be read at
+	// E/M_IONS. Fubiani et al. 2008 states the same convention: "we use the same cross
+	// sections as for the case of hydrogen for identical particle velocities (v_H = v_D)",
+	// with Fig. 4 noting E_0^(D) = 2 E_0^(H).
+	//
+	// This previously MULTIPLIED, evaluating a 1 MeV deuteron's cross section at 2 MeV
+	// instead of 500 keV -- a factor of 4 in the argument, on the falling side of sigma(E).
+	// Benchmarked against the paper's MAMuG case: multiplying gives 14.7% stripping loss
+	// against their quoted 29.0%, dividing gives 27.6%. It is a no-op for hydrogen
+	// (M_IONS = 1), which is why it stayed latent. Note THCallback_surf_EAMCC's RN/RE/
+	// eta_ion already divide (E0 = E0/mass_ratio); the two halves of the code disagreed.
+	double evaluation_energy = process.scale_energy_by_ion_mass ? energy/M_IONS : energy;
 	if( evaluation_energy <= 0.0 || !std::isfinite(evaluation_energy) ) {
 		return 0.0;
 	}
@@ -63,6 +88,25 @@ double evaluate_configured_cross_section( const string& reaction_id,
 	double sigma = pow(10.0, lg10Sigma);
 	if( !std::isfinite(sigma) || sigma < 0.0 ) {
 		return 0.0;
+	}
+
+	if( sigma > MAX_PHYSICAL_CROSS_SECTION_M2 ) {
+		// Warn once, naming the first offender, then clamp. Clamping rather than zeroing
+		// keeps the reaction present instead of silently deleting it, but the run is not
+		// trustworthy until the process gets a proper energy bound -- so say so loudly.
+		static std::atomic<bool> warned(false);
+		bool expected = false;
+		if( warned.compare_exchange_strong(expected, true) ) {
+			std::cerr << "WARNING: cross section for process '" << reaction_id
+			          << "' evaluated to " << sigma << " m^2 at " << evaluation_energy
+			          << " eV, above the physical ceiling of "
+			          << MAX_PHYSICAL_CROSS_SECTION_M2 << " m^2. This means its polynomial "
+			          << "fit is being extrapolated outside the energy range it was fitted "
+			          << "over. Set minimumEnergyEV/maximumEnergyEV for this process to the "
+			          << "range of its .cross data. Clamping; further such warnings are "
+			          << "suppressed." << std::endl;
+		}
+		sigma = MAX_PHYSICAL_CROSS_SECTION_M2;
 	}
 
 	return sigma;

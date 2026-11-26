@@ -19,7 +19,7 @@ def build_form(window) -> QFormLayout:
     window.widgets["surfaceInteractions.minimumImpactZMeters"] = minimum_impact_z
 
     max_secondary_electrons = QSpinBox()
-    max_secondary_electrons.setRange(0, 100000)
+    max_secondary_electrons.setRange(1, 100000)
     window.widgets["surfaceInteractions.maximumSecondaryElectrons"] = max_secondary_electrons
 
     secondary_energy = window._double_spin(0.0, 1.0e5, 3, 0.5)
@@ -53,11 +53,15 @@ def populate(window, spec: dict[str, object]) -> None:
     window.widgets["surfaceInteractions.minimumImpactZMeters"].setValue(
         float(surface.get("minimumImpactZMeters") or 0.0)
     )
+    # Default to the values the solver actually uses, not 0. These are now live inputs:
+    # a 0 cap would switch true secondary emission off and a 0 eV birth energy would
+    # create electrons at rest, so offering 0 as the resting state of the form invites
+    # exactly the two settings that cannot work.
     window.widgets["surfaceInteractions.maximumSecondaryElectrons"].setValue(
-        int(surface.get("maximumSecondaryElectrons") or 0)
+        int(surface.get("maximumSecondaryElectrons") or 26)
     )
     window.widgets["surfaceInteractions.secondaryElectronEnergyEV"].setValue(
-        float(surface.get("secondaryElectronEnergyEV") or 0.0)
+        float(surface.get("secondaryElectronEnergyEV") or 10.0)
     )
     window.widgets["surfaceInteractions.debug"].setChecked(bool(surface.get("debug", False)))
 

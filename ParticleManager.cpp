@@ -10,6 +10,9 @@
 #include "globals.h"
 #include "my_diagnostics.h"
 
+#include <random>
+#include <cstdlib>
+
 #include "particledatabase.hpp"
 #include "geometry.hpp"
 #include "ibsimu.hpp"
@@ -36,6 +39,65 @@ ParticleManager::ParticleManager() :
 
 ParticleManager::~ParticleManager() {
     resetParticles();
+}
+
+size_t ParticleManager::beamletSlotFor(int beamlet_index,
+                                       int column,
+                                       int row,
+                                       double center_x,
+                                       double center_y) {
+    // Several authored sources (different species, say) can feed the same beamlet, so the
+    // slot is keyed on the beamlet index and not on the source.
+    for (size_t s = 0; s < beamlet_tags.size(); s++) {
+        if (beamlet_tags[s].index == beamlet_index) return s;
+    }
+    BeamletTag tag;
+    tag.index = beamlet_index;
+    tag.column = column;
+    tag.row = row;
+    tag.centerX = center_x;
+    tag.centerY = center_y;
+    beamlet_tags.push_back(tag);
+    return beamlet_tags.size() - 1;
+}
+
+void ParticleManager::tagParticleRange(size_t first, size_t last, size_t slot) {
+    if (last <= first) return;
+    if (particle_beamlet_slot.size() < last) {
+        particle_beamlet_slot.resize(last, -1);
+    }
+    for (size_t i = first; i < last; i++) {
+        particle_beamlet_slot[i] = static_cast<int>(slot);
+    }
+}
+
+const BeamletTag* ParticleManager::beamletOfParticle(size_t index,
+                                                     double birth_x,
+                                                     double birth_y) const {
+    if (beamlet_tags.empty()) return NULL;
+
+    if (index < particle_beamlet_slot.size()) {
+        const int slot = particle_beamlet_slot[index];
+        if (slot >= 0 && static_cast<size_t>(slot) < beamlet_tags.size()) {
+            return &beamlet_tags[slot];
+        }
+    }
+
+    // Not emitted by a source: a secondary created during tracing. Attribute it to the
+    // beamlet whose axis it was born closest to. That is the beamlet whose beam produced
+    // it, except in the gap between two apertures, where either answer is defensible.
+    size_t best = 0;
+    double best_d2 = -1.0;
+    for (size_t s = 0; s < beamlet_tags.size(); s++) {
+        const double dx = birth_x - beamlet_tags[s].centerX;
+        const double dy = birth_y - beamlet_tags[s].centerY;
+        const double d2 = dx * dx + dy * dy;
+        if (best_d2 < 0.0 || d2 < best_d2) {
+            best_d2 = d2;
+            best = s;
+        }
+    }
+    return &beamlet_tags[best];
 }
 
 void ParticleManager::resetParticles() {
@@ -68,6 +130,206 @@ void ParticleManager::initializeDiagnostics() {
     };
 }
 
+namespace {
+
+/// The plasma grid, identified the way the configuration actually labels it.
+///
+/// Cases in this project carry no "role" field, so name is the primary key and role is
+/// accepted when present. The final fallback is the solid that starts furthest upstream,
+/// which is the plasma grid in every accelerator layout this code builds.
+const SimulationParameters::GeometrySolidDefinition* findPlasmaGrid(
+        const std::vector<SimulationParameters::GeometrySolidDefinition>& solids) {
+    const SimulationParameters::GeometrySolidDefinition* upstream = NULL;
+    for (size_t i = 0; i < solids.size(); i++) {
+        const SimulationParameters::GeometrySolidDefinition& s = solids[i];
+        if (s.zProfileMeters.size() < 2 || s.rProfileMeters.size() != s.zProfileMeters.size())
+            continue;
+
+        std::string name = s.name;
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (name == "PG" || name == "PLASMA GRID" || name == "PLASMAGRID" ||
+            s.role == "plasmaGrid") {
+            return &s;
+        }
+        if (upstream == NULL || s.zProfileMeters.front() < upstream->zProfileMeters.front()) {
+            upstream = &s;
+        }
+    }
+    return upstream;
+}
+
+}  // namespace
+
+size_t ParticleManager::addBeamHalo(ParticleDataBase3D* pdb,
+                                    const SimulationParameters& params,
+                                    double core_current_A) {
+    if (!params.getBeamHaloEnabled()) return 0U;
+
+    if (!params.hasGeneratedGeometrySolids()) {
+        ibsimu.message(1) << "WARNING: beam halo requested but the case has no generated "
+                          << "geometry solids; no halo emitted." << endl;
+        return 0U;
+    }
+    const SimulationParameters::GeometrySolidDefinition* pg =
+        findPlasmaGrid(params.getGeneratedGeometrySolids());
+    if (pg == NULL) {
+        ibsimu.message(1) << "WARNING: beam halo requested but the plasma grid could not be "
+                          << "identified; no halo emitted." << endl;
+        return 0U;
+    }
+
+    // The downstream chamfer is the part of the bore profile after the throat: from the
+    // narrowest radius to the downstream face. Halo particles are born there and aimed
+    // along the local surface normal, following Pimazzoni et al., Fus. Eng. Des. 192 (2023)
+    // 113621, Sec. 2.
+    const std::vector<double>& pz = pg->zProfileMeters;
+    const std::vector<double>& pr = pg->rProfileMeters;
+    size_t throat = 0;
+    for (size_t i = 1; i < pr.size(); i++)
+        if (pr[i] < pr[throat]) throat = i;
+    if (throat + 1 >= pz.size()) {
+        ibsimu.message(1) << "WARNING: beam halo requested but the plasma-grid profile has "
+                          << "no downstream chamfer after its throat; no halo emitted." << endl;
+        return 0U;
+    }
+
+    // Lateral surface of each revolved segment, 2*pi*r_mid*ds, as the sampling weight so
+    // that particles are spread uniformly over the real emitting area rather than uniformly
+    // along the profile, which would over-weight the narrow end.
+    std::vector<double> cum;
+    double area = 0.0;
+    for (size_t i = throat; i + 1 < pz.size(); i++) {
+        const double dz = pz[i + 1] - pz[i];
+        const double dr = pr[i + 1] - pr[i];
+        area += 2.0 * M_PI * 0.5 * (pr[i] + pr[i + 1]) * sqrt(dz * dz + dr * dr);
+        cum.push_back(area);
+    }
+    if (!(area > 0.0)) {
+        ibsimu.message(1) << "WARNING: beam halo chamfer has zero area; no halo emitted." << endl;
+        return 0U;
+    }
+
+    // Macroparticle count scales with the requested current fraction, so each halo particle
+    // carries the same charge as a core one. Statistics stay uniform across the beam and the
+    // added cost is exactly the halo fraction -- 8 % more particles for an 8 % halo.
+    const double fraction = 0.01 * params.getBeamHaloCurrentFractionPercent();
+
+    const std::vector<SimulationParameters::ParticleSourceDefinition>& srcs =
+        params.getParticleSources();
+    if (srcs.empty()) return 0U;
+
+    // Start a quarter cell off the surface: a particle born exactly on the boundary is
+    // reported as an immediate collision and never enters the beam.
+    const double standoff = 0.25 * params.getMeshSize();
+
+    std::mt19937_64 rng(20261005ULL);
+    std::uniform_real_distribution<double> U(0.0, 1.0);
+
+    // One halo per source, around that source's own axis. The plasma-grid chamfer is the
+    // same revolved profile at every aperture of a patterned grid, so with multi-beamlet
+    // extraction each beamlet gets its own ring carrying its own share of the current. Doing
+    // this from srcs.front() alone -- as this did before multi-beamlet extraction existed --
+    // put the halo of every beamlet onto the first one, which is harmless with a single
+    // source and badly wrong with several.
+    size_t n_halo_total = 0U;
+    double halo_current_A = 0.0;
+    for (std::vector<SimulationParameters::ParticleSourceDefinition>::const_iterator it = srcs.begin();
+         it != srcs.end();
+         ++it) {
+        const SimulationParameters::ParticleSourceDefinition& ref = *it;
+
+        // Macroparticle count scales with the requested current fraction, so each halo
+        // particle carries the same charge as a core one. Statistics stay uniform across the
+        // beam and the added cost is exactly the halo fraction -- 8 % more particles for an
+        // 8 % halo.
+        const size_t n_halo =
+            static_cast<size_t>(llround(fraction * static_cast<double>(ref.particleCount)));
+        if (n_halo == 0U) continue;
+
+        const double src_current_A = ref.currentDensityAm2 * ref.widthMeters * ref.heightMeters;
+        const double cx = ref.centerMeters[0];
+        const double cy = ref.centerMeters[1];
+
+        const double m = ref.massU * MASS_U;
+        const double v = sqrt(2.0 * params.getBeamHaloAxialEnergyEV() * CHARGE_E / m);
+        const double IQ = fraction * src_current_A / static_cast<double>(n_halo);
+
+        // The halo of a beamlet belongs to that beamlet: tag it the same way the core is
+        // tagged, so a halo trajectory is not mistaken for an unattributed secondary.
+        const size_t halo_first = pdb->size();
+        const size_t halo_slot = beamletSlotFor(
+            ref.beamletIndex, ref.beamletColumn, ref.beamletRow, cx, cy);
+
+        for (size_t a = 0; a < n_halo; a++) {
+            // Pick a segment by area, then a point within it.
+            const double target = U(rng) * area;
+            size_t seg = 0;
+            while (seg + 1 < cum.size() && cum[seg] < target) seg++;
+            const size_t i = throat + seg;
+            // Place the point within the segment by AREA, not uniformly along the profile.
+            // Revolving gives dA = 2*pi*r ds with r linear in t, so the density is p(t) ~ r(t)
+            // and sampling t uniformly would over-weight the narrow end of the chamfer. The
+            // inverse of that CDF is the positive root of (dr/2) t^2 + r1 t - U (r1 + dr/2) = 0.
+            const double r1 = pr[i];
+            const double dr_seg = pr[i + 1] - pr[i];
+            const double u = U(rng);
+            double t;
+            if (fabs(dr_seg) < 1e-15 * (fabs(r1) + 1e-30)) {
+                t = u;                                // cylindrical land: area is linear in t
+            } else {
+                const double disc = r1 * r1 + 2.0 * dr_seg * u * (r1 + 0.5 * dr_seg);
+                t = (-r1 + sqrt(disc > 0.0 ? disc : 0.0)) / dr_seg;
+                if (t < 0.0) t = 0.0;
+                if (t > 1.0) t = 1.0;
+            }
+            const double z = pz[i] + t * (pz[i + 1] - pz[i]);
+            const double r = pr[i] + t * dr_seg;
+
+            const double dz = pz[i + 1] - pz[i];
+            const double dr = pr[i + 1] - pr[i];
+            const double len = sqrt(dz * dz + dr * dr);
+            // Surface normal pointing out of the metal into the bore: radially inward (-dz) and,
+            // for a widening chamfer, downstream (+dr).
+            const double n_r = -dz / len;
+            const double n_z = dr / len;
+
+            const double phi = 2.0 * M_PI * U(rng);
+            const double cphi = cos(phi), sphi = sin(phi);
+
+            ParticleP3D x;
+            x[0] = 0.0;
+            x[1] = cx + (r + standoff * n_r) * cphi;  x[2] = v * n_r * cphi;
+            x[3] = cy + (r + standoff * n_r) * sphi;  x[4] = v * n_r * sphi;
+            x[5] = z + standoff * n_z;                x[6] = v * n_z;
+            pdb->add_particle(IQ, ref.chargeState, ref.massU, 0, x);
+        }
+
+        tagParticleRange(halo_first, pdb->size(), halo_slot);
+
+        n_halo_total += n_halo;
+        halo_current_A += fraction * src_current_A;
+    }
+
+    if (n_halo_total == 0U) {
+        ibsimu.message(1) << "WARNING: beam halo fraction yields zero macroparticles; "
+                          << "no halo emitted." << endl;
+        return 0U;
+    }
+
+    // add_particle deliberately leaves _rhosum untouched, unlike add_rectangular_beam_*.
+    // That is what keeps the plasma reference density (ManageSimulation_New.cpp, which reads
+    // get_rhosum() to configure set_nsimp_plasma) equal to the core beam alone, so enabling
+    // the halo cannot move the meniscus.
+    ibsimu.message(1) << "Beam halo: " << n_halo_total << " particles over " << srcs.size()
+                      << " beamlet(s), " << params.getBeamHaloCurrentFractionPercent() << " % of "
+                      << core_current_A * 1e3 << " mA core = " << halo_current_A * 1e3
+                      << " mA, from the plasma-grid chamfer of solid '" << pg->name
+                      << "' (z " << pz[throat] << " to " << pz.back() << " m), at "
+                      << params.getBeamHaloAxialEnergyEV() << " eV" << endl;
+    return n_halo_total;
+}
+
 void ParticleManager::defineParticleDatabase(const Geometry& geometry, const SimulationParameters& params) {
     ParticleDataBase3D* pdb = new ParticleDataBase3D(geometry);
     pdb->set_max_steps(3000);
@@ -77,11 +339,18 @@ void ParticleManager::defineParticleDatabase(const Geometry& geometry, const Sim
 
     pdb->clear();
 
+    // The database is rebuilt from scratch here (and once per iteration when pdbincycle is
+    // set), so the beamlet map has to be rebuilt with it or it would describe the previous
+    // database.
+    beamlet_tags.clear();
+    particle_beamlet_slot.clear();
+
     if (params.hasParticleSources()) {
         const std::vector<SimulationParameters::ParticleSourceDefinition>& sources =
             params.getParticleSources();
         uint total_particles = 0U;
         double total_current_density = 0.0;
+        double total_current = 0.0;              // A, summed over the core sources
 
         for (std::vector<SimulationParameters::ParticleSourceDefinition>::const_iterator it = sources.begin();
              it != sources.end();
@@ -109,6 +378,12 @@ void ParticleManager::defineParticleDatabase(const Geometry& geometry, const Sim
                     "Particle source '" + source.id + "' has invalid mainDirection or inPlaneReferenceDirection");
             }
 
+            // Bracket the emitter: every particle the database gains across this call came
+            // out of this source, hence out of this beamlet. Taking the indices rather than
+            // trusting particleCount keeps the map right even if IBSimu ever emits a
+            // different number than it was asked for.
+            const size_t first_particle = pdb->size();
+
             pdb->add_rectangular_beam_with_energy(
                 source.particleCount,
                 source.currentDensityAm2,
@@ -123,14 +398,30 @@ void ParticleManager::defineParticleDatabase(const Geometry& geometry, const Sim
                 0.5 * source.widthMeters,
                 0.5 * source.heightMeters);
 
+            tagParticleRange(
+                first_particle,
+                pdb->size(),
+                beamletSlotFor(
+                    source.beamletIndex,
+                    source.beamletColumn,
+                    source.beamletRow,
+                    source.centerMeters[0],
+                    source.centerMeters[1]));
+
             total_particles += source.particleCount;
             total_current_density += source.currentDensityAm2;
+            total_current += source.currentDensityAm2 * source.widthMeters * source.heightMeters;
         }
+
+        const size_t halo_particles = addBeamHalo(pdb, params, total_current);
 
         particles = pdb;
         ibsimu.message(1) << "Particle database created with " << total_particles
                           << " particles from " << sources.size() << " configured source(s), total J="
                           << total_current_density << " A/m²" << endl;
+        if (halo_particles > 0U) {
+            ibsimu.message(1) << "  plus " << halo_particles << " beam-halo particles" << endl;
+        }
         return;
     }
 
@@ -174,7 +465,12 @@ void ParticleManager::defineParticleDatabase(const Geometry& geometry, const Sim
     // Beam definition moved outside the main iteration cycle
     // There is no need to change the starting particles at every iteration.
     pdb->clear();
-    
+
+    // An emitter file carries no beamlet pattern, so leave the map empty: the VTK export
+    // then omits the beamlet arrays rather than labelling every trajectory "beamlet 1".
+    beamlet_tags.clear();
+    particle_beamlet_slot.clear();
+
     // Load emitter from file
     string emitter_file = emittername;
     loadEmitter(pdb, emitter_file, 1.0, 1.0, 0.0); // Forward particles with original charge and mass
@@ -939,12 +1235,100 @@ void ParticleManager::exportTrajectoriesToVTK(const string& filename, double ion
             );
             file.write(reinterpret_cast<const char*>(&kind_be), sizeof(int));
         }
-        
+
+        // Beamlet of origin, as cell data: one value per trajectory, which is the natural
+        // association because a particle belongs to one beamlet for its whole life. In
+        // ParaView: colour by beamlet_id for the whole pattern at once, or Threshold on it
+        // (or on beamlet_row / beamlet_column) to isolate one beamlet, one row or one
+        // column. The arrays are written only when the case actually has beamlet tags, so
+        // a file from a run without them is byte for byte what it was before.
+        if (!beamlet_tags.empty()) {
+            // Birth point of each particle, needed to place secondaries created during
+            // tracing, which no emitter tagged.
+            std::vector<int> beamlet_id(particles->size(), 0);
+            std::vector<int> beamlet_column(particles->size(), 0);
+            std::vector<int> beamlet_row(particles->size(), 0);
+            for (size_t i = 0; i < particles->size(); i++) {
+                Particle3D &particle = particles->particle(i);
+                double birth_x = 0.0;
+                double birth_y = 0.0;
+                if (particle.traj_size() > 0) {
+                    ParticleP3D birth = particles->trajectory_point(i, 0);
+                    birth_x = birth(1);
+                    birth_y = birth(3);
+                }
+                const BeamletTag* tag = beamletOfParticle(i, birth_x, birth_y);
+                if (tag != NULL) {
+                    beamlet_id[i] = tag->index;
+                    beamlet_column[i] = tag->column;
+                    beamlet_row[i] = tag->row;
+                }
+            }
+
+            file << "\nSCALARS beamlet_id int\n";
+            file << "LOOKUP_TABLE default\n";
+            for (size_t i = 0; i < particles->size(); i++) {
+                int be = swap_endian_int(beamlet_id[i]);
+                file.write(reinterpret_cast<const char*>(&be), sizeof(int));
+            }
+
+            file << "\nSCALARS beamlet_column int\n";
+            file << "LOOKUP_TABLE default\n";
+            for (size_t i = 0; i < particles->size(); i++) {
+                int be = swap_endian_int(beamlet_column[i]);
+                file.write(reinterpret_cast<const char*>(&be), sizeof(int));
+            }
+
+            file << "\nSCALARS beamlet_row int\n";
+            file << "LOOKUP_TABLE default\n";
+            for (size_t i = 0; i < particles->size(); i++) {
+                int be = swap_endian_int(beamlet_row[i]);
+                file.write(reinterpret_cast<const char*>(&be), sizeof(int));
+            }
+
+            // Where the beamlet's own axis is, so a trajectory can be read as a
+            // displacement from its aperture without joining the run's JSON to the VTK.
+            file << "\nSCALARS beamlet_center_x_mm float\n";
+            file << "LOOKUP_TABLE default\n";
+            for (size_t i = 0; i < particles->size(); i++) {
+                const int slot = beamlet_id[i];
+                float value = 0.0f;
+                for (size_t s = 0; s < beamlet_tags.size(); s++) {
+                    if (beamlet_tags[s].index == slot) {
+                        value = static_cast<float>(1.0e3 * beamlet_tags[s].centerX);
+                        break;
+                    }
+                }
+                float be = swap_endian_float(value);
+                file.write(reinterpret_cast<const char*>(&be), sizeof(float));
+            }
+
+            file << "\nSCALARS beamlet_center_y_mm float\n";
+            file << "LOOKUP_TABLE default\n";
+            for (size_t i = 0; i < particles->size(); i++) {
+                const int slot = beamlet_id[i];
+                float value = 0.0f;
+                for (size_t s = 0; s < beamlet_tags.size(); s++) {
+                    if (beamlet_tags[s].index == slot) {
+                        value = static_cast<float>(1.0e3 * beamlet_tags[s].centerY);
+                        break;
+                    }
+                }
+                float be = swap_endian_float(value);
+                file.write(reinterpret_cast<const char*>(&be), sizeof(float));
+            }
+        }
+
         file.close();
         ibsimu.message(1) << "Particle trajectories exported to binary VTK file: " << vtkfile << endl;
         ibsimu.message(1) << "  Format: Binary VTK with big-endian byte order" << endl;
         ibsimu.message(1) << "  Point data: velocity, time, kinetic energy" << endl;
         ibsimu.message(1) << "  Cell data: particle ID, current, charge, mass, status, generation, species" << endl;
+        if (!beamlet_tags.empty()) {
+            ibsimu.message(1) << "  Cell data: beamlet_id, beamlet_column, beamlet_row, "
+                              << "beamlet_center_x_mm, beamlet_center_y_mm over "
+                              << beamlet_tags.size() << " beamlet(s)" << endl;
+        }
         
     } catch (const Error& e) {
         ibsimu.message(1) << "Error exporting trajectories to VTK" << endl;

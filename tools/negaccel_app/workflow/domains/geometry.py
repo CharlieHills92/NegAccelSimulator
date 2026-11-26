@@ -6,6 +6,7 @@ import copy
 from typing import Any
 
 from ..common import WorkflowError, require_number
+from .geometry_validation import validate_solid_boundary_ids
 
 
 _LEGACY_SOLID_KINDS = {"grid", "aperture", "wall", "plasma", "custom"}
@@ -114,6 +115,12 @@ def _normalize_generated_solids(authoring_geometry: dict[str, Any]) -> list[dict
             raise WorkflowError(f"{context}.aperturePattern must be an object when provided")
 
         normalized_solids.append(normalized_solid)
+
+    # Resolve every solid's boundary id once, here, and write it out explicitly. The runtime
+    # case then states the id for each solid instead of leaving the C++ side to re-derive it
+    # from the list position, which is how the two ended up disagreeing.
+    for solid, boundary_id in zip(normalized_solids, validate_solid_boundary_ids(normalized_solids)):
+        solid["boundaryId"] = boundary_id
 
     return normalized_solids
 

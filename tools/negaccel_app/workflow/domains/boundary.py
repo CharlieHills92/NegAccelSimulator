@@ -7,6 +7,7 @@ import copy
 from typing import Any
 
 from ..common import WorkflowError, evaluate_numeric_expression, normalize_symbol_name
+from .geometry_validation import resolve_solid_boundary_ids
 
 
 _DOMAIN_BOUNDARIES = [
@@ -32,11 +33,14 @@ def _inventory_from_geometry(authoring_geometry: dict[str, Any]) -> list[dict[st
     solids = authoring_geometry.get("solids")
     if isinstance(solids, list) and solids:
         used_ids: set[int] = set()
+        resolved_ids = resolve_solid_boundary_ids(solids)
         for index, solid in enumerate(solids):
             if not isinstance(solid, dict):
                 continue
-            boundary_id = solid.get("boundaryId", 7 + index)
-            if not isinstance(boundary_id, int) or boundary_id < 7 or boundary_id in used_ids:
+            boundary_id = resolved_ids[index]
+            if boundary_id in used_ids:
+                # A second solid on a shared id (EG and SG on one potential): the boundary
+                # is already in the inventory, and listing it twice would be a duplicate.
                 continue
             used_ids.add(boundary_id)
             default_value = solid.get("voltageVolts", 0.0)

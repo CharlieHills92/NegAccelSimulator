@@ -8,6 +8,8 @@
 #include "random.hpp"
 #include "globals.h"
 #include "constants.hpp"
+#include "CallbackThreading.h"
+#include <atomic>
 #include <cmath>
 #include <algorithm>
 //~ #include "src/pier/matlabfun.h"
@@ -17,8 +19,14 @@ using namespace std;
 // Add safety constants
 #define MAX_GENERATION_DEPTH 5
 #define MAX_PARTICLE_COUNT 10000000
+#define MAX_SECONDARY_PARTICLES_PER_PASS 1000000
 #define MIN_VELOCITY_THRESHOLD 1e3
 #define MAX_VELOCITY_SCALE SPEED_C
+// Upper bound on configured gas processes considered for one projectile species in a
+// single step, so the per-step candidate list can live on the stack. Processes beyond this
+// many that match the same projectile are ignored, and the constructor warns if the
+// configuration could ever reach it.
+#define MAX_CONFIGURED_PROCESSES 32
 
 //~ void get_dens_at_z( double z, double & nH2, double & nH0 ) {
 
@@ -114,23 +122,21 @@ inline double slow_velocity_for_particle_kind(particle_kind kind, double ion_mas
     return std::sqrt(2.0*energy_ev*CHARGE_E/(mass_u*MASS_U));
 }
 
-inline bool sample_isotropic_velocity(Random* rng, double speed, double velocity[3]) {
-    if (rng == NULL || speed <= 0.0 || !std::isfinite(speed)) {
+inline bool sample_isotropic_velocity(double speed, double velocity[3]) {
+    if (speed <= 0.0 || !std::isfinite(speed)) {
         return false;
     }
 
-    double rand_cos_theta[1];
-    double rand_phi[1];
-    rng->get(rand_cos_theta);
-    rng->get(rand_phi);
+    double rand_cos_theta = cbthread::rng().uniform();
+    double rand_phi = cbthread::rng().uniform();
 
-    double cos_theta = 1.0 - 2.0*rand_cos_theta[0];
+    double cos_theta = 1.0 - 2.0*rand_cos_theta;
     if (!std::isfinite(cos_theta)) {
         return false;
     }
     double sin_theta_sq = std::max(0.0, 1.0 - cos_theta*cos_theta);
     double sin_theta = std::sqrt(sin_theta_sq);
-    double phi = 2.0*std::acos(-1.0)*rand_phi[0];
+    double phi = 2.0*std::acos(-1.0)*rand_phi;
 
     velocity[0] = speed*sin_theta*std::cos(phi);
     velocity[1] = speed*sin_theta*std::sin(phi);
@@ -181,7 +187,6 @@ class THCallback_strip : public TrajectoryHandlerCallback {
 
 private:
 
-    Random* _rng;
     ofstream* _debugstream;
     ParticleDataBase3D* _pdb;
     bool _debugprint;
@@ -221,9 +226,7 @@ private:
         }
 
         double prob_collision = 1.0-exp(-sigma_total*target_n*delta);
-        double rand1[1];
-        _rng->get( rand1 );
-        if( rand1[0] < prob_collision ) {
+        if( cbthread::rng().uniform() < prob_collision ) {
             particle->set_status( PARTICLE_STRIP );
         }
     }
@@ -258,16 +261,9 @@ public:
                       const vector<double>& periodicity,
                       const std::vector<SimulationParameters::CrossSectionProcessDefinition>& processes,
                       const std::string& density_filename ) {
-        //Random *rng; // Random number generator for two uniform random positions, and three Gaussian velocity components (to get a Maxwell-Boltzmann distribution for the total velocity).
-        // if( ibsimu.get_rng_type() == RNG_SOBOL )  //In addition, two more numbers are needed for the cosine distribution and the angles.
-        // 	_rng = new QRandom( 0 );
-        // else
-        // 	_rng = new MTRandom( 0 );
-        _rng = new MTRandom( 1 );
-        double qx[1];
-        _rng->get( qx );
-        //~ cout << "DEBUG: random generator initialized\n";
-        // DEBUG
+        // Random numbers come from cbthread::rng(), a per-thread generator. See
+        // CallbackThreading.h for why a shared ibsimu Random cannot be used once
+        // iterate_trajectories() runs on more than one thread.
         _debugprint=debugprint;
         _pdb=pdb;
         _mass=mass;
@@ -351,7 +347,6 @@ class THCallback_secondaries : public TrajectoryHandlerCallback {
 
 private:
 
-    Random* _rng;
     ParticleDataBase3D* _pdb;
     double _mass;
     vector<double> pos;
@@ -360,8 +355,50 @@ private:
     vector<double> _periodicity;
     double _secondary_z_min;
     size_t _initial_particle_count;
-    size_t _secondary_debug_count;
+
+    // Shared by every worker thread, so all mutable counters are atomic. The created
+    // count also replaces _pdb->size() in the cap test: reading std::vector::size() while
+    // another thread is inside add_particle()'s push_back() is a data race.
+    std::atomic<size_t> _secondary_debug_count;
+    std::atomic<size_t> _secondaries_created;
+    std::atomic<size_t> _slow_neutrals_skipped;
+    std::atomic<bool> _secondary_limit_warned;
+    std::atomic<bool> _generation_limit_warned;
     vector<thcallback_detail::GenericCrossSectionProcess> _processes;
+
+    // When true, slow neutral reaction products are accounted but not tracked. See
+    // handleConfiguredProcesses.
+    bool _skip_slow_neutral_products;
+
+    /*! \brief Have we hit a particle cap?
+     *
+     *  Two distinct ceilings apply and they must not be conflated:
+     *
+     *   - MAX_SECONDARY_PARTICLES_PER_PASS bounds the secondaries CREATED in this pass, so
+     *     that a runaway cascade cannot grow without limit. Primaries are not part of it:
+     *     they are an input, not something the cascade produced.
+     *   - MAX_PARTICLE_COUNT bounds the TOTAL population, primaries included.
+     *
+     *  The previous form added the primary count to the secondary counter and compared the
+     *  sum against the SECONDARY cap. A run whose configured primary count already reached
+     *  that cap therefore exhausted the budget on the very first call and produced no
+     *  secondaries at all -- silently, and whatever the configured physics asked for. It
+     *  also left MAX_PARTICLE_COUNT unreferenced, so the total ceiling was never enforced.
+     */
+    bool secondaryBudgetExhausted() const {
+        const size_t created = _secondaries_created.load(std::memory_order_relaxed);
+        return created >= MAX_SECONDARY_PARTICLES_PER_PASS ||
+               _initial_particle_count + created >= MAX_PARTICLE_COUNT;
+    }
+
+    /*! \brief Emit a warn-once message, at most one thread at a time. */
+    void warnOnce(std::atomic<bool>& flag, const char* message) {
+        bool expected = false;
+        if (flag.compare_exchange_strong(expected, true)) {
+            CB_LOG_LOCK();
+            logfile << "WARNING: " << message << endl;
+        }
+    }
 
     bool shouldLogSecondaryDebug(size_t predicted_index) const {
          return predicted_index >= _initial_particle_count + 10300 &&
@@ -379,7 +416,8 @@ private:
                            double energy,
                            double delta,
                            double target_n) {
-        size_t predicted_index = _pdb->size();
+        size_t predicted_index = _initial_particle_count +
+                                 _secondaries_created.load(std::memory_order_relaxed);
         if (!shouldLogSecondaryDebug(predicted_index)) {
             return;
         }
@@ -388,8 +426,9 @@ private:
                                   child_state[4]*child_state[4] +
                                   child_state[6]*child_state[6]);
 
+        CB_LOG_LOCK();
         logfile << "SECONDARY_DEBUG"
-                << " event=" << _secondary_debug_count++
+                << " event=" << _secondary_debug_count.fetch_add(1, std::memory_order_relaxed)
                 << " predicted_index=" << predicted_index
                 << " branch=" << branch
                 << " parent_gen=" << particle->gen()
@@ -436,7 +475,16 @@ private:
         logSecondaryDebug(branch, particle, parent_state, child_state,
                           child_current, child_charge, child_mass,
                           child_generation, energy, delta, target_n);
+        if (secondaryBudgetExhausted()) {
+            warnOnce(_secondary_limit_warned,
+                     "Secondary particle pass limit reached; stopping further gas "
+                     "secondary creation");
+            return;
+        }
+        // Safe from a worker thread: add_particle() takes the scheduler's problem-vector
+        // mutex (particledatabaseimp.hpp:626-634).
         _pdb->add_particle(child_current, child_charge, child_mass, child_generation, child_state);
+        _secondaries_created.fetch_add(1, std::memory_order_relaxed);
     }
 
     void handleConfiguredProcesses( ParticleBase *particle,
@@ -450,11 +498,20 @@ private:
             return;
         }
 
-        std::vector<const thcallback_detail::GenericCrossSectionProcess*> matching_processes;
-        std::vector<double> matching_sigmas;
+        // Fixed-capacity scratch instead of two std::vectors. This runs on every
+        // integration step of every particle, so the two heap allocations the vectors used
+        // to make were pure per-step overhead -- and with eight worker threads they would
+        // also have been eight threads contending on the allocator.
+        const size_t process_count = _processes.size();
+        if( process_count == 0 ) {
+            return;
+        }
+        const thcallback_detail::GenericCrossSectionProcess* matching_processes[MAX_CONFIGURED_PROCESSES];
+        double matching_sigmas[MAX_CONFIGURED_PROCESSES];
+        size_t matching_count = 0;
         double sigma_total = 0.0;
 
-        for( size_t ii = 0; ii < _processes.size(); ++ii ) {
+        for( size_t ii = 0; ii < process_count && matching_count < MAX_CONFIGURED_PROCESSES; ++ii ) {
             const thcallback_detail::GenericCrossSectionProcess& process = _processes[ii];
             if( process.projectile_kind != projectile_kind ) {
                 continue;
@@ -465,28 +522,26 @@ private:
                 continue;
             }
 
-            matching_processes.push_back( &process );
-            matching_sigmas.push_back( sigma );
+            matching_processes[matching_count] = &process;
+            matching_sigmas[matching_count] = sigma;
+            ++matching_count;
             sigma_total += sigma;
         }
 
-        if( matching_processes.empty() || sigma_total <= 0.0 || !std::isfinite(sigma_total) || target_n <= 0.0 || delta <= 0.0 ) {
+        if( matching_count == 0 || sigma_total <= 0.0 || !std::isfinite(sigma_total) || target_n <= 0.0 || delta <= 0.0 ) {
             return;
         }
 
         double prob_collision = 1.0-exp(-sigma_total*target_n*delta);
-        double rand1[1];
-        _rng->get( rand1 );
-        if( rand1[0] >= prob_collision ) {
+        if( cbthread::rng().uniform() >= prob_collision ) {
             return;
         }
 
         *pend = *pcur;
-        _rng->get( rand1 );
-        double selector = rand1[0]*sigma_total;
+        double selector = cbthread::rng().uniform()*sigma_total;
         double sigma_cursor = 0.0;
-        const thcallback_detail::GenericCrossSectionProcess* selected_process = matching_processes.back();
-        for( size_t ii = 0; ii < matching_processes.size(); ++ii ) {
+        const thcallback_detail::GenericCrossSectionProcess* selected_process = matching_processes[matching_count-1];
+        for( size_t ii = 0; ii < matching_count; ++ii ) {
             sigma_cursor += matching_sigmas[ii];
             if( selector <= sigma_cursor ) {
                 selected_process = matching_processes[ii];
@@ -509,11 +564,38 @@ private:
                 continue;
             }
 
+            // Slow neutral products: created only if the caller asked for them.
+            //
+            // A 5 eV neutral is field-blind and moves at ~3e4 m/s, two orders of magnitude
+            // below the beam, so within the 10000-step budget it travels a fraction of a
+            // millimetre and terminates in vacuum by PARTICLE_NSTP. It therefore reaches no
+            // electrode and contributes nothing to any grid power or current column, while
+            // costing a full 10000-step integration each -- the most expensive particle in
+            // the run, per unit of physics delivered.
+            //
+            // It is NOT free to drop, which is why this is opt-in: ibsimu deposits space
+            // charge from IQ alone, without consulting q (particleiterator.hpp:923,932), so
+            // these macroparticles currently deposit charge as though they were still
+            // charged, and slowly, which weights them heavily. Skipping them changes the
+            // space-charge field of the pass that creates them. That pass is always the
+            // final one (secondaries are only enabled on the last iteration) and its space
+            // charge is never fed back into a Poisson solve, so no trajectory or field the
+            // simulation reports is affected -- but the saved scharge and any density
+            // diagnostic drawn from it will change. See getStrippingSkipSlowNeutrals().
+            //
+            // Fast neutrals -- the stripped beam, the quantity of interest downstream --
+            // are deliberately untouched: only PRODUCT_SPEED_SLOW is considered here.
+            const bool is_slow = ( product.speed_class == thcallback_detail::PRODUCT_SPEED_SLOW );
+            if( _skip_slow_neutral_products && is_slow && charge_state == 0.0 ) {
+                _slow_neutrals_skipped.fetch_add( 1, std::memory_order_relaxed );
+                continue;
+            }
+
             ParticleP3D child_state = parent_state;
-            if( product.speed_class == thcallback_detail::PRODUCT_SPEED_SLOW ) {
+            if( is_slow ) {
                 double sampled_velocity[3];
                 double slow_speed = thcallback_detail::slow_velocity_for_particle_kind( product.kind, _mass );
-                if( !thcallback_detail::sample_isotropic_velocity( _rng, slow_speed, sampled_velocity ) ) {
+                if( !thcallback_detail::sample_isotropic_velocity( slow_speed, sampled_velocity ) ) {
                     continue;
                 }
 
@@ -534,10 +616,12 @@ private:
                                            delta,
                                            target_n );
             } catch (Error& e) {
+                CB_LOG_LOCK();
                 logfile << "ERROR: Failed to add configured secondary particle for process '"
                         << selected_process->process_id << "': "
                         << e.get_error_message() << endl;
             } catch (const std::exception& e) {
+                CB_LOG_LOCK();
                 logfile << "ERROR: Failed to add configured secondary particle for process '"
                         << selected_process->process_id << "': "
                         << e.what() << endl;
@@ -549,6 +633,7 @@ private:
     bool validatePosition(ParticleP3D *pend) {
         for (int i = 0; i < 7; i++) {
             if (!std::isfinite((*pend)[i])) {
+                CB_LOG_LOCK();
                 logfile << "ERROR: Invalid particle position component " << i << " in secondary generation: " << (*pend)[i] << endl;
                 return false;
             }
@@ -560,47 +645,61 @@ public:
 
     THCallback_secondaries( ParticleDataBase3D* pdb, double& mass,
                             const std::string& density_filename,
-                            double secondary_z_min = 7.0e-3 )
+                            double secondary_z_min = 7.0e-3,
+                            bool skip_slow_neutral_products = false )
         : THCallback_secondaries( pdb,
                                   mass,
                                   vector<double>(),
                                   std::vector<SimulationParameters::CrossSectionProcessDefinition>(),
                                   density_filename,
-                                  secondary_z_min ) {}
+                                  secondary_z_min,
+                                  skip_slow_neutral_products ) {}
 
     THCallback_secondaries( ParticleDataBase3D* pdb, double& mass,
                             const std::vector<SimulationParameters::CrossSectionProcessDefinition>& processes,
                             const std::string& density_filename,
-                            double secondary_z_min = 7.0e-3 )
-        : THCallback_secondaries( pdb, mass, vector<double>(), processes, density_filename, secondary_z_min ) {}
+                            double secondary_z_min = 7.0e-3,
+                            bool skip_slow_neutral_products = false )
+        : THCallback_secondaries( pdb, mass, vector<double>(), processes, density_filename,
+                                  secondary_z_min, skip_slow_neutral_products ) {}
 
     THCallback_secondaries( ParticleDataBase3D* pdb, double& mass, const vector<double>& periodicity,
-                            const std::string& density_filename, double secondary_z_min = 7.0e-3 )
+                            const std::string& density_filename, double secondary_z_min = 7.0e-3,
+                            bool skip_slow_neutral_products = false )
         : THCallback_secondaries( pdb,
                                   mass,
                                   periodicity,
                                   std::vector<SimulationParameters::CrossSectionProcessDefinition>(),
                                   density_filename,
-                                  secondary_z_min ) {}
+                                  secondary_z_min,
+                                  skip_slow_neutral_products ) {}
 
     THCallback_secondaries( ParticleDataBase3D* pdb, double& mass, const vector<double>& periodicity,
                             const std::vector<SimulationParameters::CrossSectionProcessDefinition>& processes,
-                            const std::string& density_filename, double secondary_z_min = 7.0e-3 ) {
+                            const std::string& density_filename, double secondary_z_min = 7.0e-3,
+                            bool skip_slow_neutral_products = false )
+        : _secondary_debug_count(0), _secondaries_created(0), _slow_neutrals_skipped(0),
+          _secondary_limit_warned(false), _generation_limit_warned(false),
+          _skip_slow_neutral_products(skip_slow_neutral_products) {
         _pdb=pdb;
         _mass=mass;
         _processes = thcallback_detail::build_generic_processes(processes);
         _secondary_z_min = secondary_z_min;
         _initial_particle_count = pdb->size();
-        _secondary_debug_count = 0;
         if (debug) cout << " MASS : " << _mass << endl;
-        _rng = new MTRandom( 1 );
-        double qx[1];
-        _rng->get( qx );
+        // Random numbers come from cbthread::rng(), a per-thread generator; see
+        // CallbackThreading.h.
         load_density_profile(density_filename,pos,dens);
+        if (_processes.size() > MAX_CONFIGURED_PROCESSES) {
+            logfile << "WARNING: " << _processes.size() << " gas processes configured but only "
+                    << MAX_CONFIGURED_PROCESSES << " can be considered per step; "
+                    << "raise MAX_CONFIGURED_PROCESSES in THCallback.h" << endl;
+        }
         logfile << "SECONDARY_DEBUG initial_particle_count=" << _initial_particle_count
             << " debug_window_start=" << (_initial_particle_count + 10300)
             << " debug_window_end=" << (_initial_particle_count + 10550)
             << " secondary_z_min=" << _secondary_z_min
+            << " skip_slow_neutral_products=" << (_skip_slow_neutral_products ? 1 : 0)
             << endl;
         _periodicity=periodicity;
         _periodic=false;
@@ -618,7 +717,25 @@ public:
         }
     }
 
-    virtual ~THCallback_secondaries() {}
+    virtual ~THCallback_secondaries() {
+        const size_t skipped = _slow_neutrals_skipped.load(std::memory_order_relaxed);
+        if (skipped > 0) {
+            logfile << "THC_SECONDARIES: " << skipped << " slow neutral product(s) accounted "
+                    << "but not tracked (physics.stripping.skipSlowNeutralProducts); "
+                    << _secondaries_created.load(std::memory_order_relaxed)
+                    << " gas secondaries created" << endl;
+        }
+    }
+
+    /*! \brief Gas secondary macroparticles created in the current pass. */
+    size_t secondariesCreated() const {
+        return _secondaries_created.load(std::memory_order_relaxed);
+    }
+
+    /*! \brief Slow neutral products accounted but not tracked. */
+    size_t slowNeutralsSkipped() const {
+        return _slow_neutrals_skipped.load(std::memory_order_relaxed);
+    }
 
     virtual void operator()( ParticleBase *particle, ParticlePBase *xcur, ParticlePBase *xend ) {
         ParticleP3D *pcur = (ParticleP3D *)( xcur );
@@ -627,12 +744,16 @@ public:
         // Input validation
         double vel = pcur->speed();
         if (!std::isfinite(vel)) {
-            if (debug) logfile << "WARNING: Skipping secondary generation for invalid velocity: " << vel << endl;
+            if (debug) {
+                CB_LOG_LOCK();
+                logfile << "WARNING: Skipping secondary generation for invalid velocity: " << vel << endl;
+            }
             return;
         }
         
         // Validate particle position
         if (!validatePosition(pend)) {
+			CB_LOG_LOCK();
 			logfile << "ERROR: Invalid particle position detected. "
 					<< "Mass=" << particle->m()
 					<< " Charge=" << particle->q()
@@ -656,14 +777,20 @@ public:
         
         // Limit generation depth to prevent infinite chains
         int generation = particle->gen();
-        if (generation > MAX_GENERATION_DEPTH) {
-            if (debug) logfile << "WARNING: Maximum generation depth reached for particle, stopping secondaries" << endl;
+        if (generation >= MAX_GENERATION_DEPTH) {
+            if (debug) {
+                warnOnce(_generation_limit_warned,
+                         "Maximum gas-secondary generation depth reached; stopping further "
+                         "gas secondary creation");
+            }
             return;
         }
-        
+
         // Check particle count to prevent memory overflow
-        if (_pdb->size() > MAX_PARTICLE_COUNT) {
-            logfile << "WARNING: Maximum particle count reached (" << _pdb->size() << "), stopping secondary generation" << endl;
+        if (secondaryBudgetExhausted()) {
+            warnOnce(_secondary_limit_warned,
+                     "Secondary particle pass limit reached; stopping further gas "
+                     "secondary creation");
             return;
         }
         
@@ -675,7 +802,10 @@ public:
         
         // Validate target density
         if (!std::isfinite(target_n) || target_n < 0) {
-            if (debug) logfile << "WARNING: Invalid target density at z=" << zc << ": " << target_n << endl;
+            if (debug) {
+                CB_LOG_LOCK();
+                logfile << "WARNING: Invalid target density at z=" << zc << ": " << target_n << endl;
+            }
             return;
         }
         //double nu_scat=sigmav*target_n; //
@@ -684,7 +814,10 @@ public:
         
         // Validate step size
         if (!std::isfinite(delta) || delta < 0) {
-            if (debug) logfile << "WARNING: Invalid step size in secondary generation: " << delta << endl;
+            if (debug) {
+                CB_LOG_LOCK();
+                logfile << "WARNING: Invalid step size in secondary generation: " << delta << endl;
+            }
             return;
         }
 

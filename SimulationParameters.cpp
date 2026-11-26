@@ -535,6 +535,15 @@ SimulationParameters::ParticleSourceDefinition parseParticleSourceDefinition(
     if (parsed.widthMeters <= 0.0 || parsed.heightMeters <= 0.0) {
         throw runtime_error(context + ".uniform.widthMeters and heightMeters must be > 0");
     }
+    // Beamlet identity, written by the multi-beamlet expansion. Optional on purpose: a
+    // hand-written or pre-existing single-beamlet case has none and must stay valid, and
+    // defaulting to beamlet 1 makes it indistinguishable from a one-beamlet pattern.
+    parsed.beamletIndex = particle_source.value("beamletIndex", 1);
+    parsed.beamletColumn = particle_source.value("beamletColumn", 0);
+    parsed.beamletRow = particle_source.value("beamletRow", 0);
+    if (parsed.beamletIndex < 1) {
+        throw runtime_error(context + ".beamletIndex must be >= 1");
+    }
     return parsed;
 }
 
@@ -635,8 +644,14 @@ SimulationParameters::CrossSectionProcessDefinition parseCrossSectionProcessDefi
             throw runtime_error(context + ".projectileKind must be a string");
         }
         parsed.projectileKind = process.at("projectileKind").get<std::string>();
-        if (!isSupportedParticleKind(parsed.projectileKind) || parsed.projectileKind == "e-") {
-            throw runtime_error(context + ".projectileKind must be a supported heavy-particle kind");
+        // Electron projectiles are a supported, functional case here (e.g. e- + H2 -> 2 H0
+        // dissociation, produced by every materialized case's "eminus_process" entry) --
+        // particle_kind_from_config_name() maps "e-" to PARTICLE_E (funct.cpp) and
+        // THCallback.h consumes it like any other projectile kind. Both the JSON schema's
+        // particleKind enum and isSupportedParticleKind() already include "e-"; rejecting it
+        // here contradicted them and the engine's own runtime support.
+        if (!isSupportedParticleKind(parsed.projectileKind)) {
+            throw runtime_error(context + ".projectileKind must be a supported particle kind");
         }
     } else {
         parsed.projectileKind = inferLegacyProjectileKind(parsed.processId, ion_mass_u, context);
@@ -721,6 +736,7 @@ SimulationParameters::SimulationParameters()
       G5_VOLTAGE(0.0),
       MESH_SIZE(0.0),
       ITERATIONS(0U),
+      BEAMLET_COUNT(1U),
       SPLIT_DOMAIN(0U),
       JTOLERANCE(0.0),
       ALPHA_COEFF(0.0),
@@ -763,6 +779,11 @@ SimulationParameters::SimulationParameters()
       STRIPPING_MIN_Z(-1.0),
       SURFACE_COLLISIONS_MIN_Z(7.0e-3),
       SURFACE_COLLISIONS_DEBUG(0U),
+      SURFACE_SECONDARY_ELECTRON_BUNDLE(4),
+      SURFACE_MAX_SECONDARY_ELECTRONS(26),
+      SURFACE_SECONDARY_ELECTRON_ENERGY_EV(10.0),
+      STRIPPING_SKIP_SLOW_NEUTRALS(0U),
+      THREAD_COUNT(0U),
       PERIODIC_BOUNDARIES_ENABLED(0U),
       PERIODIC_X_MIN(0.0),
       PERIODIC_X_MAX(0.0),
@@ -802,12 +823,24 @@ SimulationParameters::SimulationParameters()
     DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER(0U),
     DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS(1U),
     DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY(1U),
-    // Off by default: writing a per-triangle map costs an extra pass over every impact
-    // plus a VTK file, and is only meaningful once the impact statistics support it (a few
-    // hundred macroparticles on a grid is Poisson noise, not a density map).
-    DIAGNOSTIC_WRITE_POWER_DENSITY_MAP(0U),
+    // On by default. The per-impact cost is small -- nearestSurfaceTriangle searches the
+    // containing mesh cell and, only if that is empty, its 26-neighbourhood, so it is O(1)
+    // per deposit rather than a scan over the triangulation -- and the file is proportional
+    // to the wetted surface, not to the whole boundary. The map is what makes a local peak
+    // visible at all: a grid can sit well inside its total-power budget while exceeding its
+    // allowable density over a few square millimetres of bore.
+    //
+    // Statistics remain the reader's responsibility, which is why the writer emits the
+    // per-triangle impact count alongside the density: with a handful of macroparticles on
+    // a triangle the value is Poisson noise and must be masked before a peak is quoted.
+    DIAGNOSTIC_WRITE_POWER_DENSITY_MAP(1U),
     DIAGNOSTIC_GRID_POWER_RANGES(),
-    DIAGNOSTIC_MENISCUS_PLOT() {
+    DIAGNOSTIC_MENISCUS_PLOT(),
+    // Halo off unless the case asks for it. 8 % is the value used in Pimazzoni et al.,
+    // Fus. Eng. Des. 192 (2023) 113621, Sec. 2, and 4 eV the emission energy there.
+    BEAM_HALO_ENABLED(0U),
+    BEAM_HALO_CURRENT_FRACTION_PERCENT(8.0),
+    BEAM_HALO_AXIAL_ENERGY_EV(4.0) {
 }
 
 void SimulationParameters::readParametersFromFile(const string& input) {
@@ -933,6 +966,35 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         }
     }
 
+    // Beamlet halo. Optional, so a case written before it existed still loads, and absent
+    // means disabled -- a halo must never appear unless the case asked for one.
+    if (hasObject(root, "beamHalo")) {
+        const json& halo = root.at("beamHalo");
+        if (halo.contains("enabled")) {
+            BEAM_HALO_ENABLED = halo.at("enabled").get<bool>() ? 1U : 0U;
+        }
+        if (halo.contains("currentFractionPercent")) {
+            const double pct = halo.at("currentFractionPercent").get<double>();
+            // Rejected rather than clamped: a halo outside this band is not the model of
+            // Pimazzoni et al. (which fixes 8 %), and silently correcting the number would
+            // hide that the case no longer represents what its author intended.
+            if (!(pct > 0.0) || pct > 50.0) {
+                throw Error(ERROR_LOCATION,
+                            "beamHalo.currentFractionPercent must be in (0, 50]; the "
+                            "reference model of Pimazzoni et al., Fus. Eng. Des. 192 (2023) "
+                            "113621 uses 8 %");
+            }
+            BEAM_HALO_CURRENT_FRACTION_PERCENT = pct;
+        }
+        if (halo.contains("axialEnergyEV")) {
+            const double e0 = halo.at("axialEnergyEV").get<double>();
+            if (!(e0 > 0.0)) {
+                throw Error(ERROR_LOCATION, "beamHalo.axialEnergyEV must be > 0");
+            }
+            BEAM_HALO_AXIAL_ENERGY_EV = e0;
+        }
+    }
+
     if (root.contains("particleSources") && root.at("particleSources").is_array()) {
         for (json::const_iterator it = root.at("particleSources").begin();
              it != root.at("particleSources").end();
@@ -1021,6 +1083,18 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
         }
         if (simulation.contains("iterations")) {
             ITERATIONS = simulation.at("iterations").get<uint>();
+        }
+        // Absent means a single beamlet, so a case written before multi-beamlet extraction
+        // existed keeps exactly the plasma reference density it had.
+        if (simulation.contains("beamletCount")) {
+            const uint beamlets = simulation.at("beamletCount").get<uint>();
+            if (beamlets < 1U) {
+                throw Error(ERROR_LOCATION, "simulation.beamletCount must be >= 1");
+            }
+            BEAMLET_COUNT = beamlets;
+        }
+        if (simulation.contains("threadCount")) {
+            THREAD_COUNT = simulation.at("threadCount").get<uint>();
         }
 
         if (hasObject(simulation, "domainDecomposition")) {
@@ -1549,6 +1623,10 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
             if (stripping.contains("densityProfile")) {
                 selected_density_profile_name = stripping.at("densityProfile").get<string>();
             }
+            if (stripping.contains("skipSlowNeutralProducts")) {
+                STRIPPING_SKIP_SLOW_NEUTRALS =
+                    stripping.at("skipSlowNeutralProducts").get<bool>() ? 1U : 0U;
+            }
         }
 
         if (hasObject(physics, "surfaceCollisions")) {
@@ -1561,6 +1639,39 @@ void SimulationParameters::parseJsonFile(const string& configFile) {
             }
             if (surface_collisions.contains("minimumImpactZMeters")) {
                 SURFACE_COLLISIONS_MIN_Z = surface_collisions.at("minimumImpactZMeters").get<double>();
+            }
+            // 0 is treated as "unset, keep the default" for both of the following,
+            // because the GUI writes 0 for a field that was never configured.
+            if (surface_collisions.contains("maximumSecondaryElectrons")) {
+                const int cap = surface_collisions.at("maximumSecondaryElectrons").get<int>();
+                if (cap < 0) {
+                    throw Error(ERROR_LOCATION,
+                                "physics.surfaceCollisions.maximumSecondaryElectrons must be >= 0 "
+                                "(0 keeps the default of 26)");
+                }
+                if (cap > 0) {
+                    SURFACE_MAX_SECONDARY_ELECTRONS = cap;
+                }
+            }
+            if (surface_collisions.contains("secondaryElectronEnergyEV")) {
+                const double e_sec = surface_collisions.at("secondaryElectronEnergyEV").get<double>();
+                if (e_sec < 0.0) {
+                    throw Error(ERROR_LOCATION,
+                                "physics.surfaceCollisions.secondaryElectronEnergyEV must be >= 0 "
+                                "(0 keeps the default of 10 eV)");
+                }
+                if (e_sec > 0.0) {
+                    SURFACE_SECONDARY_ELECTRON_ENERGY_EV = e_sec;
+                }
+            }
+            if (surface_collisions.contains("secondaryElectronBundle")) {
+                const int bundle = surface_collisions.at("secondaryElectronBundle").get<int>();
+                if (bundle < 0) {
+                    throw Error(ERROR_LOCATION,
+                                "physics.surfaceCollisions.secondaryElectronBundle must be >= 0 "
+                                "(0 disables bundling)");
+                }
+                SURFACE_SECONDARY_ELECTRON_BUNDLE = bundle;
             }
         }
     }
@@ -1687,6 +1798,7 @@ void SimulationParameters::setDefaultValues() {
 
     MESH_SIZE = 0.0003;
     ITERATIONS = 5U;
+    BEAMLET_COUNT = 1U;
     SPLIT_DOMAIN = 0U;
     JTOLERANCE = 1.0;
     ALPHA_COEFF = 0.3;
@@ -1720,6 +1832,11 @@ void SimulationParameters::setDefaultValues() {
     STRIPPING_MIN_Z = -1.0;
     SURFACE_COLLISIONS_MIN_Z = 7.0e-3;
     SURFACE_COLLISIONS_DEBUG = 0U;
+    SURFACE_SECONDARY_ELECTRON_BUNDLE = 4;
+    SURFACE_MAX_SECONDARY_ELECTRONS = 26;
+    SURFACE_SECONDARY_ELECTRON_ENERGY_EV = 10.0;
+    STRIPPING_SKIP_SLOW_NEUTRALS = 0U;
+    THREAD_COUNT = 0U;
     PERIODIC_BOUNDARIES_ENABLED = 0U;
     PERIODIC_X_MIN = 0.0;
     PERIODIC_X_MAX = 0.0;
@@ -1750,7 +1867,10 @@ void SimulationParameters::setDefaultValues() {
     DIAGNOSTIC_WRITE_PER_SPECIES_GRID_POWER = 0U;   // see the constructor for why
     DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS = 1U;
     DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY = 1U;
-    DIAGNOSTIC_WRITE_POWER_DENSITY_MAP = 0U;
+    DIAGNOSTIC_WRITE_POWER_DENSITY_MAP = 1U;       // see the constructor for why
+    BEAM_HALO_ENABLED = 0U;
+    BEAM_HALO_CURRENT_FRACTION_PERCENT = 8.0;
+    BEAM_HALO_AXIAL_ENERGY_EV = 4.0;
     DIAGNOSTIC_GRID_POWER_RANGES.clear();
     DIAGNOSTIC_MENISCUS_PLOT = DiagnosticMeniscusPlotDefinition();
     N_SOLIDS = 0U;

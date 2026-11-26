@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QAbstractItemView, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
-from ...workflow.domains.geometry_validation import derive_diagnostic_planes
+from ...workflow.domains.geometry_validation import (
+    derive_diagnostic_planes,
+    resolve_solid_boundary_ids,
+)
 
 from ..common import (
     QCheckBox,
@@ -70,12 +73,16 @@ class _GridPowerIdTable(QWidget):
         solids_editor = self._window.widgets.get("geometry.solidsEditor")
         solids = solids_editor.get_solids() if hasattr(solids_editor, "get_solids") else []
         solid_map: dict[int, dict[str, object]] = {}
+        try:
+            resolved_ids = resolve_solid_boundary_ids(solids)
+        except WorkflowError:
+            # The editor can hold a half-finished solid; fall back rather than blow up a
+            # panel refresh. The workflow validates the ids properly before a run.
+            return solid_map
         for index, solid in enumerate(solids):
             if not isinstance(solid, dict):
                 continue
-            boundary_id = solid.get("boundaryId", 7 + index)
-            if isinstance(boundary_id, int) and boundary_id >= 7:
-                solid_map[boundary_id] = solid
+            solid_map[resolved_ids[index]] = solid
         return solid_map
 
     def _derive_extent(self, row_id: int) -> str:
@@ -312,14 +319,22 @@ def build_form(window) -> QFormLayout:
     window.widgets["diagnostics.writePerSpeciesPlots"] = QCheckBox("Render per-species plots")
     window.widgets["diagnostics.writeNegativeIonSummary"] = QCheckBox("Write dedicated negative-ion summary")
     window.widgets["diagnostics.writePowerDensityMap"] = QCheckBox(
-        "Write surface power density map (W/cm2)"
+        "Write surface power density map (W/cm2, plus per-species MW/m2)"
     )
     window.widgets["diagnostics.writePowerDensityMap"].setToolTip(
         "Bins each impact onto the boundary triangulation and writes <tag>_power_density.vtk "
-        "plus a text summary of max/mean density per electrode. Off by default: it costs an "
-        "extra pass over every impact, and with only a few hundred macroparticles on a grid "
-        "the per-triangle values are Poisson noise rather than a resolved density. The VTK "
-        "file carries a per-triangle impact count so that is visible."
+        "plus a text summary of max/mean density per electrode. On by default: binning is "
+        "O(1) per impact and the file scales with the wetted surface, while the map is the "
+        "only output that reveals a local density peak, which can exceed an electrode's "
+        "limit while its total power stays within budget. In ParaView, threshold the VTK on "
+        "the row_id cell array to isolate one electrode. With only a few hundred "
+        "macroparticles on a grid the per-triangle values are Poisson noise rather than a "
+        "resolved density, so mask on the impacts array before quoting a peak.\n\n"
+        "The file also carries one density array per species in MW/m2 "
+        "(Pd_Hminus_MW_per_m2, Pd_Electrons_MW_per_m2, ...), so you can colour by the "
+        "species responsible for a hot spot. Those are gross arrivals and sum to "
+        "gross_power_W; Pd_ElectronsSurface and Pd_ElectronsVolume further split the "
+        "electron channel into surface-emitted and gas-born and so overlap it."
     )
 
     restore_plane_defaults_button = QPushButton("Restore to defaults")
@@ -370,7 +385,7 @@ def populate(window, spec: dict[str, object]) -> None:
     )
 
     window.widgets["diagnostics.writePowerDensityMap"].setChecked(
-        bool(nested_get(spec, "diagnostics", "gridPower", "writePowerDensityMap", default=False))
+        bool(nested_get(spec, "diagnostics", "gridPower", "writePowerDensityMap", default=True))
     )
 
     window.widgets["diagnostics.gridRanges"].sync_from_geometry(

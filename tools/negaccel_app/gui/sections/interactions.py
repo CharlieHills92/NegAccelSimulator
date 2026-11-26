@@ -1150,6 +1150,31 @@ class _InteractionsWorkspaceWidget(QWidget):
         fit_energy = energy[positive_mask]
         fit_sigma = sigma[positive_mask]
         coefficients = np.polyfit(np.log10(fit_energy), np.log10(fit_sigma), int(entry["fitDegree"]))
+
+        # Record the range the fit is actually valid over, so the solver does not
+        # extrapolate it.
+        #
+        # The fit is a polynomial in log10(sigma) taken over the POSITIVE samples only
+        # (positive_mask above), because log10(0) is undefined. Outside that range the
+        # measured cross section is zero, and a polynomial cannot represent zero -- it
+        # runs away instead. For H_H2_dision_2.cross, whose data is non-zero only between
+        # 5.34 and 43.3 keV, the degree-4 fit reaches 1.2e-7 m2 at 800 keV: thirteen
+        # orders of magnitude above an atomic cross section, a mean free path of 4e-13 m,
+        # and therefore a collision on every single integration step. With
+        # projectileFate="survive" and four products that is an unbounded particle
+        # factory, and it was the dominant cause of secondary-population explosion.
+        #
+        # These bounds are not a fudge: outside the window the tabulated cross section IS
+        # zero, so returning zero is the correct physics. Values inside the window are
+        # untouched. Any explicit bound already on the entry is intersected, never
+        # widened.
+        fit_lo = float(fit_energy.min())
+        fit_hi = float(fit_energy.max())
+        existing_lo = entry.get("minimumEnergyEV")
+        existing_hi = entry.get("maximumEnergyEV")
+        entry["minimumEnergyEV"] = max(float(existing_lo), fit_lo) if existing_lo is not None else fit_lo
+        entry["maximumEnergyEV"] = min(float(existing_hi), fit_hi) if existing_hi is not None else fit_hi
+
         fit_curve_energy = np.geomspace(fit_energy.min(), fit_energy.max(), 240)
         fit_curve_sigma = np.power(10.0, np.polyval(coefficients, np.log10(fit_curve_energy)))
         return fit_energy, fit_sigma, [float(value) for value in coefficients.tolist()], fit_curve_energy, fit_curve_sigma

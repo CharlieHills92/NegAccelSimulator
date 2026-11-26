@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from .common import REPO_ROOT, DEFAULT_SIMULATOR_PATH, WorkflowError, authored_to_runtime_case, ensure_case_metadata, load_json, nested_get, write_json
 from ..workflow.common import set_path
 from ..workflow.post_processing import aggregate_case_diagnostics
+from ..workflow.scan_summary import write_scan_summary
 from .parameter_flagging import ScanProjectData, ScanCaseDefinition
 from .visualization import configure_matplotlib_canvas, configure_matplotlib_toolbar
 
@@ -84,9 +85,11 @@ class ScanManagerWindow(QMainWindow):
         # Tab widget for Parameters and Results
         tabs = QTabWidget()
         self.parameters_tab = self._build_parameters_tab()
+        self.cases_tab = self._build_cases_tab()
         self.results_tab = self._build_results_tab()
         
         tabs.addTab(self.parameters_tab, "Parameters")
+        tabs.addTab(self.cases_tab, "Cases")
         tabs.addTab(self.results_tab, "Results")
         root_layout.addWidget(tabs, 1)
         
@@ -174,6 +177,229 @@ class ScanManagerWindow(QMainWindow):
         
         return tab
     
+    def _build_cases_tab(self) -> QWidget:
+        """Build the Cases tab: pick a finished case and open it in the main window.
+
+        A scan writes each case into its own directory with its own runtime JSON, so the
+        outputs of a scan case are not the outputs of whatever is currently loaded in the
+        main window. Selecting a case here points the main window's Visualization tab at
+        that case's runtime JSON, which is what the visualization panel resolves its
+        output directories from (see ResultsMixin._resolve_output_directory).
+        """
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        layout.addWidget(QLabel(
+            "Select a case and load it to open its results in the main window's "
+            "Visualization tab. Double-clicking a row does the same."
+        ))
+
+        self.cases_table = QTableWidget()
+        self.cases_table.setColumnCount(6)
+        self.cases_table.setHorizontalHeaderLabels(
+            ["Case", "Label", "Status", "Completed (UTC)", "Error / reason", "Output directory"]
+        )
+        self.cases_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.cases_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.cases_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.cases_table.horizontalHeader().setStretchLastSection(True)
+        self.cases_table.doubleClicked.connect(self.load_selected_case_in_visualization)
+        layout.addWidget(self.cases_table, 1)
+
+        button_row = QHBoxLayout()
+        self.load_case_visualization_button = QPushButton("Load in Visualization")
+        self.load_case_visualization_button.clicked.connect(self.load_selected_case_in_visualization)
+        button_row.addWidget(self.load_case_visualization_button)
+
+        self.open_case_directory_button = QPushButton("Copy Output Path")
+        self.open_case_directory_button.clicked.connect(self.copy_selected_case_directory)
+        button_row.addWidget(self.open_case_directory_button)
+
+        self.export_scan_summary_button = QPushButton("Export Combined Summary (.txt)")
+        self.export_scan_summary_button.clicked.connect(self.export_scan_summary)
+        button_row.addWidget(self.export_scan_summary_button)
+
+        self.refresh_cases_button = QPushButton("Refresh")
+        self.refresh_cases_button.clicked.connect(self._sync_cases_table)
+        button_row.addWidget(self.refresh_cases_button)
+
+        button_row.addStretch()
+        layout.addLayout(button_row)
+
+        self.cases_hint = QLabel("")
+        self.cases_hint.setWordWrap(True)
+        layout.addWidget(self.cases_hint)
+
+        self._sync_cases_table()
+        return tab
+
+    def _sync_cases_table(self) -> None:
+        """Refresh the Cases table from the loaded scan project."""
+        if not hasattr(self, "cases_table"):
+            return
+        cases = list(self.scan_project.cases) if self.scan_project is not None else []
+        previous_row = self.cases_table.currentRow()
+        self.cases_table.setRowCount(len(cases))
+        completed = 0
+        for row, case in enumerate(cases):
+            if case.status == "completed":
+                completed += 1
+            values = (
+                f"{case.caseIndex + 1:03d}",
+                case.caseLabel or f"case_{case.caseIndex + 1:03d}",
+                case.status,
+                (case.completedAt or "").replace("T", " ").replace("Z", ""),
+                case.errorMessage or "",
+                case.outputDirectoryPath or "(not materialized)",
+            )
+            for col, text in enumerate(values):
+                item = QTableWidgetItem(str(text))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.cases_table.setItem(row, col, item)
+        self.cases_table.resizeColumnsToContents()
+        self.cases_table.horizontalHeader().setStretchLastSection(True)
+        if 0 <= previous_row < len(cases):
+            self.cases_table.selectRow(previous_row)
+        if not cases:
+            self.cases_hint.setText("No scan project loaded. Load or build a project first.")
+        else:
+            self.cases_hint.setText(
+                f"{completed} of {len(cases)} case(s) completed. "
+                "A case must have been materialized (it has a runtime JSON) before it can be loaded."
+            )
+
+    def _selected_case(self) -> ScanCaseDefinition | None:
+        if self.scan_project is None or not hasattr(self, "cases_table"):
+            return None
+        row = self.cases_table.currentRow()
+        if row < 0 or row >= len(self.scan_project.cases):
+            return None
+        return self.scan_project.cases[row]
+
+    def copy_selected_case_directory(self) -> None:
+        """Put the selected case's output directory on the clipboard."""
+        case = self._selected_case()
+        if case is None:
+            QMessageBox.information(self, "No case selected", "Select a case row first.")
+            return
+        if not case.outputDirectoryPath:
+            QMessageBox.information(
+                self, "Not materialized",
+                "This case has no output directory yet. Run or materialize the scan first."
+            )
+            return
+        from PySide6.QtGui import QGuiApplication
+        QGuiApplication.clipboard().setText(case.outputDirectoryPath)
+        self.status_label.setText(f"Copied: {case.outputDirectoryPath}")
+
+    def load_selected_case_in_visualization(self) -> None:
+        """Point the main window's Visualization tab at the selected case."""
+        case = self._selected_case()
+        if case is None:
+            QMessageBox.information(self, "No case selected", "Select a case row first.")
+            return
+
+        label = case.caseLabel or f"case_{case.caseIndex + 1:03d}"
+
+        if not case.runtimeJsonPath:
+            QMessageBox.warning(
+                self, "Case not materialized",
+                f"{label} has no runtime JSON yet.\n\n"
+                "Run the scan, or use Run Scan to materialize the cases, then try again."
+            )
+            return
+
+        runtime_path = Path(case.runtimeJsonPath)
+        if not runtime_path.is_file():
+            QMessageBox.warning(
+                self, "Runtime JSON missing",
+                f"{label} points at a runtime JSON that is not on disk:\n\n{runtime_path}"
+            )
+            return
+
+        try:
+            runtime_case = load_json(runtime_path)
+        except Exception as exc:                                    # noqa: BLE001
+            QMessageBox.critical(self, "Could not read runtime JSON", f"{runtime_path}\n\n{exc}")
+            return
+
+        window = self.parent_window
+
+        # ResultsMixin owns the visualization widgets, so it owns the switch. It also
+        # re-picks a category/artifact-type pair that actually has artifacts in this
+        # case -- without that the tab opens on the previous case's selection and can
+        # show nothing even when the case has hundreds of outputs.
+        found = window.load_runtime_case_into_visualization(runtime_case, runtime_path, label)
+
+        # Bring the Visualization tab forward in the main window.
+        tabs = getattr(window, "output_tabs", None)
+        if tabs is not None:
+            for index in range(tabs.count()):
+                if tabs.tabText(index) == "Visualization":
+                    tabs.setCurrentIndex(index)
+                    break
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+        if found == 0:
+            self.status_label.setText(
+                f"Loaded {label}, but no output artifacts were found under {runtime_path.parent}"
+            )
+        elif case.status != "completed":
+            self.status_label.setText(
+                f"Loaded {label} ({found} artifacts; status: {case.status}, may be incomplete)"
+            )
+        else:
+            self.status_label.setText(f"Loaded {label} in Visualization ({found} artifacts)")
+
+    def export_scan_summary(self, silent: bool = False) -> Path | None:
+        """Write one combined .txt comparing every completed case in the scan.
+
+        Cases that have not run, or whose outputs cannot be read, are listed as skipped
+        comments at the bottom of the file rather than silently dropped.
+        """
+        if self.scan_project is None or not self.scan_project.cases:
+            if not silent:
+                QMessageBox.information(self, "No cases", "Load or build a scan project first.")
+            return None
+
+        cases: list[tuple[str, Path]] = []
+        parameter_values: dict[str, list[Any]] = {}
+        for case in self.scan_project.cases:
+            if not case.runtimeJsonPath:
+                continue
+            label = case.caseLabel or f"case_{case.caseIndex + 1:03d}"
+            cases.append((label, Path(case.runtimeJsonPath)))
+            parameter_values[label] = list(case.parameterValues or [])
+
+        if not cases:
+            if not silent:
+                QMessageBox.information(
+                    self, "Nothing to export",
+                    "No case has been materialized yet. Run the scan first."
+                )
+            return None
+
+        parameter_names = [p.label or p.path for p in (self.scan_project.parameters or [])]
+
+        tag = self.scan_project.scanProjectTag or "scan"
+        output_path = self._scan_output_root() / f"{tag}_combined_summary.txt"
+        try:
+            write_scan_summary(cases, output_path, parameter_names, parameter_values)
+        except Exception as exc:                                   # noqa: BLE001
+            if not silent:
+                QMessageBox.critical(self, "Export failed", f"{output_path}\n\n{exc}")
+            return None
+
+        self.status_label.setText(f"Wrote combined summary: {output_path}")
+        if not silent:
+            QMessageBox.information(
+                self, "Combined summary written",
+                f"{len(cases)} case(s) written to:\n\n{output_path}"
+            )
+        return output_path
+
     def _build_results_tab(self) -> QWidget:
         """Build the results tab for visualization."""
         tab = QWidget()
@@ -451,6 +677,8 @@ class ScanManagerWindow(QMainWindow):
         # Auto-resize columns
         self.parameters_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
     
+        self._sync_cases_table()
+
     def _sync_project_from_table(self) -> None:
         """Sync project data from the current GUI table state."""
         if not self.scan_project:
@@ -575,6 +803,7 @@ class ScanManagerWindow(QMainWindow):
             case.completedAt = None
 
         self._sync_table_from_project()
+        self._sync_cases_table()
 
     def _update_case_status_cell(self, case_index: int, status: str) -> None:
         if self.scan_project is None or case_index >= len(self.scan_project.cases):
@@ -587,12 +816,36 @@ class ScanManagerWindow(QMainWindow):
             self.parameters_table.setItem(case_index, status_column, item)
         item.setText(status)
 
+    def _case_console_log_path(self, case_index: int) -> Path | None:
+        """Where a case's console output is kept, so a failure can be diagnosed later."""
+        if self.scan_project is None or case_index >= len(self.scan_project.cases):
+            return None
+        case = self.scan_project.cases[case_index]
+        directory = Path(case.outputDirectoryPath) if case.outputDirectoryPath else None
+        if directory is None:
+            directory = self._scan_output_root()
+        return directory / f"case_{case_index + 1:03d}_console.log"
+
     def _append_case_output(self, case_index: int, process: QProcess) -> None:
         data = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
         if not data:
             return
         self._process_buffer[case_index] = self._process_buffer.get(case_index, "") + data
         self.results_display.append(f"[case {case_index + 1:03d}]\n{data.rstrip()}\n")
+
+        # Persist it. Held only in memory, the output of a failed case is lost as soon as
+        # the results pane scrolls, which makes "it failed in the scan but works alone"
+        # impossible to diagnose. Appended as it streams so a hung or killed case still
+        # leaves its partial output behind.
+        log_path = self._case_console_log_path(case_index)
+        if log_path is None:
+            return
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8") as handle:
+                handle.write(data)
+        except Exception:                                          # noqa: BLE001
+            pass          # never let logging break the run
 
     def _start_case_process(self, case_index: int) -> None:
         if self.scan_project is None:
@@ -617,6 +870,20 @@ class ScanManagerWindow(QMainWindow):
         self._update_case_status_cell(case_index, case.status)
         self._running_processes[case_index] = process
         self.results_display.append(f"$ {display_command}\n")
+
+        log_path = self._case_console_log_path(case_index)
+        if log_path is not None:
+            try:
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with log_path.open("w", encoding="utf-8") as handle:
+                    handle.write(f"# case {case_index + 1:03d}: {case.caseLabel or ''}\n")
+                    handle.write(f"# runtime json : {runtime_path}\n")
+                    handle.write(f"# working dir  : {REPO_ROOT}\n")
+                    handle.write(f"# workers      : {self._worker_limit} concurrent\n")
+                    handle.write(f"# command      : {display_command}\n")
+                    handle.write("#\n")
+            except Exception:                                      # noqa: BLE001
+                pass
         process.start(program, arguments)
 
     def _launch_available_cases(self) -> None:
@@ -634,7 +901,20 @@ class ScanManagerWindow(QMainWindow):
             case.errorMessage = None
         else:
             case.status = "failed"
-            case.errorMessage = f"exit code {exit_code}"
+            tail = (self._process_buffer.get(case_index, "") or "").strip().splitlines()
+            reason = ""
+            for line in reversed(tail[-40:]):
+                if any(k in line for k in ("Error in ", "FAILED:", "error:", "Segmentation",
+                                           "std::bad_alloc", "srun:", "No such file",
+                                           "not found", "Killed", "Aborted")):
+                    reason = line.strip()
+                    break
+            if not reason and tail:
+                reason = tail[-1].strip()
+            log_path = self._case_console_log_path(case_index)
+            case.errorMessage = f"exit code {exit_code}" + (f" - {reason[:200]}" if reason else "")
+            if log_path is not None:
+                case.errorMessage += f"  [see {log_path.name}]"
         case.completedAt = datetime.utcnow().isoformat() + "Z"
         self._completed_case_count += 1
         self._update_case_status_cell(case_index, case.status)
@@ -643,9 +923,15 @@ class ScanManagerWindow(QMainWindow):
         progress = int((100 * self._completed_case_count) / total) if total else 0
         self.progress_bar.setValue(progress)
         self.status_label.setText(f"Completed {self._completed_case_count}/{total} cases")
+        self._sync_cases_table()
 
         if self.scan_project_path is not None:
             self.scan_project.save(self.scan_project_path)
+
+        # When the last case finishes, drop the combined comparison table next to the
+        # case directories so it is there without anyone having to ask for it.
+        if not self._running_processes and not self._pending_case_indices:
+            self.export_scan_summary(silent=True)
 
         if self._pending_case_indices:
             self._launch_available_cases()

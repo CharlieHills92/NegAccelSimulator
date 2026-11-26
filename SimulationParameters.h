@@ -96,6 +96,12 @@ public:
         std::vector<double> inPlaneReferenceDirection;
         double widthMeters;
         double heightMeters;
+        // Which beamlet of a patterned extraction this source feeds. Written by the
+        // multi-beamlet expansion in the Python workflow; 1 / 0 / 0 for a case that was
+        // never expanded, so a single-beamlet run reports beamlet 1 rather than "unknown".
+        int beamletIndex;
+        int beamletColumn;
+        int beamletRow;
 
         ParticleSourceDefinition()
             : chargeState(0.0),
@@ -109,7 +115,10 @@ public:
               mainDirection(3, 0.0),
               inPlaneReferenceDirection(3, 0.0),
               widthMeters(0.0),
-              heightMeters(0.0) {}
+              heightMeters(0.0),
+              beamletIndex(1),
+              beamletColumn(0),
+              beamletRow(0) {}
     };
 
     struct MagneticFieldDefinition {
@@ -204,6 +213,7 @@ private:
 
     double MESH_SIZE;
     uint ITERATIONS;
+    uint BEAMLET_COUNT;
     uint SPLIT_DOMAIN;
     double JTOLERANCE;
     double ALPHA_COEFF;
@@ -249,6 +259,11 @@ private:
     double STRIPPING_MIN_Z;
     double SURFACE_COLLISIONS_MIN_Z;
     uint SURFACE_COLLISIONS_DEBUG;
+    int SURFACE_SECONDARY_ELECTRON_BUNDLE;
+    int SURFACE_MAX_SECONDARY_ELECTRONS;
+    double SURFACE_SECONDARY_ELECTRON_ENERGY_EV;
+    uint STRIPPING_SKIP_SLOW_NEUTRALS;
+    uint THREAD_COUNT;
     uint PERIODIC_BOUNDARIES_ENABLED;
     double PERIODIC_X_MIN;
     double PERIODIC_X_MAX;
@@ -289,6 +304,14 @@ private:
     std::vector<DiagnosticGridRangeDefinition> DIAGNOSTIC_GRID_POWER_RANGES;
     DiagnosticMeniscusPlotDefinition DIAGNOSTIC_MENISCUS_PLOT;
 
+    // Beamlet halo, after Pimazzoni et al., Fus. Eng. Des. 192 (2023) 113621, Sec. 2:
+    // halo particles are emitted from the downstream chamfer of the plasma grid, normal to
+    // that surface, with a small axial energy, and carry a fixed fraction of the core
+    // current. Disabled unless the case asks for it, so an existing case is unaffected.
+    uint BEAM_HALO_ENABLED;
+    double BEAM_HALO_CURRENT_FRACTION_PERCENT;
+    double BEAM_HALO_AXIAL_ENERGY_EV;
+
 public:
     SimulationParameters();
     ~SimulationParameters() = default;
@@ -322,6 +345,15 @@ public:
 
     double getMeshSize() const { return MESH_SIZE; }
     uint getIterations() const { return ITERATIONS; }
+
+    /*! \brief Number of beamlets each particle source was replicated into.
+     *
+     *  1 for a single-beamlet case. IBSimu adds J/v to its rhosum once per
+     *  add_rectangular_beam_* call, so an N-beamlet lattice reports N times the plasma
+     *  charge density. Every beamlet is extracted from the same plasma, so the meniscus
+     *  model needs the per-aperture density: ManageSimulation divides rhosum by this.
+     */
+    uint getBeamletCount() const { return BEAMLET_COUNT < 1U ? 1U : BEAMLET_COUNT; }
     uint getSplitDomain() const { return SPLIT_DOMAIN; }
     double getJTolerance() const { return JTOLERANCE; }
     double getAlphaCoeff() const { return ALPHA_COEFF; }
@@ -383,6 +415,63 @@ public:
     double getStrippingMinimumZ() const;
     double getSurfaceCollisionsMinimumZ() const { return SURFACE_COLLISIONS_MIN_Z; }
     bool getSurfaceCollisionsDebug() const { return SURFACE_COLLISIONS_DEBUG != 0U; }
+
+    /*! \brief Max macroparticles carrying one impact's secondary-electron yield.
+     *
+     *  A single impact can emit up to 26 secondary electrons. Representing each as its own
+     *  unit-weight macroparticle is the dominant source of population growth in a run with
+     *  surface collisions enabled. With this set to N the same yield is carried by at most
+     *  N weighted macroparticles, which is mean-preserving -- see
+     *  THCallback_surf_EAMCC::generateSecondaryElectrons for the derivation.
+     *
+     *  0 restores the original one-macroparticle-per-electron sampler exactly.
+     */
+    int getSurfaceSecondaryElectronBundle() const { return SURFACE_SECONDARY_ELECTRON_BUNDLE; }
+
+    /*! \brief Per-impact cap on secondary electrons from ONE ion or neutral impact.
+     *
+     *  Reaches THCallback_surf_EAMCC::generateSecondaryElectrons as lsec_max: once this
+     *  many have been emitted from a single impact the sampler stops, even if the yield
+     *  eta_SEC would allow more. Default 26, matching the Fortran (ion_surf_coll.f:101).
+     *
+     *  This caps ION and NEUTRAL impacts only. Electron impacts keep their own separate
+     *  cap of 3 (e_surf_coll.f:91), which is unreachable in practice because
+     *  eta_SEC = ETA1*exp(CTsec*(1-cos theta)) <= 1.13*exp(1.005) = 3.09, so exposing it
+     *  would be a control that cannot do anything.
+     *
+     *  0 means "unset, use the default" rather than "emit no secondary electrons": the GUI
+     *  writes 0 for an unconfigured field, and silently switching off secondary emission
+     *  is not a reasonable reading of that.
+     */
+    int getSurfaceMaxSecondaryElectrons() const { return SURFACE_MAX_SECONDARY_ELECTRONS; }
+
+    /*! \brief Birth energy of a true secondary electron [eV].
+     *
+     *  EAMCC emits true secondaries at a fixed energy rather than sampling the 0-50 eV
+     *  spectrum, on the grounds that it is negligible next to the energy gained in the
+     *  accelerating field (Fubiani et al. 2008, Sec. II A). Default 10.0 eV, their value.
+     *
+     *  As with the cap, 0 means "unset, use the default": a 0 eV secondary would be born
+     *  with zero velocity and never leave the surface.
+     */
+    double getSurfaceSecondaryElectronEnergyEV() const { return SURFACE_SECONDARY_ELECTRON_ENERGY_EV; }
+
+    /*! \brief Account slow neutral gas-reaction products without tracking them.
+     *
+     *  Slow (few-eV) neutrals are field-blind, never reach an electrode within the step
+     *  budget, and so contribute to no grid power or current column -- but each still costs
+     *  a full 10000-step integration. Enabling this skips their creation.
+     *
+     *  Off by default because it is not free: ibsimu deposits space charge from IQ without
+     *  consulting the charge state, so these macroparticles currently contribute to the
+     *  space-charge field of the pass that creates them. That is always the final tracking
+     *  pass, whose space charge is never fed back into a Poisson solve, so no reported
+     *  trajectory or field changes -- but the saved scharge and density diagnostics do.
+     */
+    bool getStrippingSkipSlowNeutrals() const { return STRIPPING_SKIP_SLOW_NEUTRALS != 0U; }
+
+    /*! \brief Worker threads for trajectory tracking; 0 selects the built-in default. */
+    uint getThreadCount() const { return THREAD_COUNT; }
     bool getPeriodicBoundariesEnabled() const { return PERIODIC_BOUNDARIES_ENABLED != 0U; }
     std::vector<double> getPeriodicityBounds() const;
     const std::string& getOutputSummaryDirectory() const { return OUTPUT_SUMMARY_DIRECTORY; }
@@ -432,6 +521,10 @@ public:
     bool getDiagnosticWritePerSpeciesPlots() const { return DIAGNOSTIC_WRITE_PER_SPECIES_PLOTS != 0U; }
     bool getDiagnosticWriteNegativeIonSummary() const { return DIAGNOSTIC_WRITE_NEGATIVE_ION_SUMMARY != 0U; }
     bool getDiagnosticWritePowerDensityMap() const { return DIAGNOSTIC_WRITE_POWER_DENSITY_MAP != 0U; }
+    bool getBeamHaloEnabled() const { return BEAM_HALO_ENABLED != 0U; }
+    /// Halo current as a percentage of the summed core source current.
+    double getBeamHaloCurrentFractionPercent() const { return BEAM_HALO_CURRENT_FRACTION_PERCENT; }
+    double getBeamHaloAxialEnergyEV() const { return BEAM_HALO_AXIAL_ENERGY_EV; }
     bool hasDiagnosticGridPowerRanges() const { return !DIAGNOSTIC_GRID_POWER_RANGES.empty(); }
     const std::vector<DiagnosticGridRangeDefinition>& getDiagnosticGridPowerRanges() const {
         return DIAGNOSTIC_GRID_POWER_RANGES;

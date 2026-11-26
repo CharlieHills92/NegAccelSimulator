@@ -9,6 +9,14 @@
 using namespace std;
 
 
+/*! \brief Physical ceiling on one cross section [m^2].
+ *
+ *  Backstop against a log10-sigma polynomial fit evaluated outside its fitted energy
+ *  range, where it diverges rather than failing. About 100x the largest legitimate
+ *  value in this data set, so it cannot clip real physics.
+ */
+#define MAX_PHYSICAL_CROSS_SECTION_M2 1.0e-17
+
 void clear_cross_section_processes();
 void configure_cross_section_process( const std::string& reaction_id,
 									 const std::string& source_path,

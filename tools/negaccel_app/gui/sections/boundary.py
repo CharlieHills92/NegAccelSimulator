@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from ..common import ParameterizedEditor, QCheckBox, WorkflowError, nested_get
 from ...workflow.domains.boundary import resolve_boundary_value_expressions
+from ...workflow.domains.geometry_validation import resolve_solid_boundary_ids
 
 
 _DOMAIN_BOUNDARIES = [
@@ -150,9 +151,16 @@ class _BoundaryEditorWidget(QWidget):
 
         if geometry_path is not None or solids:
             used_ids: set[int] = set()
+            try:
+                resolved_ids = resolve_solid_boundary_ids(solids)
+            except WorkflowError:
+                # A solid still being edited can be malformed; show what is there rather
+                # than failing the panel. The workflow validates before a run.
+                resolved_ids = [7 + index for index in range(len(solids))]
             for index, solid in enumerate(solids):
-                boundary_id = solid.get("boundaryId", 7 + index)
-                if not isinstance(boundary_id, int) or boundary_id < 7 or boundary_id in used_ids:
+                boundary_id = resolved_ids[index]
+                if boundary_id in used_ids:
+                    # Second solid sharing a boundary (EG and SG on one potential).
                     continue
                 used_ids.add(boundary_id)
                 rows.append(

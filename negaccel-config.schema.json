@@ -295,6 +295,19 @@
                   "uniform"
                 ]
               },
+              "beamletIndex": {
+                "description": "1-based index of the beamlet this source feeds, written by the multi-beamlet expansion. Absent for a single-beamlet case, where the runtime uses 1.",
+                "type": "integer",
+                "minimum": 1
+              },
+              "beamletColumn": {
+                "description": "Signed lattice column of the beamlet, centred on the pattern origin.",
+                "type": "integer"
+              },
+              "beamletRow": {
+                "description": "Signed lattice row of the beamlet, centred on the pattern origin.",
+                "type": "integer"
+              },
               "uniform": {
                 "type": "object",
                 "additionalProperties": false,
@@ -522,6 +535,16 @@
               "$ref": "#/$defs/nonNegativeNumber"
             }
           }
+        },
+        "threadCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Worker threads for trajectory tracking. Omit for the built-in default (8). Set to 1 for a bit-reproducible run: with more than one thread, particles are assigned to random-number streams by OS scheduling, so results are statistically equivalent but not bit-identical."
+        },
+        "beamletCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of beamlets each particle source was replicated into by multi-beamlet extraction. Omitted or 1 for a single-beamlet case. The runtime divides the accumulated plasma reference density by this: IBSimu adds J/v to rhosum once per add_rectangular_beam_* call, so N identical beamlets would otherwise report an N-fold plasma density to set_nsimp_plasma and put the meniscus of every beamlet in the wrong place. Every beamlet is extracted from the same plasma, so the per-aperture density is what the meniscus model needs."
         }
       }
     },
@@ -716,6 +739,10 @@
             },
             "densityProfile": {
               "$ref": "#/$defs/nonEmptyString"
+            },
+            "skipSlowNeutralProducts": {
+              "type": "boolean",
+              "description": "Account slow neutral gas-reaction products without tracking them. They are field-blind, never reach an electrode within the step budget and so contribute to no grid power or current column, but each costs a full trajectory integration. Off by default because they do contribute to the space charge of the final tracking pass (ibsimu deposits from IQ without consulting the charge state); that pass is never fed back into a Poisson solve, so no reported trajectory or field changes, but the saved scharge and density diagnostics do. Fast neutrals -- the stripped beam -- are never affected."
             }
           },
           "allOf": [
@@ -765,13 +792,20 @@
             },
             "maximumSecondaryElectrons": {
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "description": "Per-impact cap on secondary electrons from one ION or NEUTRAL impact (lsec_max). Default 26, matching the Fortran ion_surf_coll.f:101. Electron impacts use a separate fixed cap of 3, which is unreachable because etaSEC <= 3.09. 0 means 'unset, keep the default' rather than 'emit none'."
             },
             "secondaryElectronEnergyEV": {
-              "$ref": "#/$defs/nonNegativeNumber"
+              "$ref": "#/$defs/nonNegativeNumber",
+              "description": "Birth energy of a true secondary electron [eV]. EAMCC uses a fixed value rather than sampling the 0-50 eV spectrum (Fubiani et al. 2008, Sec. II A). Default 10.0. 0 means 'unset, keep the default': a 0 eV secondary would be born at rest."
             },
             "debug": {
               "type": "boolean"
+            },
+            "secondaryElectronBundle": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum macroparticles used to carry one impact's secondary-electron yield. A single impact can emit up to 26 electrons; representing each as its own unit-weight macroparticle is the dominant source of population growth. With N set, the same yield is carried by at most N weighted macroparticles, which preserves the expected electron count exactly. Default 4. Set to 0 to restore the original one-macroparticle-per-electron sampler."
             }
           }
         }
@@ -921,6 +955,28 @@
     },
     "diagnostics": {
       "$ref": "#/$defs/diagnosticsConfig"
+    },
+    "beamHalo": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Beamlet halo after Pimazzoni et al., Fus. Eng. Des. 192 (2023) 113621, Sec. 2: particles born on the downstream chamfer of the plasma grid, aimed along the local surface normal. Omit the block or set enabled=false and no halo is emitted. The halo macroparticle count is the same fraction of the core count as the current fraction, so each halo particle carries the same charge as a core one and the added run time is just that fraction.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Emit the halo. Defaults to false."
+        },
+        "currentFractionPercent": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 50,
+          "description": "Halo current as a percentage of the summed core source current. The reference work fixes this at 8 %, and notes that holding it independent of perveance is its largest stated uncertainty. Values outside (0, 50] are rejected."
+        },
+        "axialEnergyEV": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Emission energy normal to the chamfer. The reference uses 4 eV and notes the initial velocity matters little, since the field at the emission point focuses these particles strongly."
+        }
+      }
     }
   },
   "$defs": {
@@ -1383,7 +1439,7 @@
       "properties": {
         "writePowerDensityMap": {
           "type": "boolean",
-          "description": "Write a per-triangle net power density map (W/cm2) over the boundary triangulation, as <tag>_power_density.vtk plus a text summary. Optional; defaults to false because it costs an extra pass over every impact and is only meaningful when the impact statistics support it."
+          "description": "Write a per-triangle net power density map (W/cm2) over the boundary triangulation, as <tag>_power_density.vtk plus a text summary. Defaults to true: the binning is O(1) per impact and the file is proportional to the wetted surface, while the map is the only output that exposes a local density peak, which can exceed an electrode's limit while its total power stays within budget. The VTK carries a row_id cell array, so thresholding on it isolates one electrode. Read the impacts array before quoting a peak: a triangle holding a handful of macroparticles is Poisson noise. Set false to skip it."
         },
         "ranges": {
           "type": "array",
